@@ -70,6 +70,12 @@ static std::string get_view_type_string(GCodeViewer::EViewType view_type)
         return _u8L("Fan Speed");
     else if (view_type == GCodeViewer::EViewType::Temperature)
         return _u8L("Temperature");
+    else if (view_type == GCodeViewer::EViewType::ThermalIndexMin)
+        return _u8L("Thermal Index (min)");
+    else if (view_type == GCodeViewer::EViewType::ThermalIndexMax)
+        return _u8L("Thermal Index (max)");
+    else if (view_type == GCodeViewer::EViewType::ThermalIndexMean)
+        return _u8L("Thermal Index (mean)");
     else if (view_type == GCodeViewer::EViewType::VolumetricRate)
         return _u8L("Flow");
     else if (view_type == GCodeViewer::EViewType::Tool)
@@ -225,7 +231,29 @@ void GCodeViewer::TBuffer::add_path(const GCodeProcessorResult::MoveVertex& move
     paths.push_back({ move.type, move.extrusion_role, move.delta_extruder,
         round_to_bin(move.height), round_to_bin(move.width),
         move.feedrate, move.fan_speed, move.temperature,
+        move.thermal_index_min, move.thermal_index_max, move.thermal_index_mean,
         move.volumetric_rate(), move.layer_duration, move.extruder_id, move.cp_color_id, { { endpoint, endpoint } } });
+}
+
+ColorRGBA GCodeViewer::Extrusions::Range::get_thermal_index_color_at(float value) const
+{
+    // Input value scaled to the colors range
+    const float step = step_size();
+    float _min = min;
+    if(log_scale) {
+        value = std::log(value);
+        _min = std::log(min);
+    }
+    const float global_t = (step != 0.0f) ? std::max(0.0f, value - _min) / step : 0.0f; // lower limit of 0.0f
+
+    const size_t color_max_idx = Thermal_Index_Range_Colors.size() - 1;
+
+    // Compute the two colors just below (low) and above (high) the input value
+    const size_t color_low_idx = std::clamp<size_t>(static_cast<size_t>(global_t), 0, color_max_idx);
+    const size_t color_high_idx = std::clamp<size_t>(color_low_idx + 1, 0, color_max_idx);
+
+    // Interpolate between the low and high colors to find exactly which color the input value should get
+    return lerp(Thermal_Index_Range_Colors[color_low_idx], Thermal_Index_Range_Colors[color_high_idx], global_t - static_cast<float>(color_low_idx));
 }
 
 ColorRGBA GCodeViewer::Extrusions::Range::get_color_at(float value) const
@@ -362,6 +390,10 @@ void GCodeViewer::SequentialView::Marker::render(int canvas_width, int canvas_he
     std::string layer_time = ImGui::ColorMarkerStart + _u8L("Layer Time: ") + ImGui::ColorMarkerEnd;
     std::string fanspeed = ImGui::ColorMarkerStart + _u8L("Fan: ") + ImGui::ColorMarkerEnd;
     std::string temperature = ImGui::ColorMarkerStart + _u8L("Temperature: ") + ImGui::ColorMarkerEnd;
+    std::string thermal_index_min = ImGui::ColorMarkerStart + _u8L("Thermal Index (min): ") + ImGui::ColorMarkerEnd;
+    std::string thermal_index_max = ImGui::ColorMarkerStart + _u8L("Thermal Index (max): ") + ImGui::ColorMarkerEnd;
+    std::string thermal_index_mean = ImGui::ColorMarkerStart + _u8L("Thermal Index (mean): ") + ImGui::ColorMarkerEnd;
+    
     const float item_size = imgui.calc_text_size(std::string_view{"X: 000.000  "}).x;
     const float item_spacing = imgui.get_item_spacing().x;
     const float window_padding = ImGui::GetStyle().WindowPadding.x;
@@ -428,6 +460,27 @@ void GCodeViewer::SequentialView::Marker::render(int canvas_width, int canvas_he
         case EViewType::Temperature: {
             ImGui::SameLine(startx2);
             sprintf(buf, "%s%.0f", temperature.c_str(), m_curr_move.temperature);
+            ImGui::PushItemWidth(item_size);
+            imgui.text(buf);
+            break;
+        }
+        case EViewType::ThermalIndexMin: {
+            ImGui::SameLine(startx2);
+            sprintf(buf, "%s%.0f", thermal_index_min.c_str(), m_curr_move.thermal_index_min);
+            ImGui::PushItemWidth(item_size);
+            imgui.text(buf);
+            break;
+        }
+        case EViewType::ThermalIndexMax: {
+            ImGui::SameLine(startx2);
+            sprintf(buf, "%s%.0f", thermal_index_max.c_str(), m_curr_move.thermal_index_max);
+            ImGui::PushItemWidth(item_size);
+            imgui.text(buf);
+            break;
+        }
+        case EViewType::ThermalIndexMean: {
+            ImGui::SameLine(startx2);
+            sprintf(buf, "%s%.0f", thermal_index_mean.c_str(), m_curr_move.thermal_index_mean);
             ImGui::PushItemWidth(item_size);
             imgui.text(buf);
             break;
@@ -731,6 +784,21 @@ const std::vector<ColorRGBA> GCodeViewer::Travel_Colors{ {
     { 0.505f, 0.064f, 0.028f, 1.0f }  // Retract
 }};
 
+const std::vector<ColorRGBA> GCodeViewer::Thermal_Index_Range_Colors{ {
+    decode_color_to_float_array("#8d272a"),  // red
+    decode_color_to_float_array("#ba4831"),
+    decode_color_to_float_array("#d8794e"),
+    decode_color_to_float_array("#04d60f"),
+    decode_color_to_float_array("#eab36e"),
+    decode_color_to_float_array("#f7e197"),
+    decode_color_to_float_array("#ffffc6"),
+    decode_color_to_float_array("#e1ed98"),
+    decode_color_to_float_array("#b8d679"),
+    decode_color_to_float_array("#88b96e"),
+    decode_color_to_float_array("#5a9458"),
+    decode_color_to_float_array("#3a653c"),
+}};
+
 // Normal ranges
 // blue to red
 const std::vector<ColorRGBA> GCodeViewer::Range_Colors{ {
@@ -899,6 +967,9 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
 view_type_items.push_back(EViewType::LayerTimeLog);
     view_type_items.push_back(EViewType::FanSpeed);
     view_type_items.push_back(EViewType::Temperature);
+    view_type_items.push_back(EViewType::ThermalIndexMin);
+    view_type_items.push_back(EViewType::ThermalIndexMax);
+    view_type_items.push_back(EViewType::ThermalIndexMean);
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -1144,6 +1215,9 @@ void GCodeViewer::refresh(const GCodeProcessorResult& gcode_result, const std::v
             m_extrusions.ranges.width.update_from(round_to_bin(curr.width));
             m_extrusions.ranges.fan_speed.update_from(curr.fan_speed);
             m_extrusions.ranges.temperature.update_from(curr.temperature);
+            m_extrusions.ranges.thermal_index_min.update_from(curr.thermal_index_min * 100.0);
+            m_extrusions.ranges.thermal_index_max.update_from(curr.thermal_index_max * 100.0);
+            m_extrusions.ranges.thermal_index_mean.update_from(curr.thermal_index_mean * 100.0);
             if (curr.extrusion_role != erCustom || is_visible(erCustom))
                 m_extrusions.ranges.volumetric_rate.update_from(round_to_bin(curr.volumetric_rate()));
 
@@ -3205,6 +3279,9 @@ void GCodeViewer::refresh_render_paths(bool keep_sequential_current_first, bool 
         case EViewType::Feedrate:       { color = m_extrusions.ranges.feedrate.get_color_at(path.feedrate); break; }
         case EViewType::FanSpeed:       { color = m_extrusions.ranges.fan_speed.get_color_at(path.fan_speed); break; }
         case EViewType::Temperature:    { color = m_extrusions.ranges.temperature.get_color_at(path.temperature); break; }
+        case EViewType::ThermalIndexMin:  { color = m_extrusions.ranges.thermal_index_min.get_color_at(path.thermal_index_min * 100.0); break; }
+        case EViewType::ThermalIndexMax:  { color = m_extrusions.ranges.thermal_index_max.get_color_at(path.thermal_index_max * 100.0); break; }
+        case EViewType::ThermalIndexMean: { color = m_extrusions.ranges.thermal_index_mean.get_color_at(path.thermal_index_mean * 100.0); break; }
         case EViewType::LayerTime:      { color = m_extrusions.ranges.layer_duration.get_color_at(path.layer_time); break; }
         case EViewType::LayerTimeLog:   { color = m_extrusions.ranges.layer_duration_log.get_color_at(path.layer_time); break; }
         case EViewType::VolumetricRate: { color = m_extrusions.ranges.volumetric_rate.get_color_at(path.volumetric_rate); break; }
@@ -4854,6 +4931,9 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
 
     case EViewType::FanSpeed:       { imgui.title(_u8L("Fan Speed (%)")); break; }
     case EViewType::Temperature:    { imgui.title(_u8L("Temperature (°C)")); break; }
+    case EViewType::ThermalIndexMin: { imgui.title(_u8L("Thermal Index (min)")); break; }
+    case EViewType::ThermalIndexMax: { imgui.title(_u8L("Thermal Index (max)")); break; }
+    case EViewType::ThermalIndexMean: { imgui.title(_u8L("Thermal Index (mean)")); break; }
     case EViewType::VolumetricRate: { imgui.title(_u8L("Volumetric flow rate (mm³/s)")); break; }
     case EViewType::LayerTime:      { imgui.title(_u8L("Layer Time")); break; }
     case EViewType::LayerTimeLog:   { imgui.title(_u8L("Layer Time (log)")); break; }
@@ -5010,6 +5090,9 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     }
     case EViewType::FanSpeed:       { append_range(m_extrusions.ranges.fan_speed, 0); break; }
     case EViewType::Temperature:    { append_range(m_extrusions.ranges.temperature, 0); break; }
+    case EViewType::ThermalIndexMin: { append_range(m_extrusions.ranges.thermal_index_min, 0); break; }
+    case EViewType::ThermalIndexMax: { append_range(m_extrusions.ranges.thermal_index_max, 0); break; }
+    case EViewType::ThermalIndexMean: { append_range(m_extrusions.ranges.thermal_index_mean, 0); break; }
     case EViewType::LayerTime:      { append_range(m_extrusions.ranges.layer_duration, true); break; }
     case EViewType::LayerTimeLog:   { append_range(m_extrusions.ranges.layer_duration_log, true); break; }
     case EViewType::VolumetricRate: { append_range(m_extrusions.ranges.volumetric_rate, 2); break; }

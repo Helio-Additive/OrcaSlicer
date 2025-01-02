@@ -46,6 +46,7 @@ class GCodeViewer
     static const std::vector<ColorRGBA> Options_Colors;
     static const std::vector<ColorRGBA> Travel_Colors;
     static const std::vector<ColorRGBA> Range_Colors;
+    static const std::vector<ColorRGBA> Thermal_Index_Range_Colors;
     static const ColorRGBA              Wipe_Color;
     static const ColorRGBA              Neutral_Color;
 
@@ -219,6 +220,9 @@ class GCodeViewer
         float feedrate{ 0.0f };
         float fan_speed{ 0.0f };
         float temperature{ 0.0f };
+        float thermal_index_min{ 0.0f };
+        float thermal_index_max{ 0.0f };
+        float thermal_index_mean{ 0.0f };
         float volumetric_rate{ 0.0f };
         float layer_time{ 0.0f };
         unsigned char extruder_id{ 0 };
@@ -408,6 +412,7 @@ class GCodeViewer
             void reset(bool log = false) { min = FLT_MAX; max = -FLT_MAX; count = 0; log_scale = log; }
 
             float step_size() const;
+            ColorRGBA get_thermal_index_color_at(float value) const;
             ColorRGBA get_color_at(float value) const;
             float get_value_at_step(int step) const;
 
@@ -427,6 +432,13 @@ class GCodeViewer
             Range volumetric_rate;
             // Color mapping by extrusion temperature.
             Range temperature;
+            // Color mapping by min thermal index
+            Range thermal_index_min;
+            // Color mapping by max thermal index
+            Range thermal_index_max;
+            // Color mapping by mean thermal index
+            Range thermal_index_mean;
+            
             // Color mapping by layer time.
             Range layer_duration;
 Range layer_duration_log;
@@ -437,6 +449,9 @@ Range layer_duration_log;
                 fan_speed.reset();
                 volumetric_rate.reset();
                 temperature.reset();
+                thermal_index_min.reset();
+                thermal_index_max.reset();
+                thermal_index_mean.reset();
                 layer_duration.reset();
                 layer_duration_log.reset(true);
             }
@@ -716,6 +731,9 @@ public:
         Feedrate,
         FanSpeed,
         Temperature,
+        ThermalIndexMin,
+        ThermalIndexMax,
+        ThermalIndexMean,
         VolumetricRate,
         Tool,
         ColorPrint,
