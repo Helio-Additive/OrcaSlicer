@@ -2933,19 +2933,18 @@ void GCodeProcessor::process_helioadditive_comment(const GCodeReader::GCodeLine&
 {
     const std::string &comment = line.raw();
     if (boost::algorithm::contains(comment, ";helioadditive=")) {
-        std::regex regexPattern(R"(\bmax=([0-9]*\.?[0-9]+),min=([0-9]*\.?[0-9]+),mean=([0-9]*\.?[0-9]+)\b)");
+        std::regex regexPattern(R"(\bti\.max=([0-9]*\.?[0-9]+),ti\.min=([0-9]*\.?[0-9]+),ti\.mean=([0-9]*\.?[0-9]+)\b)");
         std::smatch match;
         if (std::regex_search(comment, match, regexPattern)) {
             float maxVal = std::stof(match[1].str());
             float minVal = std::stof(match[2].str());
             float meanVal = std::stof(match[3].str());
             
-            m_thermal_index = ThermalIndex(minVal, maxVal, meanVal);
+            m_thermal_index = ThermalIndex(minVal,xwmaxVal, meanVal);
         } else {
             std::cerr << "Error: Unable to parse thermal index values from comment." << std::endl;
         }
     };
-    /*if (comment.length() > 2 && comment.front() == ';')*/
 }
 
 void GCodeProcessor::process_G0(const GCodeReader::GCodeLine& line)
