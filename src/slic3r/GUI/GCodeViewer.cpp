@@ -1215,9 +1215,9 @@ void GCodeViewer::refresh(const GCodeProcessorResult& gcode_result, const std::v
             m_extrusions.ranges.width.update_from(round_to_bin(curr.width));
             m_extrusions.ranges.fan_speed.update_from(curr.fan_speed);
             m_extrusions.ranges.temperature.update_from(curr.temperature);
-            m_extrusions.ranges.thermal_index_min.update_from(curr.thermal_index_min * 100.0);
-            m_extrusions.ranges.thermal_index_max.update_from(curr.thermal_index_max * 100.0);
-            m_extrusions.ranges.thermal_index_mean.update_from(curr.thermal_index_mean * 100.0);
+            m_extrusions.ranges.thermal_index_min.update_from(curr.thermal_index_min);
+            m_extrusions.ranges.thermal_index_max.update_from(curr.thermal_index_max);
+            m_extrusions.ranges.thermal_index_mean.update_from(curr.thermal_index_mean);
             if (curr.extrusion_role != erCustom || is_visible(erCustom))
                 m_extrusions.ranges.volumetric_rate.update_from(round_to_bin(curr.volumetric_rate()));
 
@@ -3279,9 +3279,9 @@ void GCodeViewer::refresh_render_paths(bool keep_sequential_current_first, bool 
         case EViewType::Feedrate:       { color = m_extrusions.ranges.feedrate.get_color_at(path.feedrate); break; }
         case EViewType::FanSpeed:       { color = m_extrusions.ranges.fan_speed.get_color_at(path.fan_speed); break; }
         case EViewType::Temperature:    { color = m_extrusions.ranges.temperature.get_color_at(path.temperature); break; }
-        case EViewType::ThermalIndexMin:  { color = m_extrusions.ranges.thermal_index_min.get_color_at(path.thermal_index_min * 100.0); break; }
-        case EViewType::ThermalIndexMax:  { color = m_extrusions.ranges.thermal_index_max.get_color_at(path.thermal_index_max * 100.0); break; }
-        case EViewType::ThermalIndexMean: { color = m_extrusions.ranges.thermal_index_mean.get_color_at(path.thermal_index_mean * 100.0); break; }
+        case EViewType::ThermalIndexMin:  { color = m_extrusions.ranges.thermal_index_min.get_color_at(path.thermal_index_min); break; }
+        case EViewType::ThermalIndexMax:  { color = m_extrusions.ranges.thermal_index_max.get_color_at(path.thermal_index_max); break; }
+        case EViewType::ThermalIndexMean: { color = m_extrusions.ranges.thermal_index_mean.get_color_at(path.thermal_index_mean); break; }
         case EViewType::LayerTime:      { color = m_extrusions.ranges.layer_duration.get_color_at(path.layer_time); break; }
         case EViewType::LayerTimeLog:   { color = m_extrusions.ranges.layer_duration_log.get_color_at(path.layer_time); break; }
         case EViewType::VolumetricRate: { color = m_extrusions.ranges.volumetric_rate.get_color_at(path.volumetric_rate); break; }

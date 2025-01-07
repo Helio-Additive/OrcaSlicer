@@ -2936,9 +2936,9 @@ void GCodeProcessor::process_helioadditive_comment(const GCodeReader::GCodeLine&
         std::regex regexPattern(R"(\bti\.max=([0-9]*\.?[0-9]+),ti\.min=([0-9]*\.?[0-9]+),ti\.mean=([0-9]*\.?[0-9]+)\b)");
         std::smatch match;
         if (std::regex_search(comment, match, regexPattern)) {
-            float maxVal = std::stof(match[1].str());
-            float minVal = std::stof(match[2].str());
-            float meanVal = std::stof(match[3].str());
+            float maxVal = std::stof(match[1].str()) * 100.0;
+            float minVal = std::stof(match[2].str()) * 100.0;
+            float meanVal = std::stof(match[3].str()) * 100.0;
             
             m_thermal_index = ThermalIndex(minVal, maxVal, meanVal);
         } else {
