@@ -2940,7 +2940,7 @@ void GCodeProcessor::process_helioadditive_comment(const GCodeReader::GCodeLine&
             float minVal = std::stof(match[2].str());
             float meanVal = std::stof(match[3].str());
             
-            m_thermal_index = ThermalIndex(minVal,xwmaxVal, meanVal);
+            m_thermal_index = ThermalIndex(minVal, maxVal, meanVal);
         } else {
             std::cerr << "Error: Unable to parse thermal index values from comment." << std::endl;
         }
