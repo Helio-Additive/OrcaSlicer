@@ -568,12 +568,12 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
             // read line from file
             const size_t start        = id == 1 ? 0 : m_lines_ends[id - 2];
             const size_t original_len = m_lines_ends[id - 1] - start;
-            const size_t len          = std::min(original_len, (size_t) 55);
+            const size_t len          = std::min(original_len, (size_t) 100);
             std::string  gline(m_file.data() + start, len);
 
             // If original line is longer than 55 characters, truncate and append "..."
-            if (original_len > 55)
-                gline = gline.substr(0, 52) + "...";
+            if (original_len > 100)
+                gline = gline.substr(0, 97) + "...";
 
             std::string command, parameters, comment;
             // extract comment
@@ -648,12 +648,12 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
     ImGuiWrapper& imgui = *wxGetApp().imgui();
 
     //BBS: GUI refactor: move to right
-    //imgui.set_next_window_pos(0.0f, top, ImGuiCond_Always, 0.0f, 0.0f);
+//    imgui.set_next_window_pos(0.0f, top, ImGuiCond_Always, 0.0f, 0.0f);
     imgui.set_next_window_pos(right, top, ImGuiCond_Always, 1.0f, 0.0f);
-    imgui.set_next_window_size(0.0f, wnd_height, ImGuiCond_Always);
+    imgui.set_next_window_size(1200.0f, wnd_height, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::SetNextWindowBgAlpha(0.8f);
-    imgui.begin(std::string("G-code"), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
+    imgui.begin(std::string("G-code"), ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
 
     // center the text in the window by pushing down the first line
     const float f_lines_count = static_cast<float>(lines_count);
@@ -709,9 +709,11 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
         if (!line.comment.empty()) {
             if (!line.command.empty())
                 ImGui::SameLine(0.0f, 0.0f);
+            ImGui::PushItemWidth(-1);
             ImGui::PushStyleColor(ImGuiCol_Text, COMMENT_COLOR);
             imgui.text(line.comment);
             ImGui::PopStyleColor();
+            ImGui::PopItemWidth();
         }
     }
 
