@@ -2933,7 +2933,7 @@ void GCodeProcessor::process_helioadditive_comment(const GCodeReader::GCodeLine&
 {
     const std::string &comment = line.raw();
     if (boost::algorithm::contains(comment, ";helioadditive=")) {
-        std::regex regexPattern(R"(\bti\.max=([0-9]*\.?[0-9]+),ti\.min=([0-9]*\.?[0-9]+),ti\.mean=([0-9]*\.?[0-9]+)\b)");
+        std::regex regexPattern(R"(\bti\.max=(-?[0-9]*\.?[0-9]+),ti\.min=(-?[0-9]*\.?[0-9]+),ti\.mean=(-?[0-9]*\.?[0-9]+)\b)");
         std::smatch match;
         if (std::regex_search(comment, match, regexPattern)) {
             float maxVal = std::stof(match[1].str()) * 100.0;
