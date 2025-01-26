@@ -2227,6 +2227,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("support_type", "support#support-types");
         optgroup->append_single_option_line("support_style", "support#support-styles");
         optgroup->append_single_option_line("support_threshold_angle", "support#threshold-angle");
+        optgroup->append_single_option_line("support_threshold_overlap", "support#threshold-angle");
         optgroup->append_single_option_line("raft_first_layer_density");
         optgroup->append_single_option_line("raft_first_layer_expansion");
         optgroup->append_single_option_line("support_on_build_plate_only");
@@ -2381,7 +2382,6 @@ page = add_options_page(L("Others"), "custom-gcode_other"); // ORCA: icon only v
         option.opt.height = 25;//250;
         optgroup->append_single_option_line(option);
 
-#if 1
     page = add_options_page(L("Dependencies"), "custom-gcode_advanced");
         optgroup = page->new_optgroup(L("Profile dependencies"));
 
@@ -2394,7 +2394,6 @@ page = add_options_page(L("Others"), "custom-gcode_other"); // ORCA: icon only v
         optgroup->append_single_option_line(option);
 
         build_preset_description_line(optgroup.get());
-#endif
 }
 
 // Reload current config (aka presets->edited_preset->config) into the UI fields.
@@ -3527,14 +3526,6 @@ void TabFilament::build()
         optgroup->append_single_option_line("filament_multitool_ramming_volume");
         optgroup->append_single_option_line("filament_multitool_ramming_flow");
 
-        page     = add_options_page(L("Notes"), "custom-gcode_note"); // ORCA: icon only visible on placeholders
-        optgroup = page->new_optgroup(L("Notes"),"note", 0);
-        optgroup->label_width = 0;
-        option = optgroup->get_option("filament_notes");
-        option.opt.full_width = true;
-        option.opt.height = notes_field_height;// 250;
-        optgroup->append_single_option_line(option);
-#if 1
     page = add_options_page(L("Dependencies"), "advanced");
         optgroup = page->new_optgroup(L("Profile dependencies"));
         create_line_with_widget(optgroup.get(), "compatible_printers", "", [this](wxWindow* parent) {
@@ -3553,8 +3544,15 @@ void TabFilament::build()
         option.opt.full_width = true;
         optgroup->append_single_option_line(option);
 
+    page = add_options_page(L("Notes"), "custom-gcode_note"); // ORCA: icon only visible on placeholders
+        optgroup = page->new_optgroup(L("Notes"),"note", 0);
+        optgroup->label_width = 0;
+        option = optgroup->get_option("filament_notes");
+        option.opt.full_width = true;
+        option.opt.height = notes_field_height;// 250;
+        optgroup->append_single_option_line(option);
+
         //build_preset_description_line(optgroup.get());
-#endif
 }
 
 // Reload current config (aka presets->edited_preset->config) into the UI fields.
@@ -5118,13 +5116,12 @@ bool Tab::select_preset(std::string preset_name, bool delete_current /*=false*/,
         apply_config_from_cache();
 
         // Orca: update presets for the selected printer
-        load_current_preset();
-
         if (m_type == Preset::TYPE_PRINTER && wxGetApp().app_config->get_bool("remember_printer_config")) {
             m_preset_bundle->update_selections(*wxGetApp().app_config);
             wxGetApp().plater()->sidebar().on_filaments_change(m_preset_bundle->filament_presets.size());
         }
-        
+        load_current_preset();
+
 
         if (delete_third_printer) {
             wxGetApp().CallAfter([filament_presets, process_presets]() {
