@@ -574,6 +574,8 @@ set(SLIC3R_GUI_SOURCES
     Utils/ElegooLink.hpp
     Utils/ElegooLink.cpp
     Utils/WebSocketClient.hpp
+    Utils/SlicerContextExporter.cpp
+    Utils/SlicerContextExporter.hpp
 )
 
 if (WIN32)
