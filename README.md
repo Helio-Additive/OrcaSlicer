@@ -1,10 +1,13 @@
-
 <h1> <p "font-size:200px;"><img align="left" src="https://github.com/SoftFever/OrcaSlicer/blob/main/resources/images/OrcaSlicer.ico" width="100"> Orca Slicer</p> </h1>
 
-[![Build all](https://github.com/SoftFever/OrcaSlicer/actions/workflows/build_all.yml/badge.svg?branch=main)](https://github.com/SoftFever/OrcaSlicer/actions/workflows/build_all.yml)
+[![Build all](https://github.com/SoftFever/OrcaSlicer/actions/workflows/build_all.yml/badge.svg?branch=main)](https://github.com/Helio-Additive/OrcaSlicer/actions)
 <br>Orca Slicer is an open source slicer for FDM printers. 
 
-## Follow Us
+⚠️ Note that this is a a customized fork of Orca Slicer with **cloud-based thermal simulation** built right in.
+
+This version adds Helio’s physics-driven thermal simulation directly into your slicing workflow. Instantly visualize layer-by-layer thermal behavior and optimize for print reliability;  no extra software needed.
+
+## Follow Offical Orca Slicer Channels
 Stay connected with us:
 
 [![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?logo=twitter&logoColor=white&style=flat)](https://twitter.com/real_OrcaSlicer)
@@ -22,112 +25,52 @@ If you see the above sites in your searches, report them as spam or unsafe to th
 
 We deeply value our OrcaSlicer community and appreciate all the social groups that support us. However, it is crucial to address the risk posed by any group that falsely claims to be official or misleads its members. If you encounter such a group or are part of one, please assist by encouraging the group owner to add a clear disclaimer or by alerting its members.
 
-
-
 Thank you for your vigilance and support in keeping our community safe!
 
-# Main features
-- Auto-calibration for all printers
-- Sandwich (inner-outer-inner) mode - An improved version of the `External Perimeters First` mode
-- [Precise wall](https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall)
-- Polyholes conversion support: [SuperSlicer Wiki: Polyholes](https://github.com/supermerill/SuperSlicer/wiki/Polyholes)
-- Klipper support
-- More granular controls
-- Additional features can be found in the [change notes](https://github.com/SoftFever/OrcaSlicer/releases/)  
+## 🚀 Added Helio Additive Features
 
-# Wiki
-The wiki below aims to provide a detailed explanation of the slicer settings, including how to maximize their use and how to calibrate and set up your printer.
+### 🔥 Thermal Simulation Integration
+- Slice as usual or toggle on **"Slice with Helio"** to generate a full thermal simulation of your print.
+- View **layer time dependent temperature** directly in the **Preview panel**, alongside standard slicer settings.
+- Get insight into thermal consistency, cooling behavior, and critical hotspots in your model.
+
+### 🌐 Cloud-Based Processing
+- Simulation is offloaded to the cloud for fast processing – no local compute needed.
+- Requires internet connection and a personal api key for usage.
+- Simulations are offered for free
+
+### 🧪 Experimental Features
+- Integrated thermal overlays in the Preview tab.
+- Thermal results viewable layer by layer, road by road or across the full print.
+
+## Wiki
+The wiki below aims to provide a detailed introduction to and support for **Orca Slicer, Helio Edition**.
 
 Please note that the wiki is a work in progress. We appreciate your patience as we continue to develop and improve it!
 
-**[Access the wiki here](https://github.com/SoftFever/OrcaSlicer/wiki)**  
+📝 **[Access the wiki here](https://wiki.helioadditive.com/en/orcaslicer)**  
 
-# Download
+## Download Helio Additive's Orca Slicer Version
+
+Download our customized version of OrcaSlicer with **cloud-based thermal simulation** built in.
 
 ### Stable Release
-📥 **[Download the Latest Stable Release](https://github.com/SoftFever/OrcaSlicer/releases/latest)**  
+📥 **[Download the Latest Stable Release](https://github.com/Helio-Additive/OrcaSlicer/releases)**  
 Visit our GitHub Releases page for the latest stable version of Orca Slicer, recommended for most users.
 
-### Nightly Builds
-🌙 **[Download the Latest Nightly Build](https://github.com/SoftFever/OrcaSlicer/releases/tag/nightly-builds)**  
-Explore the latest developments in Orca Slicer with our nightly builds. Feedback on these versions is highly appreciated.
+## How to set up
 
+📝 **[View Our Guide On Setting Up Supported Printer And Material Profiles](https://docs.helioadditive.com/en/slicers/orcaslicer/#initial-set-up)** 
 
-# How to install
-**Windows**: 
-1.  Download the installer for your preferred version from the [releases page](https://github.com/SoftFever/OrcaSlicer/releases).
-    - *For convenience there is also a portable build available.*
-    - *If you have troubles to run the build, you might need to install following runtimes:*
-      - [MicrosoftEdgeWebView2RuntimeInstallerX64](https://github.com/SoftFever/OrcaSlicer/releases/download/v1.0.10-sf2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe)
-          - [Details of this runtime](https://aka.ms/webview2)
-          - [Alternative Download Link Hosted by Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703)
-      - [vcredist2019_x64](https://github.com/SoftFever/OrcaSlicer/releases/download/v1.0.10-sf2/vcredist2019_x64.exe)
-          -  [Alternative Download Link Hosted by Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-          -  This file may already be available on your computer if you've installed visual studio.  Check the following location: `%VCINSTALLDIR%Redist\MSVC\v142`
+## How to use
+1. Slice your model as usual.
+2. Enable **“Slice with Helio”** before slicing.
+3. Once slicing and simulation completes, view the thermal results in the Preview panel.
+4. You can toggle between regular preview parameters and thermal simulation overlays.
 
-**Mac**:
-1. Download the DMG for your computer: `arm64` version for Apple Silicon and `x86_64` for Intel CPU.  
-2. Drag OrcaSlicer.app to Application folder. 
-3. *If you want to run a build from a PR, you also need to follow the instructions below:*  
-    <details quarantine>
-    - Option 1 (You only need to do this once. After that the app can be opened normally.):
-      - Step 1: Hold _cmd_ and right click the app, from the context menu choose **Open**.
-      - Step 2: A warning window will pop up, click _Open_  
-      
-    - Option 2:  
-      Execute this command in terminal: `xattr -dr com.apple.quarantine /Applications/OrcaSlicer.app`
-      ```console
-          softfever@mac:~$ xattr -dr com.apple.quarantine /Applications/OrcaSlicer.app
-      ```
-    - Option 3:  
-        - Step 1: open the app, a warning window will pop up  
-            ![image](./SoftFever_doc/mac_cant_open.png)  
-        - Step 2: in `System Settings` -> `Privacy & Security`, click `Open Anyway`:  
-            ![image](./SoftFever_doc/mac_security_setting.png)  
-    </details>
-    
-**Linux (Ubuntu)**:
- 1. If you run into trouble executing it, try this command in the terminal:  
-    `chmod +x /path_to_appimage/OrcaSlicer_Linux.AppImage`
-    
-# How to compile
-- Windows 64-bit  
-  - Tools needed: Visual Studio 2019, Cmake, git, git-lfs, Strawberry Perl.
-      - You will require cmake version 3.14 or later, which is available [on their website](https://cmake.org/download/).
-      - Strawberry Perl is [available on their GitHub repository](https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/).
-  - Run `build_release.bat` in `x64 Native Tools Command Prompt for VS 2019`
-  - Note: Don't forget to run `git lfs pull` after cloning the repository to download tools on Windows
+For more information on reading and improving results, refer to our [documentation here](https://docs.helioadditive.com/en/slicers/orcaslicer/#how-to-interpret-thermal-index). 
 
-- Mac 64-bit  
-  - Tools needed: Xcode, Cmake, git, gettext, libtool, automake, autoconf, texinfo
-      - You can install most of them by running `brew install cmake gettext libtool automake autoconf texinfo`
-      - If you haven't since upgrading Xcode, start Xcode and install macOS build support.
-  - run `build_release_macos.sh`
-  - open `build_arm64/OrcaSlicer/OrcaSlicer.app`
-  - To build and debug in Xcode:
-      - run `Xcode.app`
-      - open ``build_`arch`/OrcaSlicer.Xcodeproj``
-      - menu bar: Product => Scheme => OrcaSlicer
-      - menu bar: Product => Scheme => Edit Scheme...
-          - Run => Info tab => Build Configuration: `RelWithDebInfo`
-          - Run => Options tab => Document Versions: uncheck `Allow debugging when browsing versions`
-      - menu bar: Product => Run
-
-- Linux (All Distros)
-    - Docker
-        - Dependencies: Docker [Installation Instructions](https://www.docker.com/get-started/), git
-        - clone this repository `git clone https://github.com/SoftFever/OrcaSlicer`
-        - run `cd OrcaSlicer`
-        - run `./DockerBuild.sh`
-        - To run OrcaSlicer:
-            - run `./DockerRun.sh`
-                - For most common errors, open `DockerRun.sh` and read the comments.  
-    - Ubuntu 
-      - Dependencies **Will be auto installed with the shell script**: `libmspack-dev libgstreamerd-3-dev libsecret-1-dev libwebkit2gtk-4.0-dev libosmesa6-dev libssl-dev libcurl4-openssl-dev eglexternalplatform-dev libudev-dev libdbus-1-dev extra-cmake-modules libgtk2.0-dev libglew-dev libudev-dev libdbus-1-dev cmake git texinfo`
-      - run 'sudo ./BuildLinux.sh -u'
-      - run './BuildLinux.sh -dsi'
-
-# Note: 
+## Note (from the Original Orca Slicer Project): 
 If you're running Klipper, it's recommended to add the following configuration to your `printer.cfg` file.
 ```
 # Enable object exclusion
