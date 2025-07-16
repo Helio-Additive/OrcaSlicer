@@ -1669,6 +1669,9 @@ public:
             throw ConfigurationError("ConfigOptionEnumsGeneric: Comparing incompatible types");
         return this->values == rhs.values;
     }
+
+    bool operator==(const ConfigOptionEnumsGenericTempl<false>& rhs) const { return this->values == rhs.values; }
+
     bool nullable() const override { return NULLABLE; }
 
     void set(const ConfigOption* rhs) override {

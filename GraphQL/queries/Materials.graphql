@@ -1,0 +1,19 @@
+query ListMaterials($page: Int, $pageSize: Int, $filters: [MaterialFilter!]) {
+  materials(page: $page, pageSize: $pageSize, filters: $filters) {
+    pages
+    pageInfo {
+      hasPreviousPage
+      hasNextPage
+    }
+    objects {
+      ... on Material {
+        id
+        name
+        brand {
+          id
+          name
+        }
+      }
+    }
+  }
+}
