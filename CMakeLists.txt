@@ -18,8 +18,8 @@ set(SLIC3R_RESOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources")
 file(TO_NATIVE_PATH "${SLIC3R_RESOURCES_DIR}" SLIC3R_RESOURCES_DIR_WIN)
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "No build type selected, default to Release")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (default Release)" FORCE)
+    message(STATUS "No build type selected, default to Release")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (default Release)" FORCE)
 endif()
 
 find_package(Git)
@@ -35,13 +35,13 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
 endif()
 
 if(DEFINED ENV{SLIC3R_STATIC})
-        set(SLIC3R_STATIC_INITIAL $ENV{SLIC3R_STATIC})
+    set(SLIC3R_STATIC_INITIAL $ENV{SLIC3R_STATIC})
 else()
-        if (MSVC OR MINGW OR APPLE)
-                set(SLIC3R_STATIC_INITIAL 1)
-        else()
-                set(SLIC3R_STATIC_INITIAL 0)
-        endif()
+    if (MSVC OR MINGW OR APPLE)
+        set(SLIC3R_STATIC_INITIAL 1)
+    else()
+        set(SLIC3R_STATIC_INITIAL 0)
+    endif()
 endif()
 
 option(SLIC3R_STATIC 			"Compile OrcaSlicer with static libraries (Boost, TBB, glew)" ${SLIC3R_STATIC_INITIAL})
@@ -120,7 +120,7 @@ endif ()
 
 if (MSVC)
     if (SLIC3R_MSVC_COMPILE_PARALLEL AND NOT IS_CLANG_CL)
-           add_compile_options(/MP)
+        add_compile_options(/MP)
     endif ()
     # /bigobj (Increase Number of Sections in .Obj file)
     # error C3859: virtual memory range for PCH exceeded; please recompile with a command line option of '-Zm90' or greater
@@ -194,7 +194,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(WIN32)
     if(NOT DEFINED WIN10SDK_PATH)
         if(DEFINED ENV{WIN10SDK_PATH})
-                set(WIN10SDK_PATH "$ENV{WIN10SDK_PATH}")
+            set(WIN10SDK_PATH "$ENV{WIN10SDK_PATH}")
         endif()
     endif()
     if(DEFINED WIN10SDK_PATH)
@@ -309,7 +309,7 @@ if (NOT MSVC AND ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMP
         add_compile_options(-Wno-unknown-pragmas)
     endif()
 
-    # Bit of a hack for flatpak building: compress the debug info with zstd to save space in CI 
+    # Bit of a hack for flatpak building: compress the debug info with zstd to save space in CI
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0)
         add_compile_options(-gz=zstd)
     endif()
@@ -345,8 +345,8 @@ if (APPLE)
 endif ()
 
 if(MSVC)
-# 添加编译选项，忽略警告 C4305 （格式转换截断）
-add_compile_options(/wd4305)
+    # 添加编译选项，忽略警告 C4305 （格式转换截断）
+    add_compile_options(/wd4305)
 endif()
 
 # Where all the bundled libraries reside?
@@ -447,7 +447,7 @@ endif()
 function(slic3r_remap_configs targets from_Cfg to_Cfg)
     if(MSVC)
         string(TOUPPER ${from_Cfg} from_CFG)
-    
+
         foreach(tgt ${targets})
             if(TARGET ${tgt})
                 set_target_properties(${tgt} PROPERTIES MAP_IMPORTED_CONFIG_${from_CFG} ${to_Cfg})
@@ -574,7 +574,7 @@ add_custom_target(gettext_make_pot
     COMMAND xgettext --keyword=L --keyword=_L --keyword=_u8L --keyword=L_CONTEXT:1,2c --keyword=_L_PLURAL:1,2 --add-comments=TRN --from-code=UTF-8 --no-location --debug --boost
         -f "${BBL_L18N_DIR}/list.txt"
         -o "${BBL_L18N_DIR}/OrcaSlicer.pot"
-	COMMAND hintsToPot ${SLIC3R_RESOURCES_DIR} ${BBL_L18N_DIR}	
+ COMMAND hintsToPot ${SLIC3R_RESOURCES_DIR} ${BBL_L18N_DIR}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Generate pot file from strings in the source tree"
 )
@@ -734,7 +734,7 @@ function(orcaslicer_copy_dlls target config postfix output_dlls)
 
         PARENT_SCOPE
     )
-    
+
 endfunction()
 
 
@@ -774,7 +774,7 @@ endif()
 if (WIN32)
     install(DIRECTORY "${SLIC3R_RESOURCES_DIR}/" DESTINATION "./resources")
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
-    include(InstallRequiredSystemLibraries) 
+    include(InstallRequiredSystemLibraries)
     install (PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} DESTINATION ".")
 elseif (SLIC3R_FHS)
     # CMAKE_INSTALL_FULL_DATAROOTDIR: read-only architecture-independent data root (share)

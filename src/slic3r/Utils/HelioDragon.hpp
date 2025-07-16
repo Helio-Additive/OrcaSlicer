@@ -22,6 +22,8 @@
 #include "../GUI/Plater.hpp"
 #include <vector>
 
+#include "../../helioadditive/ListMaterialsClient.h"
+
 namespace Slic3r {
 
 class DynamicPrintConfig;
