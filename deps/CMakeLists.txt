@@ -297,9 +297,9 @@ include(libnoise/libnoise.cmake)
 
 include(RAPIDJSON/RAPIDJSON.cmake)
 include(GTEST/GTEST.cmake)
+include(PEGTL/PEGTL.cmake)
 include(cppgraphqlgen/cppgraphqlgen.cmake)
 
-include(PEGTL/PEGTL.cmake)
 include(CPR/CPR.cmake)
 
 # I *think* 1.1 is used for *just* md5 hashing?
@@ -382,8 +382,8 @@ set(_dep_list
     ${ZLIB_PKG}
     ${EXPAT_PKG}
     dep_libnoise
-    dep_cppgraphqlgen
     dep_PEGTL
+    dep_cppgraphqlgen
     dep_CPR
     )
 
