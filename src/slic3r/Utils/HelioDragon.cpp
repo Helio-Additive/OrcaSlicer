@@ -15,6 +15,9 @@
 #include "../GUI/NotificationManager.hpp"
 #include "wx/app.h"
 #include "cstdio"
+#include "../GraphQL/MaterialsClient.h"
+
+namespace Materials = graphql::client::query::Query;
 
 namespace Slic3r {
 

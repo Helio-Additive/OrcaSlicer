@@ -14,7 +14,7 @@ endif()
 
 orcaslicer_add_cmake_project(cppgraphqlgen
   GIT_REPOSITORY https://github.com/microsoft/cppgraphqlgen.git
-  GIT_TAG v3.7.1
+  GIT_TAG v3.6.0
   DEPENDS dep_RAPIDJSON dep_GTEST dep_PEGTL
   CMAKE_ARGS
     -DCPPGRAPHQLGEN_STATIC=${_cppgraphqlgen_static}

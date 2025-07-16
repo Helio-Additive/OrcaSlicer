@@ -14,324 +14,170 @@
 
 #include "graphqlservice/internal/Version.h"
 
-// Check if the library version is compatible with clientgen 4.5.0
-static_assert(graphql::internal::MajorVersion == 4, "regenerate with clientgen: major version mismatch");
-static_assert(graphql::internal::MinorVersion == 5, "regenerate with clientgen: minor version mismatch");
+// Check if the library version is compatible with clientgen 3.6.0
+static_assert(graphql::internal::MajorVersion == 3, "regenerate with clientgen: major version mismatch");
+static_assert(graphql::internal::MinorVersion == 6, "regenerate with clientgen: minor version mismatch");
 
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace graphql::client {
-
 /// <summary>
-/// Operation: query ListMaterials
+/// Operation: query (unnamed)
 /// </summary>
 /// <code class="language-graphql">
-/// query ListMaterials($page: Int, $pageSize: Int, $filters: [MaterialFilter!]) {
-///   materials(page: $page, pageSize: $pageSize, filters: $filters) {
-///     pages
-///     pageInfo {
-///       hasPreviousPage
-///       hasNextPage
+/// # Copyright (c) Microsoft Corporation. All rights reserved.
+/// # Licensed under the MIT License.
+/// 
+/// query {
+///   appointments {
+///     edges {
+///       node {
+///         id
+///         subject
+///         when
+///         isNow
+///         __typename
+///       }
 ///     }
-///     objects {
-///       ... on Material {
+///   }
+///   tasks {
+///     edges {
+///       node {
+///         id
+///         title
+///         isComplete
+///         __typename
+///       }
+///     }
+///   }
+///   unreadCounts {
+///     edges {
+///       node {
 ///         id
 ///         name
-///         brand {
-///           id
-///           name
-///         }
+///         unreadCount
+///         __typename
 ///       }
+///     }
+///   }
+/// 
+///   # Read a field with an enum type
+///   testTaskState
+/// 
+///   # Try a field with a union type
+///   anyType(ids: ["ZmFrZVRhc2tJZA=="]) {
+///     __typename
+///     ... on Node {
+///       id
+///     }
+///     ... on Task {
+///       id
+///       title
+///       isComplete
+///     }
+///     ... on Appointment {
+///       id
+///       subject
+///       when
+///       isNow
 ///     }
 ///   }
 /// }
 /// </code>
-namespace HelioAdditive {
+namespace graphql::client::query::Query {
 
 // Return the original text of the request document.
-[[nodiscard("unnecessary call")]] const std::string& GetRequestText() noexcept;
+const std::string& GetRequestText() noexcept;
 
 // Return a pre-parsed, pre-validated request object.
-[[nodiscard("unnecessary call")]] const peg::ast& GetRequestObject() noexcept;
+const peg::ast& GetRequestObject() noexcept;
 
-enum class [[nodiscard("unnecessary conversion")]] MaterialField
+enum class TaskState
 {
-	ID,
-	NAME,
-	BAMBUSTUDIO_NAME,
+	New,
+	Started,
+	Complete,
+	Unassigned,
 };
 
-enum class [[nodiscard("unnecessary conversion")]] SimulationStatus
+struct Response
 {
-	PENDING,
-	INITIALIZING,
-	SIMULATING,
-	ARCHIVING,
-	FINISHED,
-	FAILED,
-	STOPPED,
-};
-
-struct StringFilter;
-struct FloatFilter;
-struct IntFilter;
-struct BooleanFilter;
-struct SimulationStatusFilter;
-
-struct [[nodiscard("unnecessary construction")]] Filter
-{
-	explicit Filter() noexcept;
-	explicit Filter(
-		std::unique_ptr<StringFilter> stringFilterArg,
-		std::unique_ptr<FloatFilter> floatFilterArg,
-		std::unique_ptr<IntFilter> intFilterArg,
-		std::unique_ptr<BooleanFilter> booleanFilterArg,
-		std::unique_ptr<SimulationStatusFilter> statusFilterArg) noexcept;
-	Filter(const Filter& other);
-	Filter(Filter&& other) noexcept;
-	~Filter();
-
-	Filter& operator=(const Filter& other);
-	Filter& operator=(Filter&& other) noexcept;
-
-	std::unique_ptr<StringFilter> stringFilter;
-	std::unique_ptr<FloatFilter> floatFilter;
-	std::unique_ptr<IntFilter> intFilter;
-	std::unique_ptr<BooleanFilter> booleanFilter;
-	std::unique_ptr<SimulationStatusFilter> statusFilter;
-};
-
-struct [[nodiscard("unnecessary construction")]] StringFilter
-{
-	explicit StringFilter() noexcept;
-	explicit StringFilter(
-		std::optional<std::string> equalToArg,
-		std::optional<std::string> notEqualToArg,
-		std::optional<std::string> caseSensitiveContainsArg,
-		std::optional<std::string> caseInsensitiveContainsArg,
-		std::optional<std::string> caseSensitiveStartsWithArg,
-		std::optional<std::string> caseInsensitiveStartsWithArg,
-		std::optional<std::string> caseSensitiveEndsWithArg,
-		std::optional<std::string> caseInsensitiveEndsWithArg,
-		std::optional<std::string> notCaseSensitiveContainsArg,
-		std::optional<std::string> notCaseInsensitiveContainsArg,
-		std::optional<std::string> notCaseSensitiveStartsWithArg,
-		std::optional<std::string> notCaseInsensitiveStartsWithArg,
-		std::optional<std::string> notCaseSensitiveEndsWithArg,
-		std::optional<std::string> notCaseInsensitiveEndsWithArg) noexcept;
-	StringFilter(const StringFilter& other);
-	StringFilter(StringFilter&& other) noexcept;
-	~StringFilter();
-
-	StringFilter& operator=(const StringFilter& other);
-	StringFilter& operator=(StringFilter&& other) noexcept;
-
-	std::optional<std::string> equalTo;
-	std::optional<std::string> notEqualTo;
-	std::optional<std::string> caseSensitiveContains;
-	std::optional<std::string> caseInsensitiveContains;
-	std::optional<std::string> caseSensitiveStartsWith;
-	std::optional<std::string> caseInsensitiveStartsWith;
-	std::optional<std::string> caseSensitiveEndsWith;
-	std::optional<std::string> caseInsensitiveEndsWith;
-	std::optional<std::string> notCaseSensitiveContains;
-	std::optional<std::string> notCaseInsensitiveContains;
-	std::optional<std::string> notCaseSensitiveStartsWith;
-	std::optional<std::string> notCaseInsensitiveStartsWith;
-	std::optional<std::string> notCaseSensitiveEndsWith;
-	std::optional<std::string> notCaseInsensitiveEndsWith;
-};
-
-struct [[nodiscard("unnecessary construction")]] FloatFilter
-{
-	explicit FloatFilter() noexcept;
-	explicit FloatFilter(
-		std::optional<double> equalToArg,
-		std::optional<double> notEqualToArg,
-		std::optional<double> greaterThanArg,
-		std::optional<double> greaterThanOrEqualToArg,
-		std::optional<double> lessThanArg,
-		std::optional<double> lessThanOrEqualToArg,
-		std::optional<std::vector<double>> inListArg,
-		std::optional<std::vector<double>> notInListArg) noexcept;
-	FloatFilter(const FloatFilter& other);
-	FloatFilter(FloatFilter&& other) noexcept;
-	~FloatFilter();
-
-	FloatFilter& operator=(const FloatFilter& other);
-	FloatFilter& operator=(FloatFilter&& other) noexcept;
-
-	std::optional<double> equalTo;
-	std::optional<double> notEqualTo;
-	std::optional<double> greaterThan;
-	std::optional<double> greaterThanOrEqualTo;
-	std::optional<double> lessThan;
-	std::optional<double> lessThanOrEqualTo;
-	std::optional<std::vector<double>> inList;
-	std::optional<std::vector<double>> notInList;
-};
-
-struct [[nodiscard("unnecessary construction")]] IntFilter
-{
-	explicit IntFilter() noexcept;
-	explicit IntFilter(
-		std::optional<int> equalToArg,
-		std::optional<int> notEqualToArg,
-		std::optional<int> greaterThanArg,
-		std::optional<int> greaterThanOrEqualToArg,
-		std::optional<int> lessThanArg,
-		std::optional<int> lessThanOrEqualToArg,
-		std::optional<std::vector<int>> inListArg,
-		std::optional<std::vector<int>> notInListArg) noexcept;
-	IntFilter(const IntFilter& other);
-	IntFilter(IntFilter&& other) noexcept;
-	~IntFilter();
-
-	IntFilter& operator=(const IntFilter& other);
-	IntFilter& operator=(IntFilter&& other) noexcept;
-
-	std::optional<int> equalTo;
-	std::optional<int> notEqualTo;
-	std::optional<int> greaterThan;
-	std::optional<int> greaterThanOrEqualTo;
-	std::optional<int> lessThan;
-	std::optional<int> lessThanOrEqualTo;
-	std::optional<std::vector<int>> inList;
-	std::optional<std::vector<int>> notInList;
-};
-
-struct [[nodiscard("unnecessary construction")]] BooleanFilter
-{
-	explicit BooleanFilter() noexcept;
-	explicit BooleanFilter(
-		std::optional<bool> equalToArg,
-		std::optional<bool> notEqualToArg) noexcept;
-	BooleanFilter(const BooleanFilter& other);
-	BooleanFilter(BooleanFilter&& other) noexcept;
-	~BooleanFilter();
-
-	BooleanFilter& operator=(const BooleanFilter& other);
-	BooleanFilter& operator=(BooleanFilter&& other) noexcept;
-
-	std::optional<bool> equalTo;
-	std::optional<bool> notEqualTo;
-};
-
-struct [[nodiscard("unnecessary construction")]] SimulationStatusFilter
-{
-	explicit SimulationStatusFilter() noexcept;
-	explicit SimulationStatusFilter(
-		std::optional<SimulationStatus> equalToArg,
-		std::optional<SimulationStatus> notEqualToArg) noexcept;
-	SimulationStatusFilter(const SimulationStatusFilter& other);
-	SimulationStatusFilter(SimulationStatusFilter&& other) noexcept;
-	~SimulationStatusFilter();
-
-	SimulationStatusFilter& operator=(const SimulationStatusFilter& other);
-	SimulationStatusFilter& operator=(SimulationStatusFilter&& other) noexcept;
-
-	std::optional<SimulationStatus> equalTo;
-	std::optional<SimulationStatus> notEqualTo;
-};
-
-struct [[nodiscard("unnecessary construction")]] MaterialFilter
-{
-	explicit MaterialFilter() noexcept;
-	explicit MaterialFilter(
-		MaterialField fieldArg,
-		Filter filterArg) noexcept;
-	MaterialFilter(const MaterialFilter& other);
-	MaterialFilter(MaterialFilter&& other) noexcept;
-	~MaterialFilter();
-
-	MaterialFilter& operator=(const MaterialFilter& other);
-	MaterialFilter& operator=(MaterialFilter&& other) noexcept;
-
-	MaterialField field;
-	Filter filter;
-};
-
-} // namespace HelioAdditive
-
-namespace query::ListMaterials {
-
-using HelioAdditive::GetRequestText;
-using HelioAdditive::GetRequestObject;
-
-// Return the name of this operation in the shared request document.
-[[nodiscard("unnecessary call")]] const std::string& GetOperationName() noexcept;
-
-using HelioAdditive::MaterialField;
-using HelioAdditive::SimulationStatus;
-
-using HelioAdditive::Filter;
-using HelioAdditive::StringFilter;
-using HelioAdditive::FloatFilter;
-using HelioAdditive::IntFilter;
-using HelioAdditive::BooleanFilter;
-using HelioAdditive::SimulationStatusFilter;
-using HelioAdditive::MaterialFilter;
-
-struct [[nodiscard("unnecessary construction")]] Variables
-{
-	std::optional<int> page {};
-	std::optional<int> pageSize {};
-	std::optional<std::vector<MaterialFilter>> filters {};
-};
-
-[[nodiscard("unnecessary conversion")]] response::Value serializeVariables(Variables&& variables);
-
-struct [[nodiscard("unnecessary construction")]] Response
-{
-	struct [[nodiscard("unnecessary construction")]] materials_PaginatedResponse
+	struct appointments_AppointmentConnection
 	{
-		struct [[nodiscard("unnecessary construction")]] pageInfo_PageInfo
+		struct edges_AppointmentEdge
 		{
-			bool hasPreviousPage {};
-			bool hasNextPage {};
-		};
-
-		struct [[nodiscard("unnecessary construction")]] objects_MaterialPrinterSimulationOptimizationEventGcodeFaqNewsArticle
-		{
-			struct [[nodiscard("unnecessary construction")]] brand_MaterialBrand
+			struct node_Appointment
 			{
 				response::IdType id {};
-				std::string name {};
+				std::optional<response::StringType> subject {};
+				std::optional<response::Value> when {};
+				response::BooleanType isNow {};
+				response::StringType _typename {};
 			};
 
-			response::IdType id {};
-			std::string name {};
-			brand_MaterialBrand brand {};
+			std::optional<node_Appointment> node {};
 		};
 
-		int pages {};
-		pageInfo_PageInfo pageInfo {};
-		std::vector<objects_MaterialPrinterSimulationOptimizationEventGcodeFaqNewsArticle> objects {};
+		std::optional<std::vector<std::optional<edges_AppointmentEdge>>> edges {};
 	};
 
-	materials_PaginatedResponse materials {};
+	struct tasks_TaskConnection
+	{
+		struct edges_TaskEdge
+		{
+			struct node_Task
+			{
+				response::IdType id {};
+				std::optional<response::StringType> title {};
+				response::BooleanType isComplete {};
+				response::StringType _typename {};
+			};
+
+			std::optional<node_Task> node {};
+		};
+
+		std::optional<std::vector<std::optional<edges_TaskEdge>>> edges {};
+	};
+
+	struct unreadCounts_FolderConnection
+	{
+		struct edges_FolderEdge
+		{
+			struct node_Folder
+			{
+				response::IdType id {};
+				std::optional<response::StringType> name {};
+				response::IntType unreadCount {};
+				response::StringType _typename {};
+			};
+
+			std::optional<node_Folder> node {};
+		};
+
+		std::optional<std::vector<std::optional<edges_FolderEdge>>> edges {};
+	};
+
+	struct anyType_UnionType
+	{
+		response::StringType _typename {};
+		response::IdType id {};
+		std::optional<response::StringType> title {};
+		response::BooleanType isComplete {};
+		std::optional<response::StringType> subject {};
+		std::optional<response::Value> when {};
+		response::BooleanType isNow {};
+	};
+
+	appointments_AppointmentConnection appointments {};
+	tasks_TaskConnection tasks {};
+	unreadCounts_FolderConnection unreadCounts {};
+	TaskState testTaskState {};
+	std::vector<std::optional<anyType_UnionType>> anyType {};
 };
 
-[[nodiscard("unnecessary conversion")]] Response parseResponse(response::Value&& response);
+Response parseResponse(response::Value&& response);
 
-struct Traits
-{
-	[[nodiscard("unnecessary call")]] static const std::string& GetRequestText() noexcept;
-	[[nodiscard("unnecessary call")]] static const peg::ast& GetRequestObject() noexcept;
-	[[nodiscard("unnecessary call")]] static const std::string& GetOperationName() noexcept;
-
-	using Variables = ListMaterials::Variables;
-
-	[[nodiscard("unnecessary conversion")]] static response::Value serializeVariables(Variables&& variables);
-
-	using Response = ListMaterials::Response;
-
-	[[nodiscard("unnecessary conversion")]] static Response parseResponse(response::Value&& response);
-};
-
-} // namespace query::ListMaterials
-} // namespace graphql::client
+} // namespace graphql::client::query::Query
 
 #endif // MATERIALSCLIENT_H

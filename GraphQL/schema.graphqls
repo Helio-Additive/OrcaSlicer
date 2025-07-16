@@ -1,1452 +1,206 @@
-type AlternativeMaterialNames {
-  bambustudio: String
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
 }
 
-type AlternativePrinterNames {
-  bambustudio: String
+scalar ItemCursor
+
+directive @id on FIELD_DEFINITION
+
+"Root Query type"
+type Query {
+  """
+  [Object Identification](https://facebook.github.io/relay/docs/en/graphql-server-specification.html#object-identification)
+  """
+  node(id: ID!): Node
+
+  """
+  Appointments [Connection](https://facebook.github.io/relay/docs/en/graphql-server-specification.html#connections)
+  """
+  appointments(
+    first: Int
+    after: ItemCursor
+    last: Int
+    before: ItemCursor
+  ): AppointmentConnection!
+  """
+  Tasks [Connection](https://facebook.github.io/relay/docs/en/graphql-server-specification.html#connections)
+  """
+  tasks(
+    first: Int
+    after: ItemCursor
+    last: Int
+    before: ItemCursor
+  ): TaskConnection!
+  """
+  Folder unread counts [Connection](https://facebook.github.io/relay/docs/en/graphql-server-specification.html#connections)
+  """
+  unreadCounts(
+    first: Int
+    after: ItemCursor
+    last: Int
+    before: ItemCursor
+  ): FolderConnection!
+
+  appointmentsById(ids: [ID!]! = ["ZmFrZUFwcG9pbnRtZW50SWQ="]): [Appointment]!
+  tasksById(ids: [ID!]!): [Task]!
+  unreadCountsById(ids: [ID!]!): [Folder]!
+
+  nested: NestedType!
+
+  unimplemented: String!
+
+  expensive: [Expensive!]!
+
+  testTaskState: TaskState!
+
+  anyType(ids: [ID!]!): [UnionType]!
 }
 
-"""Represents a news articles comments."""
-type Author {
+"Node interface for Relay support"
+interface Node {
   id: ID!
-
-  """Name of the author."""
-  name: String!
-
-  """Position or title of the author."""
-  position: String!
-
-  """URL of the author's avatar image."""
-  avatarUrl: String
-
-  """Timestamp when the comment was created."""
-  insertedAt: DateTime!
-
-  """Timestamp when the comment was last updated."""
-  updatedAt: DateTime!
 }
 
-input BooleanFilter {
-  equalTo: Boolean = null
-  notEqualTo: Boolean = null
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
 }
 
-input CreateGcodeInput {
-  name: String!
-  materialId: ID!
-  printerId: ID!
-  gcodeKey: String!
-  nozzleTemperature: Float = null
-  isSingleShell: Boolean!
-  layerHeight: Float = null
-  lineWidth: Float = null
-  platformTemperature: Float = null
+type AppointmentEdge {
+  node: Appointment
+  cursor: ItemCursor!
 }
 
-"""Represents the result of attempting to create a new G-code entry."""
-type CreateGcodeResponse {
-  """The parsed G-code object if creation was successful; otherwise, null."""
-  gcode: Gcode
-
-  """Detailed failure flags if the G-code could not be created."""
-  errors: [GcodeError!]!
+type AppointmentConnection {
+  pageInfo: PageInfo!
+  edges: [AppointmentEdge]
 }
 
-input CreateOptimizationInput {
-  """User-defined name for the optimization run."""
-  name: String!
-
-  """Unique identifier of the G-code to optimize."""
-  gcodeId: ID!
-
-  """Settings related to the simulation environment and initial conditions."""
-  simulationSettings: SimulationSettingsInput = null
-
-  """Parameters and strategy configurations for running the optimization."""
-  optimizationSettings: OptimizationSettingsInput = null
+type TaskEdge {
+  node: Task
+  cursor: ItemCursor!
 }
 
-input CreateSimulationInput {
-  """User-defined name for the simulation."""
-  name: String!
-
-  """Unique identifier of the G-code to simulate."""
-  gcodeId: ID!
-
-  """Settings related to the simulation environment and parameters."""
-  simulationSettings: SimulationSettingsInput = null
+type TaskConnection {
+  pageInfo: PageInfo!
+  edges: [TaskEdge]
 }
 
-"""Date with time (isoformat)"""
-scalar DateTime
+type FolderEdge {
+  node: Folder
+  cursor: ItemCursor!
+}
 
-"""An event entry with details such as date, location, and status."""
-type Event {
-  """Unique identifier for the event."""
+type FolderConnection {
+  pageInfo: PageInfo!
+  edges: [FolderEdge]
+}
+
+input CompleteTaskInput {
   id: ID!
-
-  """Name of the event."""
-  name: String!
-
-  """Location where the event takes place."""
-  location: String!
-
-  """Start date and time of the event."""
-  startDate: DateTime!
-
-  """End date and time of the event."""
-  endDate: DateTime!
-
-  """Optional URL link with more details or registration for the event."""
-  link: String
-
-  """Indicates if the event is upcoming based on current date."""
-  isUpcoming: Boolean!
-
-  """Timestamp when the event was created."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to the event."""
-  updatedAt: DateTime!
+  testTaskState: TaskState
+  isComplete: Boolean = true
+  clientMutationId: String
 }
 
-"""
-Frequently Asked Question entry with localized question and answer content.
-"""
-type Faq {
-  """Unique identifier for the FAQ entry."""
-  id: ID!
-
-  """Localized question text shown to users."""
-  question: String
-
-  """Localized answer text shown to users."""
-  answer: String
-
-  """Category the FAQ belongs to, such as General or Technical."""
-  category: FaqCategory
-
-  """Timestamp of when the FAQ was created."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to the FAQ."""
-  updatedAt: DateTime!
+type CompleteTaskPayload {
+  task: Task
+  clientMutationId: String
 }
-
-"""Category that classifies the type of FAQ."""
-enum FaqCategory {
-  """FAQs related to materials."""
-  MATERIAL
-
-  """FAQs related to simulation processes."""
-  SIMULATION
-
-  """FAQs related to G-Code files and handling."""
-  GCODE
-}
-
-input Filter {
-  stringFilter: StringFilter = null
-  floatFilter: FloatFilter = null
-  intFilter: IntFilter = null
-  booleanFilter: BooleanFilter = null
-
-  """This filter is only used for filtering the status of a simulation."""
-  statusFilter: SimulationStatusFilter = null
-}
-
-input FloatFilter {
-  equalTo: Float = null
-  notEqualTo: Float = null
-  greaterThan: Float = null
-  greaterThanOrEqualTo: Float = null
-  lessThan: Float = null
-  lessThanOrEqualTo: Float = null
-  inList: [Float!] = null
-  notInList: [Float!] = null
-}
-
-enum FloatType {
-  """Represents negative infinity (−∞)."""
-  NEG_INF
-
-  """Represents positive infinity (+∞)."""
-  POS_INF
-
-  """Not-a-Number — represents undefined or unrepresentable values."""
-  NAN
-
-  """A regular float value."""
-  VALUE
-}
-
-"""Represents parsed data and metadata extracted from a G-code file."""
-type Gcode {
-  """Unique identifier for the G-code file."""
-  id: ID!
-
-  """Original name of the G-code file."""
-  name: String!
-
-  """Size of the G-code file in kilobytes."""
-  sizeKb: Float!
-
-  """Maximum height reached during the print, in millimetres."""
-  height: Float!
-
-  """Maximum width of the print area, in millimetres."""
-  width: Float!
-
-  """Maximum depth of the print area, in millimetres."""
-  depth: Float!
-
-  """
-  Platform (bed) temperature used during the print. May be overridden or missing.
-  """
-  platformTemperature: GcodeCustomFloat
-
-  """Minimum nozzle temperature detected in the G-code."""
-  nozzleTemperatureMin: GcodeCustomFloat!
-
-  """Maximum nozzle temperature detected in the G-code."""
-  nozzleTemperatureMax: GcodeCustomFloat!
-
-  """
-  URL to the G-code file in storage, if available. May be null if not stored.
-  """
-  gcodeUrl: String!
-
-  """Minimum road width specified in the G-code."""
-  roadWidthMin: GcodeCustomFloat!
-
-  """Maximum road width specified in the G-code."""
-  roadWidthMax: GcodeCustomFloat!
-
-  """Minimum layer height specified in the G-code."""
-  layerHeightMin: GcodeCustomFloat!
-
-  """Maximum layer height specified in the G-code."""
-  layerHeightMax: GcodeCustomFloat!
-
-  """Minimum print speed specified in the G-code."""
-  speedMin: GcodeCustomFloat!
-
-  """Maximum print speed specified in the G-code."""
-  speedMax: GcodeCustomFloat!
-
-  """Minimum fan speed used in the G-code."""
-  fanSpeedMin: GcodeCustomFloat!
-
-  """Maximum fan speed used in the G-code."""
-  fanSpeedMax: GcodeCustomFloat!
-
-  """Total number of layers found in the G-code."""
-  numberOfLayers: Int!
-
-  """Slicer software identified from the G-code metadata."""
-  slicer: Slicer!
-
-  """Material associated with this G-code."""
-  material: Material!
-
-  """Printer associated with this G-code."""
-  printer: Printer!
-
-  """Optional flow ratio specified in the G-code, if available."""
-  flowRatio: Float
-
-  """Overrides applied to G-code parameters, if any."""
-  overrideGcodeParams: OverrideGcodeParams
-
-  """Indicates whether the print is a single-shell structure."""
-  isSingleShell: Boolean!
-
-  """Timestamp when the G-code was first processed or uploaded."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to this G-code record."""
-  updatedAt: DateTime!
-}
-
-"""
-Represents a float value from a G-code with its override and state metadata.
-"""
-type GcodeCustomFloat {
-  """
-  Indicates the nature of the value: regular float, NaN, positive/negative infinity, etc.
-  """
-  floatType: FloatType!
-
-  """True if the value was manually overridden by the user or system."""
-  isOverriden: Boolean!
-
-  """
-  The actual numeric value if valid; otherwise, null for NaN or infinite values.
-  """
-  value: Float
-}
-
-enum GcodeError {
-  """Negative Z-coordinates were detected in the G-code."""
-  HAS_NEGATIVE_Z_COORDINATES
-
-  """No valid command was detected in the G-code."""
-  HAS_NO_COMMANDS
-
-  """Uncertain encoding was detected in the G-code."""
-  HAS_UNCERTAIN_ENCODING
-
-  """Zero speed was detected in the G-code."""
-  HAS_ZERO_SPEED
-
-  """Layer height was not detected in the G-code."""
-  LAYER_HEIGHT_NOT_FOUND
-
-  """Line width was not detected in the G-code."""
-  LINE_WIDTH_NOT_FOUND
-
-  """Nozzle temperature was not detected in the G-code."""
-  NOZZLE_TEMPERATURE_NOT_FOUND
-
-  """Platform temperature was not detected in the G-code."""
-  PLATFORM_TEMPERATURE_NOT_FOUND
-}
-
-enum GcodeField {
-  NAME
-  DESCRIPTION
-  SIZE_KB
-  HEIGHT
-  WIDTH
-  DEPTH
-  ROAD_WIDTH
-  LAYER_HEIGHT
-  PLATFORM_TEMP
-  FLOW_RATIO
-  NOZZLE_TEMP
-  INFILL_SPEED
-  NUMBER_OF_LAYERS
-}
-
-input GcodeFilter {
-  """The field to filter on, e.g., 'name', 'status'."""
-  field: GcodeField!
-
-  """
-  The value or condition to filter the field by, e.g., 'active', 'completed'.
-  """
-  filter: Filter!
-}
-
-input IntFilter {
-  equalTo: Int = null
-  notEqualTo: Int = null
-  greaterThan: Int = null
-  greaterThanOrEqualTo: Int = null
-  lessThan: Int = null
-  lessThanOrEqualTo: Int = null
-  inList: [Int!] = null
-  notInList: [Int!] = null
-}
-
-type LayerRange {
-  """The starting layer number for the specified range (inclusive)."""
-  fromLayer: Int!
-
-  """The ending layer number for the specified range (inclusive)."""
-  toLayer: Int!
-}
-
-input LayerRangeInput {
-  """The starting layer number for the specified range (inclusive)."""
-  fromLayer: Int!
-
-  """The ending layer number for the specified range (inclusive)."""
-  toLayer: Int!
-}
-
-type Material {
-  """Unique identifier for the material."""
-  id: ID!
-
-  """Name of the material."""
-  name: String!
-
-  """Alternative names for the materials."""
-  alternativeNames: AlternativeMaterialNames!
-
-  """Brand associated with the material."""
-  brand: MaterialBrand!
-
-  """Description of the material."""
-  description: String
-
-  """Timestamp of when the material was first added."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to the material."""
-  updatedAt: DateTime!
-}
-
-type MaterialBrand {
-  """Unique identifier for the material brand."""
-  id: ID!
-
-  """Name of the material brand."""
-  name: String!
-
-  """URL of the material brand's logo."""
-  logoUrl: String
-
-  """Description of the material brand."""
-  description: String
-
-  """Email address used to inquire or purchase from the material brand."""
-  emailToBuy: String
-
-  """Timestamp of when the material brand was first added."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to the material brand."""
-  updatedAt: DateTime!
-}
-
-enum MaterialField {
-  ID
-  NAME
-  BAMBUSTUDIO_NAME
-}
-
-input MaterialFilter {
-  """The field to filter on, e.g., 'name', 'status'."""
-  field: MaterialField!
-
-  """
-  The value or condition to filter the field by, e.g., 'active', 'completed'.
-  """
-  filter: Filter!
-}
-
-union MaterialPrinterSimulationOptimizationEventGcodeFaqNewsArticle = Material | Printer | Simulation | Optimization | Event | Gcode | Faq | NewsArticle
 
 type Mutation {
-  """Create a new G-Code."""
-  createGcode(input: CreateGcodeInput!): CreateGcodeResponse!
-
-  """Update an existing G-Code."""
-  updateGcode(id: ID!, input: UpdateGcodeInput!): UpdateGcodeResponse!
-
-  """Create a new simulation based on a G-Code."""
-  createSimulation(input: CreateSimulationInput!): Simulation!
-
-  """Create a new optimization based on a G-code."""
-  createOptimization(input: CreateOptimizationInput!): Optimization!
-}
-
-"""Represents a news article."""
-type NewsArticle {
-  """Unique identifier for the news article."""
-  id: ID!
-
-  """The headline or title of the news article."""
-  title: String!
-
-  """A short summary or teaser of the article's content."""
-  summary: String!
-
-  """The full article content written in Markdown format."""
-  markdown: String!
-
-  """Optional URL to the article's cover image."""
-  coverUrl: String
-
-  """The current publication status of the article."""
-  status: NewsArticleStatus!
-
-  """List of tags categorizing the article."""
-  tags: [NewsArticleTag!]!
-
-  """List of comments made on the article."""
-  comments: [NewsArticleComment!]!
-
-  """Number of likes the article has received."""
-  nLikes: Int!
-
-  """Number of comments on the article."""
-  nComments: Int!
-
-  """The author of the article, if available."""
-  author: Author
-
-  """Timestamp when the article was created."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last article update."""
-  updatedAt: DateTime!
-}
-
-"""Represents a news articles comments."""
-type NewsArticleComment {
-  id: ID!
-
-  """User associated with this login record."""
-  user: User
-
-  """Markdown content of the comment."""
-  commentMarkdown: String!
-
-  """Timestamp when the comment was created."""
-  insertedAt: DateTime!
-
-  """Timestamp when the comment was last updated."""
-  updatedAt: DateTime!
-}
-
-"""Status of a news article."""
-enum NewsArticleStatus {
-  """The article is currently being reviewed or considered for publication."""
-  UNDER_CONSIDERATION
-
-  """The article is actively being written or developed."""
-  IN_DEVELOPMENT
-
-  """The article has been published recently."""
-  RECENTLY_RELEASED
-}
-
-"""Tags associated with a news article."""
-enum NewsArticleTag {
-  """Articles related to printers."""
-  PRINTER
-
-  """Articles related to materials used in 3D printing."""
-  MATERIAL
-
-  """Articles related to G-code, the language used to control 3D printers."""
-  GCODE
-
-  """Articles related to simulation processes in 3D printing."""
-  SIMULATION
-
-  """Articles related to companies in the 3D printing industry."""
-  COMPANY
-
-  """Articles that provide updates on various topics."""
-  UPDATES
-
-  """Miscellaneous articles that do not fit into other categories."""
-  MISC
-}
-
-"""
-Represents an optimization simulation with detailed configuration and results.
-"""
-type Optimization {
-  """Unique identifier for the optimization simulation."""
-  id: ID!
-
-  """Specification version or type used in the simulation."""
-  spec: Int!
-
-  """Name of the optimization simulation."""
-  name: String!
-
-  """Index or sequence number of the simulation."""
-  index: Int!
-
-  """Indicates if this is an optimization simulation."""
-  isOptimization: Boolean!
-
-  """Progress of the simulation as a float between 0 and 1."""
-  progress: Float!
-
-  """Current status or state of the simulation."""
-  status: SimulationStatus!
-
-  """URL for the original simulation preview image."""
-  originalPreviewImageUrl: String
-
-  """URL for the optimized simulation preview image."""
-  optimizedPreviewImageUrl: String
-
-  """Presigned URL for the original simulation report."""
-  originalReportJsonUrl: String
-
-  """Presigned URL for the optimized simulation report."""
-  optimizedReportJsonUrl: String
-
-  """Presigned URL for the optimized G-code."""
-  optimizedGcodeUrl: String
-
-  """Presigned URL for the optimized G-code annotated with thermal indexes."""
-  optimizedGcodeWithThermalIndexesUrl: String
-
-  """Parquet asset with extrusion path data."""
-  extrusionPathsAsset: SimulationAsset
-
-  """Parquet asset of the original public mesh."""
-  originalMeshAsset: SimulationAsset
-
-  """Parquet asset of the optimized public mesh."""
-  optimizedMeshAsset: SimulationAsset
-
-  """
-  Settings used for the simulation, including overrides for temperatures and fan speeds.
-  """
-  simulationSettings: SimulationSettings!
-
-  """
-  Settings specific to the optimization run, including variable overrides and constraints.
-  """
-  optimizationSettings: OptimizationSettings!
-
-  """Settings for the reduction strategy used in the optimization run."""
-  optimizationReductionStrategySettings: OptimizationReductionStrategySettings!
-
-  """Settings for the residual strategy used in the optimization run."""
-  optimizationResidualStrategySettings: OptimizationResidualStrategySettings!
-
-  """G-code file associated with the optimization run."""
-  gcode: Gcode!
-
-  """Printer model used in the simulation."""
-  printer: Printer!
-
-  """Material used for the simulation."""
-  material: Material!
-
-  """Statistics related to thermal indices in the optimization run."""
-  optimizedThermalIndexStatistics: OptimizedThermalIndexStatistics!
-
-  """Statistics related to thermal indices in the original run."""
-  originalThermalIndexStatistics: ThermalIndexStatistics!
-
-  """Timestamp when the simulation was created."""
-  insertedAt: DateTime!
-
-  """Timestamp when the simulation was last updated."""
-  updatedAt: DateTime!
-}
-
-enum OptimizationReductionStrategy {
-  """Automatically adjusts nodes and strategies based on conditions."""
-  AUTOLINEAR
-
-  """Applies a fixed linear reduction of nodes."""
-  LINEAR
-
-  """No reduction strategy is applied."""
-  NO_STRATEGY
-}
-
-type OptimizationReductionStrategySettings {
-  """Reduction strategy used in the optimization run."""
-  optimizationReductionStrategy: OptimizationReductionStrategy
-
-  """Whether to apply autolinear criticality reduction."""
-  optimizationReductionAutolinearDoCriticality: Boolean
-
-  """Whether to apply autolinear fitness-based reduction."""
-  optimizationReductionAutolinearDoFitness: Boolean
-
-  """Whether to apply interpolation in autolinear reduction."""
-  optimizationReductionAutolinearDoInterpolation: Boolean
-
-  """Max node density for autolinear criticality."""
-  optimizationReductionAutolinearCriticalityMaxNodesDensity: Float
-
-  """Threshold value for autolinear criticality."""
-  optimizationReductionAutolinearCriticalityThreshold: Float
-
-  """Max node density for autolinear fitness."""
-  optimizationReductionAutolinearFitnessMaxNodesDensity: Float
-
-  """Threshold value for autolinear fitness."""
-  optimizationReductionAutolinearFitnessThreshold: Float
-
-  """Number of interpolation levels in autolinear reduction."""
-  optimizationReductionAutolinearInterpolationLevels: Int
-
-  """Limit on number of nodes in linear reduction strategy."""
-  optimizationReductionLinearNodesLimit: Int
-}
-
-enum OptimizationResidualStrategy {
-  """Applies a fixed linear reduction of nodes."""
-  LINEAR
-
-  """Applies an exponential reduction of nodes."""
-  EXPONENTIAL
-}
-
-type OptimizationResidualStrategySettings {
-  """Residual Strategy used in the optimization run."""
-  optimizationResidualStrategy: OptimizationResidualStrategy
-
-  """Low value of exponential penalty applied to residuals."""
-  optimizationResidualExponentialPenaltyLow: Float
-
-  """High value of exponential penalty applied to residuals."""
-  optimizationResidualExponentialPenaltyHigh: Float
-}
-
-type OptimizationSettings {
-  """Minimum velocity used during optimization."""
-  minVelocity: Float!
-
-  """Maximum velocity allowed during optimization."""
-  maxVelocity: Float!
-
-  """Minimum velocity increment allowed."""
-  minVelocityIncrement: Float!
-
-  """Maximum extruder flow rate during optimization."""
-  minExtruderFlowRate: Float!
-
-  """Minimum extruder flow rate during optimization."""
-  maxExtruderFlowRate: Float!
-
-  """Tolerance value for convergence in optimization."""
-  tolerance: Float!
-
-  """Maximum number of iterations in the optimization run."""
-  maxIterations: Int!
-
-  """
-  Configuration settings for the reduction strategy used during optimization.
-  """
-  reductionStrategySettings: ReductionStrategySettings!
-
-  """
-  Configuration settings for the residual strategy used during optimization.
-  """
-  residualStrategySettings: ResidualStrategySettings!
-
-  """List of layer ranges to include in the optimization process."""
-  layersToOptimize: [LayerRange!]!
-
-  """Selected optimization algorithm to use during the simulation process."""
-  optimizer: Optimizer!
-}
-
-input OptimizationSettingsInput {
-  """Minimum print head velocity during optimization, in mm/s."""
-  minVelocity: Float = null
-
-  """Maximum print head velocity during optimization, in mm/s."""
-  maxVelocity: Float = null
-
-  """
-  Minimum step size to increment velocity values during optimization, in mm/s.
-  """
-  minVelocityIncrement: Float = null
-
-  """Minimum allowed extruder flow rate during optimization, in mm³/s."""
-  minExtruderFlowRate: Float = null
-
-  """Maximum allowed extruder flow rate during optimization, in mm³/s."""
-  maxExtruderFlowRate: Float = null
-
-  """Tolerance threshold for optimization convergence."""
-  tolerance: Float = null
-
-  """Maximum number of iterations allowed during optimization."""
-  maxIterations: Int = null
-
-  """
-  Configuration settings for the reduction strategy used during optimization.
-  """
-  reductionStrategySettings: ReductionStrategySettingsInput = null
-
-  """
-  Configuration settings for the residual strategy used during optimization.
-  """
-  residualStrategySettings: ResidualStrategySettingsInput = null
-
-  """List of layer ranges to include in the optimization process."""
-  layersToOptimize: [LayerRangeInput!] = null
-
-  """Selected optimization algorithm to use during the simulation process."""
-  optimizer: Optimizer = null
-}
-
-type OptimizedThermalIndexStatistics {
-  """Number of thermal index data points in the optimized simulation."""
-  optimizedThermalIndexCount: Int
-
-  """Mean value of the optimized thermal index."""
-  optimizedThermalIndexMean: Float
-
-  """Standard deviation of the optimized thermal index."""
-  optimizedThermalIndexStd: Float
-
-  """Minimum value of the optimized thermal index."""
-  optimizedThermalIndexMin: Float
-
-  """25th percentile of the optimized thermal index."""
-  optimizedThermalIndex25: Float
-
-  """50th percentile (median) of the optimized thermal index."""
-  optimizedThermalIndex50: Float
-
-  """75th percentile of the optimized thermal index."""
-  optimizedThermalIndex75: Float
-
-  """Maximum value of the optimized thermal index."""
-  optimizedThermalIndexMax: Float
-}
-
-enum Optimizer {
-  """Full Optimizer"""
-  FULL
-
-  """Hybrid Optimizer"""
-  HYBRID
-}
-
-"""
-Override values for key G-code parameters used during simulation or optimization.
-"""
-type OverrideGcodeParams {
-  """Constant nozzle temperature override in Kelvin."""
-  overrideConstantNozzleTemperature: Float
-
-  """Constant layer height override in mm, if specified."""
-  overrideConstantLayerHeight: Float
-
-  """Constant road width override in mm, if specified."""
-  overrideConstantRoadWidth: Float
-
-  """Constant platform temperature override in Kelvin, if specified."""
-  overrideConstantPlatformTemperature: Float
-}
-
-"""Metadata about the pagination state."""
-type PageInfo {
-  """Indicates if there is a previous page."""
-  hasPreviousPage: Boolean!
-
-  """Indicates if there is a next page."""
-  hasNextPage: Boolean!
-}
-
-"""Paginated list of objects"""
-type PaginatedResponse {
-  """Number of total pages available for the current query."""
-  pages: Int!
-
-  """Information about pagination."""
-  pageInfo: PageInfo!
-
-  """List of objects on the current page."""
-  objects: [MaterialPrinterSimulationOptimizationEventGcodeFaqNewsArticle!]!
-}
-
-"""Contains information for uploading a file using a presigned URL."""
-type PresignedUrl {
-  """MIME type of the file associated with the presigned URL."""
-  mimeType: String!
-
-  """Presigned URL allowing for direct uploads."""
-  url: String!
-
-  """Key or identifier associated with the file in storage."""
-  key: String!
-}
-
-type Printer {
-  """Unique identifier for the printer."""
-  id: ID!
-
-  """Name of the printer."""
-  name: String!
-
-  """Alternative names for the printers."""
-  alternativeNames: AlternativePrinterNames!
-
-  """Brand associated with the printer."""
-  brand: PrinterBrand!
-
-  """Diameter of the printer's nozzle."""
-  nozzleDiameter: Float!
-
-  """Indicates if the printer has a heated bed."""
-  heatedBed: Boolean!
-
-  """Indicates if the printer has a heated chamber."""
-  heatedChamber: Boolean!
-
-  """Maximum extruder flow rate."""
-  maxExtruderFlowRate: Float!
-
-  """Minimum extruder flow rate."""
-  minExtruderFlowRate: Float!
-
-  """
-  Maximum temperature the printer's hardware can achieve during extrusion.
-  """
-  maxHardwareExtrusionTemp: Float!
-
-  """
-  Minimum temperature the printer's hardware operates at during extrusion.
-  """
-  minHardwareExtrusionTemp: Float!
-
-  """Timestamp when the printer was created."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update."""
-  updatedAt: DateTime!
-}
-
-type PrinterBrand {
-  """Unique identifier for the printer brand."""
-  id: ID!
-
-  """Name of the printer brand."""
-  name: String!
-
-  """URL to the brand's logo, if available."""
-  logoUrl: String
-
-  """Detailed description of the brand, if provided."""
-  description: String
-
-  """Timestamp of when the brand was added."""
-  insertedAt: DateTime!
-
-  """Timestamp of the last update to the brand."""
-  updatedAt: DateTime!
-}
-
-enum PrinterField {
-  ID
-  NAME
-  BAMBUSTUDIO_NAME
-  BRAND
-  NOZZLE_DIAMETER
-  HEATED_BED
-  HEATED_CHAMBER
-  MAX_EXTRUDER_FLOW_RATE
-  MIN_EXTRUDER_FLOW_RATE
-  MAX_HARDWARE_PRINT_SPEED
-  MIN_HARDWARE_PRINT_SPEED
-}
-
-input PrinterFilter {
-  """The field to filter on, e.g., 'name', 'status'."""
-  field: PrinterField!
-
-  """
-  The value or condition to filter the field by, e.g., 'active', 'completed'.
-  """
-  filter: Filter!
-}
-
-type Query {
-  """Retrieve a list of FAQ's."""
-  faqs(page: Int = null, pageSize: Int = null): PaginatedResponse!
-
-  """Retrieve a list of Events."""
-  events(page: Int = null, pageSize: Int = null): PaginatedResponse!
-
-  """Retrieve a list of G-Codes."""
-  gcodes(page: Int = null, pageSize: Int = null, sortBy: GcodeField = null, sortDirection: SortDirection = null, filters: [GcodeFilter!] = null): PaginatedResponse!
-
-  """Retrieve details of a single G-Code by its ID."""
-  gcode(id: ID!): Gcode!
-
-  """Retrieve a list of materials"""
-  materials(page: Int = null, pageSize: Int = null, sortBy: MaterialField = null, sortDirection: SortDirection = null, filters: [MaterialFilter!] = null): PaginatedResponse!
-
-  """Retrieve details of a single material by its ID."""
-  material(id: ID!): Material!
-
-  """Retrieve a list of printers."""
-  printers(page: Int = null, pageSize: Int = null, sortBy: PrinterField = null, sortDirection: SortDirection = null, filters: [PrinterFilter!] = null): PaginatedResponse!
-
-  """Retrieve a specific printer by its ID."""
-  printer(id: ID!): Printer!
-
-  """Retrieve the default simulation parameters."""
-  newsArticle(id: ID!): NewsArticle!
-
-  """Retrieve a list of News articles."""
-  newsArticles(page: Int = null, pageSize: Int = null): PaginatedResponse!
-
-  """Retrieve a list of simulations."""
-  simulations(page: Int = null, pageSize: Int = null, sortBy: SimulationField = null, sortDirection: SortDirection = null, filters: [SimulationFilter!] = null): PaginatedResponse!
-
-  """Retrieve a list of optimizations."""
-  optimizations(page: Int = null, pageSize: Int = null, sortBy: SimulationField = null, sortDirection: SortDirection = null, filters: [SimulationFilter!] = null): PaginatedResponse!
-
-  """Retrieve the default simulation parameters."""
-  defaultSimulationSettings(gcodeId: ID!, roomTemperature: Float = null, stabilizedTemperature: Float = null, constantPlatformTemperature: Float = null): SimulationSettings!
-
-  """Retrieve the default simulation parameters."""
-  defaultOptimizationSettings(gcodeId: ID!): OptimizationSettings!
-
-  """Retrieve the default simulation parameters."""
-  optimization(id: ID!): Optimization!
-
-  """Retrieve the default simulation parameters."""
-  simulation(id: ID!): Simulation!
-
-  """Generate a presigned URL for uploading a file."""
-  getPresignedUrl(fileName: String!): PresignedUrl!
-
-  """Retrieve the currently authenticated user."""
-  user(id: ID!): User!
-}
-
-type ReductionStrategySettings {
-  """
-  The strategy used to reduce the number of nodes in the optimization process.
-  """
-  strategy: OptimizationReductionStrategy!
-
-  """Enable automatic linear reduction based on thermal criticality."""
-  autolinearDoCriticality: Boolean!
-
-  """Enable automatic linear reduction based on fitness values."""
-  autolinearDoFitness: Boolean!
-
-  """Enable interpolation during automatic linear reduction."""
-  autolinearDoInterpolation: Boolean!
-
-  """Maximum nodes density for criticality-based auto-linear reduction."""
-  autolinearCriticalityMaxNodesDensity: Float!
-
-  """Thermal index threshold for triggering criticality-based reduction."""
-  autolinearCriticalityThreshold: Float!
-
-  """Maximum nodes density for fitness-based auto-linear reduction."""
-  autolinearFitnessMaxNodesDensity: Float!
-
-  """Fitness threshold for triggering fitness-based reduction."""
-  autolinearFitnessThreshold: Float!
-
-  """Number of interpolation levels to apply in auto-linear strategy."""
-  autolinearInterpolationLevels: Int!
-
-  """Maximum number of nodes allowed for the linear reduction strategy."""
-  linearNodesLimit: Int!
-}
-
-input ReductionStrategySettingsInput {
-  """
-  The strategy used to reduce the number of nodes in the optimization process.
-  """
-  strategy: OptimizationReductionStrategy
-
-  """Enable automatic linear reduction based on thermal criticality."""
-  autolinearDoCriticality: Boolean
-
-  """Enable automatic linear reduction based on fitness values."""
-  autolinearDoFitness: Boolean
-
-  """Enable interpolation during automatic linear reduction."""
-  autolinearDoInterpolation: Boolean
-
-  """Maximum nodes density for criticality-based auto-linear reduction."""
-  autolinearCriticalityMaxNodesDensity: Float
-
-  """Thermal index threshold for triggering criticality-based reduction."""
-  autolinearCriticalityThreshold: Float
-
-  """Maximum nodes density for fitness-based auto-linear reduction."""
-  autolinearFitnessMaxNodesDensity: Float
-
-  """Fitness threshold for triggering fitness-based reduction."""
-  autolinearFitnessThreshold: Float
-
-  """Number of interpolation levels to apply in auto-linear strategy."""
-  autolinearInterpolationLevels: Int
-
-  """Maximum number of nodes allowed for the linear reduction strategy."""
-  linearNodesLimit: Int
-}
-
-type ResidualStrategySettings {
-  """
-  The residual strategy used for optimization, such as linear or exponential.
-  """
-  strategy: OptimizationResidualStrategy!
-
-  """
-  Penalty applied to residuals above the target range when using exponential strategy.
-  """
-  exponentialPenaltyHigh: Float!
-
-  """
-  Penalty applied to residuals below the target range when using exponential strategy.
-  """
-  exponentialPenaltyLow: Float!
-}
-
-input ResidualStrategySettingsInput {
-  """
-  The residual strategy used for optimization, such as linear or exponential.
-  """
-  strategy: OptimizationResidualStrategy
-
-  """
-  Penalty applied to residuals above the target range when using exponential strategy.
-  """
-  exponentialPenaltyHigh: Float
-
-  """
-  Penalty applied to residuals below the target range when using exponential strategy.
-  """
-  exponentialPenaltyLow: Float
-}
-
-"""Represents a simulation run with associated metadata and results."""
-type Simulation {
-  """Unique identifier for the simulation."""
-  id: ID!
-
-  """Name or title of the simulation."""
-  name: String!
-
-  """Progress of the simulation as a float between 0.0 and 1.0"""
-  progress: Float!
-
-  """Current status or phase of the simulation."""
-  status: SimulationStatus!
-
-  """Public-facing original mesh asset (Parquet)."""
-  meshUrl: SimulationAsset
-
-  """G-code used to run the simulation."""
-  gcode: Gcode!
-
-  """Printer used for the simulation."""
-  printer: Printer!
-
-  """Material used for the simulation."""
-  material: Material!
-
-  """Presigned URL for downloading the original simulation report."""
-  reportJsonUrl: String
-
-  """Presigned URL to download thermal index G-code."""
-  thermalIndexGcodeUrl: String
-
-  """Estimated duration of the simulation in seconds."""
-  estimatedSimulationDurationSeconds: Float
-  simulationSettings: SimulationSettings!
-
-  """Statistics related to thermal indices in the simulation."""
-  thermalIndexStatistics: ThermalIndexStatistics!
-
-  """Timestamp when the simulation was last updated."""
-  updatedAt: DateTime!
-
-  """Timestamp when the simulation was created."""
-  insertedAt: DateTime!
-}
-
-type SimulationAsset {
-  assetType: SimulationAssetType!
-  url: String!
-}
-
-"""Defines the type or format of a simulation asset."""
-enum SimulationAssetType {
-  """Asset is in Apache Parquet format."""
-  PARQUET
-
-  """Asset is in JSON format."""
-  JSON
-}
-
-"""Defines the simulation fields"""
-enum SimulationField {
-  """Name of the simulation."""
-  NAME
-
-  """Current status of the simulation."""
-  STATUS
-
-  """
-  Indicates if the simulation is a LFAM (Large Format Additive Manufacturing) simulation.
-  """
-  IS_BAAM
-
-  """Indicates if the simulation is an optimization simulation."""
-  IS_OPTIMIZATION
-
-  """Current progress of the simulation, represented as a percentage."""
-  PROGRESS
-
-  """
-  Printability score of the simulation, indicating how suitable the design is for printing.
-  """
-  PRINTABILITY
-
-  """
-  Mean bonding rate of the simulation, indicating the average adhesion strength between layers.
-  """
-  BONDING_RATE_MEAN
-
-  """
-  Standard deviation of the bonding rate, indicating variability in adhesion strength.
-  """
-  BONDING_RATE_STD
-
-  """
-  Minimum bonding rate observed in the simulation, indicating the weakest adhesion strength.
-  """
-  BONDING_RATE_MIN
-
-  """
-  Maximum bonding rate observed in the simulation, indicating the strongest adhesion strength.
-  """
-  BONDING_RATE_MAX
-
-  """
-  Mean equivalent time for the simulation, representing the average time taken for the process.
-  """
-  EQUIVALENT_TIME_MEAN
-
-  """
-  Standard deviation of the equivalent time, indicating variability in process duration.
-  """
-  EQUIVALENT_TIME_STD
-
-  """
-  Minimum equivalent time observed in the simulation, indicating the shortest process duration.
-  """
-  EQUIVALENT_TIME_MIN
-
-  """
-  Maximum equivalent time observed in the simulation, indicating the longest process duration.
-  """
-  EQUIVALENT_TIME_MAX
-
-  """
-  Mean thermal index of the simulation, indicating the average thermal performance.
-  """
-  THERMAL_INDEX_MEAN
-
-  """
-  Standard deviation of the thermal index, indicating variability in thermal performance.
-  """
-  THERMAL_INDEX_STD
-
-  """
-  Minimum thermal index observed in the simulation, indicating the lowest thermal performance.
-  """
-  THERMAL_INDEX_MIN
-
-  """
-  Maximum thermal index observed in the simulation, indicating the highest thermal performance.
-  """
-  THERMAL_INDEX_MAX
-}
-
-input SimulationFilter {
-  """The field to filter on, e.g., 'name', 'status'."""
-  field: SimulationField!
-
-  """
-  The value or condition to filter the field by, e.g., 'active', 'completed'.
-  """
-  filter: Filter!
-}
-
-type SimulationSettings {
-  """Ambient air temperature just above the build plate, in degrees Kelvin."""
-  airTemperatureAboveBuildPlate: Float!
-
-  """Height at which temperature stabilization occurs, in millimeters."""
-  temperatureStabilizationHeight: Float!
-
-  """
-  The temperature maintained at the stabilization height, in degrees Kelvin.
-  """
-  stabilizedAirTemperature: Float!
-
-  """
-  Optional override for the platform (bed) temperature, in degrees Kelvin.
-  """
-  constantPlatformTemperature: Float
-
-  """Optional override for the nozzle temperature, in degrees Kelvin."""
-  constantNozzleTemperature: Float
-
-  """Optional override for fan speed as a percentage (0–100)."""
-  constantFanSpeed: Float
-}
-
-input SimulationSettingsInput {
-  """Ambient air temperature in the room, in degrees Kelvin"""
-  roomTemperature: Float = null
-
-  """Ambient air temperature just above the build plate, in degrees Kelvin."""
-  airTemperatureAboveBuildPlate: Float = null
-
-  """
-  The height at which the air temperature around the print begins to stabilize.
-  """
-  temperatureStabilizationHeight: Float = null
-
-  """
-  The temperature maintained at the stabilization height, in degrees Kelvin.
-  """
-  stabilizedAirTemperature: Float = null
-
-  """
-  Optional override for the platform (bed) temperature, in degrees Kelvin.
-  """
-  constantPlatformTemperature: Float = null
-
-  """Optional override for the nozzle temperature, in degrees Kelvin."""
-  constantNozzleTemperature: Float = null
-
-  """Optional override for fan speed as a percentage (0–100)."""
-  constantFanSpeed: Float = null
-}
-
-"""Represents the current lifecycle status of a simulation."""
-enum SimulationStatus {
-  """Simulation is queued and waiting to start."""
-  PENDING
-
-  """Simulation is preparing resources and initializing."""
-  INITIALIZING
-
-  """Simulation is currently running."""
-  SIMULATING
-
-  """Simulation has completed and is archiving results."""
-  ARCHIVING
-
-  """Simulation completed successfully."""
-  FINISHED
-
-  """Simulation encountered an error and failed."""
-  FAILED
-
-  """Simulation was manually stopped before completion."""
-  STOPPED
-}
-
-input SimulationStatusFilter {
-  equalTo: SimulationStatus = null
-  notEqualTo: SimulationStatus = null
-}
-
-enum Slicer {
-  SIMPLIFY3D
-  IDEAMAKER
-  CURA
-  BAMBU_LABS
-  SUPERSLICER
-  SLIC3R
-  FUSION360
-  BAAM
-  MW
-  CEAD_BAAM
-  KRAUSS_MAFFEI
-  PIOCREATE
-  KUYING
-  CEAD
-  AI_BUILD
-  AI_BUILD_GCODE
-  AI_BUILD_SRC
-  ADAONE
-  PRUSA_SLICER
-  SIGNIFY
-  ORCA_SLICER
-  CARACOL
-  UNKNOWN
-}
-
-"""sort direction for paginated queries."""
-enum SortDirection {
-  ASCENDING
-  DESCENDING
-}
-
-input StringFilter {
-  equalTo: String = null
-  notEqualTo: String = null
-  caseSensitiveContains: String = null
-  caseInsensitiveContains: String = null
-  caseSensitiveStartsWith: String = null
-  caseInsensitiveStartsWith: String = null
-  caseSensitiveEndsWith: String = null
-  caseInsensitiveEndsWith: String = null
-  notCaseSensitiveContains: String = null
-  notCaseInsensitiveContains: String = null
-  notCaseSensitiveStartsWith: String = null
-  notCaseInsensitiveStartsWith: String = null
-  notCaseSensitiveEndsWith: String = null
-  notCaseInsensitiveEndsWith: String = null
+  completeTask(input: CompleteTaskInput!): CompleteTaskPayload!
+  setFloat(value: Float!): Float!
 }
 
 type Subscription {
-  simulationUpdates: Simulation!
-  optimizationUpdates: Optimization!
+  nextAppointmentChange: Appointment
+    @deprecated(
+      reason: """
+      Need to deprecate a [field](http://spec.graphql.org/June2018/#sec-Deprecation)
+      """
+    )
+  nodeChange(id: ID!): Node!
 }
 
-type ThermalIndexStatistics {
-  """Number of thermal index values in the original simulation."""
-  thermalIndexCount: Int
+directive @subscriptionTag(field: String) on SUBSCRIPTION
 
-  """Mean of the thermal index values in the original simulation."""
-  thermalIndexMean: Float
+scalar DateTime
 
-  """Standard deviation of the original thermal index values."""
-  thermalIndexStd: Float
-
-  """Minimum thermal index value observed."""
-  thermalIndexMin: Float
-
-  """25th percentile of thermal index values."""
-  thermalIndex25: Float
-
-  """Median or 50th percentile of thermal index values."""
-  thermalIndex50: Float
-
-  """75th percentile of thermal index values."""
-  thermalIndex75: Float
-
-  """Maximum thermal index value observed."""
-  thermalIndexMax: Float
+enum TaskState {
+  New
+  Started
+  Complete
+  Unassigned
+    @deprecated(
+      reason: """
+      Need to deprecate an [enum value](http://spec.graphql.org/June2018/#sec-Deprecation)
+      """
+    )
 }
 
-input UpdateGcodeInput {
-  name: String!
-  materialId: ID!
-  printerId: ID!
-  nozzleTemperature: Float = null
-  isSingleShell: Boolean!
-  layerHeight: Float = null
-  lineWidth: Float = null
-  platformTemperature: Float = null
-}
-
-"""Represents the result of attempting to update an uploaded G-code."""
-type UpdateGcodeResponse {
-  """
-  The parsed G-code object if the file was successfully processed; otherwise, null.
-  """
-  gcode: Gcode
-
-  """
-  Detailed failure flags if the G-code update encountered issues during parsing.
-  """
-  errors: [GcodeError!]!
-}
-
-"""Details of a user in the system."""
-type User {
-  """Unique identifier for the user."""
+type Appointment implements Node {
   id: ID!
+  when: DateTime
+  subject: String
+  isNow: Boolean!
+  forceError: String
+}
 
-  """Email address of the user."""
-  email: String
+type Task implements Node {
+  id: ID!
+  title: String
+  isComplete: Boolean!
+}
+
+type Folder implements Node {
+  id: ID!
+  name: String
+  unreadCount: Int!
+}
+
+union UnionType = Appointment | Task | Folder
+
+directive @queryTag(query: String!) on QUERY
+directive @fieldTag(field: String!) on FIELD
+directive @fragmentDefinitionTag(
+  fragmentDefinition: String!
+) on FRAGMENT_DEFINITION
+directive @fragmentSpreadTag(fragmentSpread: String!) on FRAGMENT_SPREAD
+directive @inlineFragmentTag(inlineFragment: String!) on INLINE_FRAGMENT
+
+"Infinitely nestable type which can be used with nested fragments to test directive handling"
+type NestedType {
+  "Depth of the nested element"
+  depth: Int!
+  "Link to the next level"
+  nested: NestedType!
+}
+
+type Expensive {
+  order: Int!
+}
+
+input FirstNestedInput {
+  id: ID!
+  second: SecondNestedInput!
+  third: ThirdNestedInput!
+}
+
+input SecondNestedInput {
+  id: ID!
+  third: ThirdNestedInput!
+}
+
+input ThirdNestedInput {
+  id: ID!
+}
+
+input FourthNestedInput {
+  id: ID!
 }
