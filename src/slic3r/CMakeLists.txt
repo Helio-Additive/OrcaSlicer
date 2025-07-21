@@ -574,6 +574,12 @@ set(SLIC3R_GUI_SOURCES
     Utils/ElegooLink.hpp
     Utils/ElegooLink.cpp
     Utils/WebSocketClient.hpp
+
+    GraphQL/AnonymousToken.cpp
+    GraphQL/AnonymousToken.hpp
+
+    GraphQL/QueryResultBase.cpp
+    GraphQL/QueryResultBase.hpp
 )
 
 if (WIN32)
