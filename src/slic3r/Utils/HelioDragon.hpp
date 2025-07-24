@@ -130,6 +130,7 @@ public:
     boost::thread           m_thread;
     std::string             helio_api_key;
     std::string             helio_api_url;
+    std::string             helio_api_endpoint;
     std::string             printer_id;
     std::string             filament_id;
 
@@ -210,6 +211,7 @@ public:
         m_gcode_processor.reset();
         helio_api_key     = "Bearer " + api_key;
         helio_api_url     = api_url;
+        helio_api_endpoint = api_url + "/graphql";
         this->printer_id  = printer_id;
         this->filament_id = filament_id;
         m_gcode_result    = gcode_result;

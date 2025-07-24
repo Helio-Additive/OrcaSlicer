@@ -1,6 +1,8 @@
 #ifndef helio_AnonymousToken_hpp_
 #define helio_AnonymousToken_hpp_
 
+#include "QueryResultBase.hpp"
+
 namespace Helio {
 	class QueryResultBase;
 	class ResultFromUnsuccessfulQuery;
@@ -9,15 +11,18 @@ namespace Helio {
 	{
     public:
 
-		class Result:QueryResultBase
+		class Result: public QueryResultBase
 		{
 		private:
-			std : string token;
+			std::string token;
 
 		public:
-			AnonymousTokenResult(unsigned status, bool success, std::string error, std::string token) : token(token), QueryResultBase(status, success, error){}
-            AnonymousTokenResult() {}
-			init(unsigned status, bool success, std::string error, std::string token) : token(token), QueryResultBase::init(status, success, error){}
+			Result(unsigned status, bool success, std::string error, std::string token) : token(token), QueryResultBase(status, success, error){}
+            Result() { QueryResultBase(); }
+			void init(unsigned status, bool success, std::string error, std::string token) {
+                this->token = "Bearer " + token;
+                QueryResultBase::init(status, success, error);
+			}
             std::string getToken() { 
 				if (isSuccess())
                     return token;

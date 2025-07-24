@@ -10,6 +10,7 @@
 class ComboBox : public wxWindowWithItems<TextInput, wxItemContainer>
 {
     std::vector<wxString>         texts;
+    std::vector<bool>             helio_supported;
     std::vector<wxString>         tips;
     std::vector<wxBitmap>         icons;
     std::vector<void *>           datas;
@@ -34,9 +35,9 @@ public:
     virtual bool SetFont(wxFont const & font) override;
 
 public:
-    int Append(const wxString &item, const wxBitmap &bitmap = wxNullBitmap);
+    int Append(const wxString &item, const wxBitmap &bitmap = wxNullBitmap, const bool &helio_supported_item = false);
 
-    int Append(const wxString &item, const wxBitmap &bitmap, void *clientData);
+    int Append(const wxString &item, const wxBitmap &bitmap, const bool &helio_supported_item,void *clientData);
 
     unsigned int GetCount() const override;
 
@@ -49,6 +50,9 @@ public:
     virtual void Rescale() override;
 
     wxString GetValue() const;
+
+    bool GetHelioSupportStatus() const;
+
     void     SetValue(const wxString &value);
 
     void SetLabel(const wxString &label) override;

@@ -9,6 +9,7 @@ class TextInput : public wxNavigationEnabled<StaticBox>
 
     wxSize labelSize;
     ScalableBitmap icon;
+    ScalableBitmap suffix_icon;
     StateColor     label_color;
     StateColor     text_color;
     wxTextCtrl * text_ctrl;
@@ -25,7 +26,8 @@ public:
               wxString       icon  = "",
               const wxPoint &pos   = wxDefaultPosition,
               const wxSize & size  = wxDefaultSize,
-              long           style = 0);
+              long           style = 0, 
+			  wxString suffix_icon = "");
 
 public:
     void Create(wxWindow *     parent,
@@ -34,7 +36,8 @@ public:
               wxString       icon  = "",
               const wxPoint &pos   = wxDefaultPosition,
               const wxSize & size  = wxDefaultSize,
-              long           style = 0);
+              long           style = 0,
+			  wxString suffix_icon = "");
 
     void SetCornerRadius(double radius);
 
@@ -42,7 +45,11 @@ public:
 
     void SetIcon(const wxBitmap & icon);
 
+    void SetSuffixIcon(const wxBitmap & icon);
+
     void SetIcon(const wxString & icon);
+
+    void SetSuffixIcon(const wxString & icon);
 
     void SetLabelColor(StateColor const &color);
 

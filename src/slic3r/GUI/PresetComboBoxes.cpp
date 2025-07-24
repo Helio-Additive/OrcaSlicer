@@ -930,6 +930,7 @@ void PlaterPresetComboBox::update()
     this->Clear();
     invalidate_selection();
 
+    auto          &sidebar                  = wxGetApp().sidebar();
     const Preset* selected_filament_preset = nullptr;
     std::string filament_color;
     if (m_type == Preset::TYPE_FILAMENT)
@@ -958,10 +959,10 @@ void PlaterPresetComboBox::update()
     // and draw a red flag in front of the selected preset.
     bool wide_icons = selected_preset && !selected_preset->is_compatible;
 
-    std::map<wxString, wxBitmap*> nonsys_presets;
+    std::map<wxString, std::tuple<wxBitmap*, bool>> nonsys_presets;
     //BBS: add project embedded presets logic
-    std::map<wxString, wxBitmap*>  project_embedded_presets;
-    std::map<wxString, wxBitmap *> system_presets;
+    std::map<wxString, std::tuple<wxBitmap*, bool>>  project_embedded_presets;
+    std::map<wxString, std::tuple<wxBitmap *, bool>> system_presets;
     std::map<wxString, wxString>   preset_descriptions;
 
     //BBS:  move system to the end
@@ -987,6 +988,7 @@ void PlaterPresetComboBox::update()
             continue;
 
         bool single_bar = false;
+        bool helio_supported = false;
         if (m_type == Preset::TYPE_FILAMENT)
         {
 #if 0
@@ -1000,15 +1002,28 @@ void PlaterPresetComboBox::update()
 #endif
         }
 
+
+        wxString name       = get_preset_name(preset);
         wxBitmap* bmp = get_bmp(preset);
         assert(bmp);
 
-        const wxString name = get_preset_name(preset);
-        preset_descriptions.emplace(name, from_u8(preset.description));
+        bool helio_supported_item = false;
+        auto plater               = wxGetApp().plater();
+        if (m_type == Preset::TYPE_FILAMENT) {
+            std::optional<string> id = plater -> get_material_id_from_name(name.ToStdString());
+            if (id.has_value())
+                helio_supported_item = true;
+        } else if (m_type == Preset::TYPE_PRINTER) {
+            std::optional<string> id = plater -> get_printer_id_from_name(name.ToStdString());
+            if (id.has_value())
+                helio_supported_item = true;
+        }
 
+
+        preset_descriptions.emplace(name, from_u8(preset.description));
         if (preset.is_default || preset.is_system) {
             //BBS: move system to the end
-            system_presets.emplace(name, bmp);
+            system_presets.emplace(name, std::make_tuple(bmp, helio_supported_item));
             if (is_selected) {
                 tooltip = get_tooltip(preset);
                 selected_system_preset = name;
@@ -1022,7 +1037,7 @@ void PlaterPresetComboBox::update()
         //BBS: add project embedded preset logic
         else if (preset.is_project_embedded)
         {
-            project_embedded_presets.emplace(name, bmp);
+            project_embedded_presets.emplace(name, std::make_tuple(bmp, helio_supported_item));
             if (is_selected) {
                 selected_user_preset = name;
                 tooltip = wxString::FromUTF8(preset.name.c_str());
@@ -1030,7 +1045,7 @@ void PlaterPresetComboBox::update()
         }
         else
         {
-            nonsys_presets.emplace(name, bmp);
+            nonsys_presets.emplace(name, std::make_tuple(bmp, helio_supported_item));
             if (is_selected) {
                 selected_user_preset = name;
                 //BBS set tooltip
@@ -1048,16 +1063,17 @@ void PlaterPresetComboBox::update()
     if (!project_embedded_presets.empty())
     {
         set_label_marker(Append(separator(L("Project-inside presets")), wxNullBitmap));
-        for (std::map<wxString, wxBitmap*>::iterator it = project_embedded_presets.begin(); it != project_embedded_presets.end(); ++it) {
-            SetItemTooltip(Append(it->first, *it->second), preset_descriptions[it->first]);
+        for (std::map<wxString, std::tuple<wxBitmap*, bool>>::iterator it = project_embedded_presets.begin();
+             it != project_embedded_presets.end(); ++it) {
+            SetItemTooltip(Append(it->first, *std::get<0>(it->second), std::get<1>(it->second)), preset_descriptions[it->first]);
             validate_selection(it->first == selected_user_preset);
         }
     }
     if (!nonsys_presets.empty())
     {
         set_label_marker(Append(separator(L("User presets")), wxNullBitmap));
-        for (std::map<wxString, wxBitmap*>::iterator it = nonsys_presets.begin(); it != nonsys_presets.end(); ++it) {
-            SetItemTooltip(Append(it->first, *it->second), preset_descriptions[it->first]);
+        for (std::map<wxString, std::tuple<wxBitmap*, bool>>::iterator it = nonsys_presets.begin(); it != nonsys_presets.end(); ++it) {
+            SetItemTooltip(Append(it->first, *std::get<0>(it->second), std::get<1>(it->second)), preset_descriptions[it->first]);
             validate_selection(it->first == selected_user_preset);
         }
     }
@@ -1065,8 +1081,8 @@ void PlaterPresetComboBox::update()
     if (!system_presets.empty())
     {
         set_label_marker(Append(separator(L("System presets")), wxNullBitmap));
-        for (std::map<wxString, wxBitmap*>::iterator it = system_presets.begin(); it != system_presets.end(); ++it) {
-            SetItemTooltip(Append(it->first, *it->second), preset_descriptions[it->first]);
+        for (std::map<wxString, std::tuple<wxBitmap*, bool>>::iterator it = system_presets.begin(); it != system_presets.end(); ++it) {
+            SetItemTooltip(Append(it->first, *std::get<0>(it->second), std::get<1>(it->second)), preset_descriptions[it->first]);
             validate_selection(it->first == selected_system_preset);
         }
     }

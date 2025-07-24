@@ -16,6 +16,7 @@ wxDECLARE_EVENT(EVT_DISMISS, wxCommandEvent);
 class DropDown : public PopupWindow
 {
     std::vector<wxString> &       texts;
+	std::vector<bool> &           helio_supported;
     std::vector<wxString> &       tips;
     std::vector<wxBitmap> &     icons;
     bool                          need_sync  = false;
@@ -38,6 +39,7 @@ class DropDown : public PopupWindow
     StateColor   selector_border_color;
     StateColor   selector_background_color;
     ScalableBitmap check_bitmap;
+    ScalableBitmap helio_logo_bitmap;
 
     bool pressedDown = false;
     boost::posix_time::ptime dismissTime;
@@ -47,12 +49,14 @@ class DropDown : public PopupWindow
 public:
     DropDown(std::vector<wxString> &texts,
              std::vector<wxString> &tips,
-             std::vector<wxBitmap> &icons);
+             std::vector<wxBitmap> &icons,
+			 std::vector<bool> &helio_supported );
     
     DropDown(wxWindow *     parent,
              std::vector<wxString> &texts,
              std::vector<wxString> &tips,
              std::vector<wxBitmap> &icons,
+			 std::vector<bool> &helio_supported,
              long           style     = 0);
     
     void Create(wxWindow *     parent,
@@ -66,6 +70,9 @@ public:
     void SetSelection(int n);
 
     wxString GetValue() const;
+
+    bool GetHelioSupportStatus() const;
+
     void     SetValue(const wxString &value);
 
 public:

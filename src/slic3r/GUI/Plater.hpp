@@ -28,6 +28,7 @@
 #include "libslic3r/calib.hpp"
 #include "libslic3r/CutUtils.hpp"
 #include "libslic3r/FlushVolCalc.hpp"
+#include <optional>
 
 #define FILAMENT_SYSTEM_COLORS_NUM      16
 
@@ -834,6 +835,11 @@ private:
 
     friend class SuppressBackgroundProcessingUpdate;
     friend class PlaterDropTarget;
+
+public:
+    void fetch_materials_and_printers_from_helio();
+    std::optional<std::string> get_material_id_from_name(std::string name);
+    std::optional<std::string> get_printer_id_from_name(std::string name);
 };
 
 class SuppressBackgroundProcessingUpdate

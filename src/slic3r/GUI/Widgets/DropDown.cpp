@@ -32,8 +32,10 @@ END_EVENT_TABLE()
 
 DropDown::DropDown(std::vector<wxString> &texts,
                    std::vector<wxString> &tips,
-                   std::vector<wxBitmap> &icons)
+                   std::vector<wxBitmap> &icons,
+                   std::vector<bool> &helio_supported )
     : texts(texts)
+    , helio_supported(helio_supported)
     , tips(tips)
     , icons(icons)
     , state_handler(this)
@@ -50,8 +52,9 @@ DropDown::DropDown(wxWindow *             parent,
                    std::vector<wxString> &texts,
                    std::vector<wxString> &tips,
                    std::vector<wxBitmap> &icons,
+                   std::vector<bool> &helio_supported,
                    long           style)
-    : DropDown(texts, tips, icons)
+    : DropDown(texts, tips, icons, helio_supported)
 {
     Create(parent, style);
 }
@@ -64,8 +67,10 @@ void DropDown::Create(wxWindow *     parent,
     SetBackgroundColour(*wxWHITE);
     state_handler.attach({&border_color, &text_color, &selector_border_color, &selector_background_color});
     state_handler.update_binds();
-    if ((style & DD_NO_CHECK_ICON) == 0)
+    if ((style & DD_NO_CHECK_ICON) == 0) {
         check_bitmap = ScalableBitmap(this, "checked", 16);
+        helio_logo_bitmap = ScalableBitmap(this, "helio-logo", 16);
+    }
     text_off = style & DD_NO_TEXT;
 
     // BBS set default font
@@ -104,6 +109,11 @@ void DropDown::SetSelection(int n)
 wxString DropDown::GetValue() const
 {
     return selection >= 0 ? texts[selection] : wxString();
+}
+
+bool DropDown::GetHelioSupportStatus() const
+{
+    return selection >= 0 ? helio_supported[selection] : false;
 }
 
 void DropDown::SetValue(const wxString &value)
@@ -306,17 +316,26 @@ void DropDown::render(wxDC &dc)
             pt.y = rcContent.y;
         }
         auto text = texts[i];
+        auto helio_supported_item = helio_supported[i];
         if (!text_off && !text.IsEmpty()) {
             wxSize tSize = dc.GetMultiLineTextExtent(text);
-            if (pt.x + tSize.x > rcContent.GetRight()) {
+            wxSize margin_size = dc.GetMultiLineTextExtent(" ");
+            wxSize helio_logo_size = GetBmpSize(helio_logo_bitmap.bmp());
+
+            if (pt.x + tSize.x + margin_size.x + helio_logo_size.x > rcContent.GetRight()) {
                 if (i == hover_item && tips[i].IsEmpty())
                     SetToolTip(text);
                 text = wxControl::Ellipsize(text, dc, wxELLIPSIZE_END,
-                                            rcContent.GetRight() - pt.x);
+                                            rcContent.GetRight() - margin_size.x - helio_logo_size.x - pt.x);
             }
             pt.y += (rcContent.height - textSize.y) / 2;
             dc.SetFont(GetFont());
             dc.DrawText(text, pt);
+
+            if (helio_supported_item) {
+                pt.x += tSize.x + margin_size.x;
+                dc.DrawBitmap(helio_logo_bitmap.bmp(), pt);
+            }
         }
         rcContent.y += rowSize.y;
     }

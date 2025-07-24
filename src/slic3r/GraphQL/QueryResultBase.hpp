@@ -11,8 +11,13 @@ namespace Helio {
 
 	public:
         QueryResultBase(unsigned status, bool success, std::string error) : status(status), success(success), error(std::move(error)) {}
-        QueryResultBase() {}
-        init(unsigned status, bool success, std::string error) : status(status), success(success), error(std::move(error)) {}
+        QueryResultBase():status(0), success(false){}
+        void init(unsigned status, bool success, std::string error) { 
+            this->status = status;
+            this->success = success;
+            this->error = error;
+        }
+
         unsigned getStatus() { return status; }
         bool     isSuccess() { return success; }
         std::string     getError() { return error; }

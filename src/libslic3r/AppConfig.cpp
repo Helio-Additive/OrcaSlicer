@@ -355,7 +355,11 @@ void AppConfig::set_defaults()
     }
     
     if (get("helio_api_url").empty()) {
-        set("helio_api_url", "https://api.helioadditive.com/graphql/sdk");
+        set("helio_api_url", "https://api.helioadditive.com/");
+    }
+
+    if (get("enable_helio_processing").empty()) {
+        set_bool("enable_helio_processing", true);
     }
 
     // if (get("staff_pick_switch").empty()) {

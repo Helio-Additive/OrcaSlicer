@@ -39,7 +39,7 @@ ComboBox::ComboBox(wxWindow *parent,
                    int             n,
                    const wxString  choices[],
                    long            style)
-    : drop(texts, tips, icons)
+    : drop(texts, tips, icons, helio_supported)
 {
     if (style & wxCB_READONLY)
         style |= wxRIGHT;
@@ -85,8 +85,16 @@ void ComboBox::SetSelection(int n)
         return;
     drop.SetSelection(n);
     SetLabel(drop.GetValue());
-    if (drop.selection >= 0 && drop.iconSize.y > 0)
-        SetIcon(icons[drop.selection].IsNull() ? create_scaled_bitmap("drop_down", nullptr, 16): icons[drop.selection]); // ORCA fix combo boxes without arrows
+    if (drop.selection >= 0 && drop.iconSize.y > 0) {
+        SetIcon(icons[drop.selection].IsNull() ? create_scaled_bitmap("drop_down", nullptr, 16) : icons[drop.selection]); // ORCA fix combo boxes without arrows
+    }
+
+    if (drop.selection >= 0 && helio_supported[drop.selection]) {
+        SetSuffixIcon("helio-logo");
+    } else {
+        SetSuffixIcon(wxNullBitmap);
+    }
+
 }
 void ComboBox::SelectAndNotify(int n) { 
     SetSelection(n);
@@ -102,6 +110,11 @@ void ComboBox::Rescale()
 wxString ComboBox::GetValue() const
 {
     return drop.GetSelection() >= 0 ? drop.GetValue() : GetLabel();
+}
+
+bool ComboBox::GetHelioSupportStatus() const 
+{
+    return drop.GetSelection() >= 0 ? drop.GetHelioSupportStatus() : false;
 }
 
 void ComboBox::SetValue(const wxString &value)
@@ -146,17 +159,19 @@ bool ComboBox::SetFont(wxFont const& font)
         return TextInput::SetFont(font);
 }
 
-int ComboBox::Append(const wxString &item, const wxBitmap &bitmap)
+int ComboBox::Append(const wxString &item, const wxBitmap &bitmap, const bool &helio_supported_item)
 {
-    return Append(item, bitmap, nullptr);
+    return Append(item, bitmap, helio_supported_item, nullptr);
 }
 
 int ComboBox::Append(const wxString &item,
                      const wxBitmap &bitmap,
+				     const bool &helio_supported_item,
                      void *          clientData)
 {
     texts.push_back(item);
     tips.push_back(wxString{});
+    helio_supported.push_back(helio_supported_item);
     icons.push_back(bitmap);
     datas.push_back(clientData);
     types.push_back(wxClientData_None);
@@ -179,6 +194,7 @@ void ComboBox::DoDeleteOneItem(unsigned int pos)
 {
     if (pos >= texts.size()) return;
     texts.erase(texts.begin() + pos);
+    helio_supported.erase(helio_supported.begin() + pos);
     tips.erase(tips.begin() + pos);
     icons.erase(icons.begin() + pos);
     datas.erase(datas.begin() + pos);
@@ -230,6 +246,7 @@ int ComboBox::DoInsertItems(const wxArrayStringsAdapter &items,
     if (pos > texts.size()) return -1;
     for (int i = 0; i < items.GetCount(); ++i) {
         texts.insert(texts.begin() + pos, items[i]);
+        helio_supported.insert(helio_supported.begin() + pos, false);
         tips.insert(tips.begin() + pos, wxString{});
         icons.insert(icons.begin() + pos, wxNullBitmap);
         datas.insert(datas.begin() + pos, clientData ? clientData[i] : NULL);

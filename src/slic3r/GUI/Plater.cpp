@@ -153,6 +153,9 @@
 #include "DailyTips.hpp"
 #include "CreatePresetsDialog.hpp"
 #include "FileArchiveDialog.hpp"
+#include "slic3r/GraphQL/Materials.hpp"
+#include "slic3r/GraphQL/Printers.hpp"
+#include "slic3r/GraphQL/AnonymousToken.hpp"
 
 using boost::optional;
 namespace fs = boost::filesystem;
@@ -327,7 +330,7 @@ int SidebarProps::ElementSpacing() { return 5; }  // Use if elements has relatio
 struct Sidebar::priv
 {
     Plater *plater;
-
+    
     wxPanel *scrolled;
     PlaterPresetComboBox *combo_print;
     std::vector<PlaterPresetComboBox*> combos_filament;
@@ -826,6 +829,7 @@ Sidebar::Sidebar(Plater *parent)
         });
 
         AppConfig *app_config = wxGetApp().app_config;
+
         std::string str_bed_type = app_config->get("curr_bed_type");
         int bed_type_value = atoi(str_bed_type.c_str());
         // hotfix: btDefault is added as the first one in BedType, and app_config should not be btDefault
@@ -2244,6 +2248,8 @@ struct Plater::priv
     Plater *q;
     MainFrame *main_frame;
 
+    Helio::Materials::Result           helio_materials_result;
+    Helio::Printers::Result           helio_printers_result;
     MenuFactory menus;
 
     SelectMachineDialog* m_select_machine_dlg = nullptr;
@@ -2763,6 +2769,41 @@ private:
     //record print preset
     void record_start_print_preset(std::string action);
 };
+
+std::optional<std::string> Plater::get_material_id_from_name(std::string name)
+{
+    return p->helio_materials_result.getMaterildIdByName(name);
+}
+
+std::optional<std::string> Plater::get_printer_id_from_name(std::string name) {
+    return p->helio_printers_result.getPrinterIdByName(name);
+}
+
+void Plater::fetch_materials_and_printers_from_helio() {
+        AppConfig *app_config = wxGetApp().app_config;
+
+        std::string helio_api_url  = app_config->get("helio_api_url");
+        std::string helio_auth_token  = app_config->get("helio_access_token");
+
+        Helio::Materials materials      = Helio::Materials(helio_api_url, helio_auth_token);
+        Helio::Materials::Result all_materials = materials.getAllMaterials();
+
+        if (!all_materials.isSuccess()) {
+            if (all_materials.getStatus() == 401) {
+                helio_auth_token = Helio::AnonymousToken::get_anonymous_token(helio_api_url).getToken();
+				app_config->set("helio_access_token", helio_auth_token);
+
+				materials      = Helio::Materials(helio_api_url, helio_auth_token);
+				all_materials = materials.getAllMaterials();
+            }
+        }
+
+        Helio::Printers printers = Helio::Printers(helio_api_url, helio_auth_token);
+        Helio::Printers::Result all_printers = printers.getAllPrinters();
+
+        p->helio_materials_result = all_materials;
+        p->helio_printers_result = all_printers;
+}
 
 const std::regex Plater::priv::pattern_bundle(".*[.](amf|amf[.]xml|zip[.]amf|3mf)", std::regex::icase);
 const std::regex Plater::priv::pattern_3mf(".*3mf", std::regex::icase);
@@ -8926,6 +8967,13 @@ Plater::Plater(wxWindow *parent, MainFrame *main_frame)
     // Initialization performed in the private c-tor
     enable_wireframe(true);
     m_only_gcode = false;
+
+    auto app_config              = wxGetApp().app_config;
+	bool enable_helio_processing = app_config->get_bool("enable_helio_processing");
+
+	if (enable_helio_processing) {
+		fetch_materials_and_printers_from_helio();
+	}
 }
 
 bool Plater::Show(bool show)

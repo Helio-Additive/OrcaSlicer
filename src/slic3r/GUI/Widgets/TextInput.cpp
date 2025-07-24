@@ -38,10 +38,11 @@ TextInput::TextInput(wxWindow *     parent,
                      wxString       icon,
                      const wxPoint &pos,
                      const wxSize & size,
-                     long           style)
+                     long           style,
+					 wxString suffix_icon)
     : TextInput()
 {
-    Create(parent, text, label, icon, pos, size, style);
+    Create(parent, text, label, icon, pos, size, style, suffix_icon);
 }
 
 void TextInput::Create(wxWindow *     parent,
@@ -50,7 +51,8 @@ void TextInput::Create(wxWindow *     parent,
                        wxString       icon,
                        const wxPoint &pos,
                        const wxSize & size,
-                       long           style)
+                       long           style,
+					   wxString suffix_icon)
 {
         text_ctrl = nullptr;
     StaticBox::Create(parent, wxID_ANY, pos, size, style);
@@ -79,6 +81,9 @@ void TextInput::Create(wxWindow *     parent,
     if (!icon.IsEmpty()) {
         this->icon = ScalableBitmap(this, icon.ToStdString(), 16);
     }
+    if (!suffix_icon.IsEmpty()) {
+        this->suffix_icon = ScalableBitmap(this, suffix_icon.ToStdString(), 16);
+    }
     messureSize();
 }
 
@@ -102,11 +107,26 @@ void TextInput::SetIcon(const wxBitmap &icon)
     Rescale();
 }
 
+void TextInput::SetSuffixIcon(const wxBitmap &icon)
+{
+    this->suffix_icon = ScalableBitmap();
+    this->suffix_icon.bmp() = icon;
+    Rescale();
+}
+
 void TextInput::SetIcon(const wxString &icon)
 {
     if (this->icon.name() == icon.ToStdString())
         return;
     this->icon = ScalableBitmap(this, icon.ToStdString(), 16);
+    Rescale();
+}
+
+void TextInput::SetSuffixIcon(const wxString &icon)
+{
+    if (this->suffix_icon.name() == icon.ToStdString())
+        return;
+    this->suffix_icon = ScalableBitmap(this, icon.ToStdString(), 16);
     Rescale();
 }
 
@@ -210,6 +230,8 @@ void TextInput::render(wxDC& dc)
     }
     auto text = wxWindow::GetLabel();
     if (!text.IsEmpty()) {
+
+		wxSize margin_size = dc.GetMultiLineTextExtent(" ");
         wxSize textSize = text_ctrl->GetSize();
         if (align_right) {
             if (pt.x + labelSize.x > size.x)
@@ -225,6 +247,15 @@ void TextInput::render(wxDC& dc)
         else
             dc.SetFont(Label::Body_12);
         dc.DrawText(text, pt);
+
+		if (suffix_icon.bmp().IsOk()) {
+            wxSize tSize = dc.GetMultiLineTextExtent(text);
+			pt.x += tSize.x + margin_size.x;
+			wxSize szIcon = suffix_icon.GetBmpSize();
+			pt.y = (size.y - szIcon.y) / 2;
+			dc.DrawBitmap(suffix_icon.bmp(), pt);
+		}
+
     }
 }
 
