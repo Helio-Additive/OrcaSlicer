@@ -815,6 +815,7 @@ private:
     std::vector<float> m_filament_densities;
     Extrusions m_extrusions;
     SequentialView              m_sequential_view = SequentialView(*this);
+	ImTextureID m_helio_logo_id = nullptr;
     IMSlider* m_moves_slider;
     IMSlider* m_layers_slider;
     Shells m_shells;

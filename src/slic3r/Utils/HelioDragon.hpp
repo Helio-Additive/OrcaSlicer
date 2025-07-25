@@ -83,7 +83,8 @@ public:
                                            const std::string helio_api_url,
                                            const std::string helio_api_key,
                                            const std::string printer_id,
-                                           const std::string filament_id);
+                                           const std::string filament_id,
+											bool is_single_shell);
 
     static CreateSimulationResult create_simulation(const std::string helio_api_url,
                                                     const std::string helio_api_key,

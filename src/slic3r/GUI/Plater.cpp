@@ -2627,7 +2627,7 @@ struct Plater::priv
     void on_action_open_project(SimpleEvent&);
     void on_action_slice_plate(SimpleEvent&);
     void on_action_slice_all(SimpleEvent&);
-    void on_action_slice_plate_helio(SimpleEvent&);
+    void on_action_helio_processing(SimpleEvent&);
     void on_helio_processing_complete(HelioCompletionEvent&);
     void on_helio_processing_start(SimpleEvent&);
     void on_action_publish(wxCommandEvent &evt);
@@ -3180,7 +3180,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         //BBS: set on_slice to false
         q->Bind(EVT_GLVIEWTOOLBAR_PREVIEW, [q](SimpleEvent&) { q->select_view_3D("Preview", false); });
         q->Bind(EVT_GLTOOLBAR_SLICE_PLATE, &priv::on_action_slice_plate, this);
-        q->Bind(EVT_GLTOOLBAR_SLICE_PLATE_HELIO, &priv::on_action_slice_plate_helio, this);
+        q->Bind(EVT_GLTOOLBAR_ACTION_HELIO, &priv::on_action_helio_processing, this);
         q->Bind(EVT_GLTOOLBAR_SLICE_ALL, &priv::on_action_slice_all, this);
         q->Bind(EVT_GLTOOLBAR_PRINT_PLATE, &priv::on_action_print_plate, this);
         q->Bind(EVT_PRINT_FROM_SDCARD_VIEW, &priv::on_action_print_plate_from_sdcard, this);
@@ -7230,18 +7230,31 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
     }
 }
 
-void Plater::priv::on_action_slice_plate_helio(SimpleEvent& a)
+void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
-    BOOST_LOG_TRIVIAL(debug) << boost::format("helio process called");
-    on_action_slice_plate(a);
-
     if (!(partplate_list.get_curr_plate()->empty())) {
-        std::string                      helio_api_key = wxGetApp().app_config->get("helio_access_token");
-        std::string                      helio_api_url = wxGetApp().app_config->get("helio_api_url");
+        auto                             app_config    = wxGetApp().app_config;
+        std::string                      helio_api_key = app_config->get("helio_access_token");
+        std::string                      helio_api_url = app_config->get("helio_api_url");
         const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
+
+        std::string printer_name = wxGetApp().preset_bundle->printers.get_selected_preset_name();
+        std::string filament_name = wxGetApp().preset_bundle->filaments.get_selected_preset_name();
+
+        std::string helio_printer_id = config.opt_string("helio_printer_id");
+        std::string helio_filament_id = config.opt_string("helio_filament_id");
+
+        if (helio_printer_id.empty()) {
+            helio_printer_id = q->get_printer_id_from_name(printer_name).value_or("");
+        }
+
+        if (helio_filament_id.empty()) {
+            helio_filament_id = q->get_printer_id_from_name(filament_name).value_or("");
+        }
+
         auto                             g_result      = background_process.get_current_gcode_result();
 
-        helio_background_process.init(helio_api_key, helio_api_url, config.opt_string("helio_printer_id"), config.opt_string("helio_filament_id"),
+        helio_background_process.init(helio_api_key, helio_api_url, helio_printer_id, helio_filament_id,
                                       g_result, preview, [this]() {});
 
         helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state,

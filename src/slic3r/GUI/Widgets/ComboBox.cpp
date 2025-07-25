@@ -183,6 +183,7 @@ void ComboBox::DoClear()
 {
     SetIcon("drop_down");
     texts.clear();
+    helio_supported.clear();
     tips.clear();
     icons.clear();
     datas.clear();

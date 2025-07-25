@@ -1011,9 +1011,9 @@ void PlaterPresetComboBox::update()
         auto plater               = wxGetApp().plater();
         if (m_type == Preset::TYPE_FILAMENT) {
             std::optional<string> id = plater -> get_material_id_from_name(name.ToStdString());
-            if (id.has_value())
+            if (id.has_value() || preset.config.opt_string("helio_filament_id").length()  > 0)
                 helio_supported_item = true;
-        } else if (m_type == Preset::TYPE_PRINTER) {
+        } else if (m_type == Preset::TYPE_PRINTER || preset.config.opt_string("helio_printer_id").length()  > 0) {
             std::optional<string> id = plater -> get_printer_id_from_name(name.ToStdString());
             if (id.has_value())
                 helio_supported_item = true;

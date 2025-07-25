@@ -966,7 +966,6 @@ GCodeViewer::GCodeViewer()
     m_moves_slider  = new IMSlider(0, 0, 0, 100, wxSL_HORIZONTAL);
     m_layers_slider = new IMSlider(0, 0, 0, 100, wxSL_VERTICAL);
     m_extrusions.reset_role_visibility_flags();
-
 //    m_sequential_view.skip_invisible_moves = true;
 }
 
@@ -4579,6 +4578,9 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     if (!m_legend_enabled)
         return;
 
+    if (m_helio_logo_id == nullptr)
+		IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 14, 14, m_helio_logo_id);
+
     const Size cnv_size = wxGetApp().plater()->get_current_canvas3D()->get_canvas_size();
 
     ImGuiWrapper& imgui = *wxGetApp().imgui();
@@ -4623,10 +4625,6 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 pos_rect = ImGui::GetCursorScreenPos();
     float window_padding = 4.0f * m_scale;
-
-    draw_list->AddRectFilled(ImVec2(pos_rect.x,pos_rect.y - ImGui::GetStyle().WindowPadding.y),
-        ImVec2(pos_rect.x + ImGui::GetWindowWidth() + ImGui::GetFrameHeight(),pos_rect.y + ImGui::GetFrameHeight() + window_padding * 2.5),
-        ImGui::GetColorU32(ImVec4(0,0,0,0.3)));
 
     auto append_item = [icon_size, &imgui, imperial_units, &window_padding, &draw_list, this](
         EItemType type,
@@ -4860,7 +4858,43 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     //BBS display Color Scheme
     ImGui::Dummy({ window_padding, window_padding });
     ImGui::Dummy({ window_padding, window_padding });
-    ImGui::SameLine();
+
+    auto create_helio_button = [&window_padding, &draw_list, &imgui,this]() {
+        ImVec2 pos = ImVec2(ImGui::GetCursorScreenPos().x + window_padding * 3, ImGui::GetCursorScreenPos().y);
+        ImVec2 size(100, 20); // Adjust to your button size
+        size           = {size.x * m_scale, size.y * m_scale};
+        float rounding = size.y * 0.5f; // Pill shape
+
+        ImU32 bgColor     = IM_COL32(255, 255, 255, 255); // white background
+
+        draw_list->AddRectFilled(pos, {pos.x + size.x, pos.y + size.y}, bgColor, rounding);
+        bool pressed = ImGui::InvisibleButton("##HelioAction", size);
+        if (pressed) {
+            wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_HELIO));
+        }
+
+        float padding  = 10.0f * m_scale;
+        float logoSize = (size.y - padding * 2) * m_scale;
+
+        ImGui::SetCursorScreenPos({pos.x + padding, pos.y + padding});
+
+        GLuint      gl_tex_id    = 2; // From glGenTextures or your loader
+        ImTextureID imgui_tex_id = (ImTextureID) (intptr_t) gl_tex_id;
+        ImGui::Image(imgui_tex_id, ImVec2(logoSize, logoSize));
+
+        auto logo_end_pos = ImVec2(logoSize + 2 * padding, (size.y - ImGui::GetTextLineHeight()) * 0.5f);
+        ImGui::SetCursorScreenPos({pos.x + logo_end_pos.x, pos.y + logo_end_pos.y});
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 255)); // Red
+        imgui.bold_text("Helio Action");
+        ImGui::PopStyleColor();
+
+        ImGui::SetCursorScreenPos({pos.x, pos.y + size.y});
+    };
+
+    create_helio_button();
+    ImGui::Dummy({ window_padding, window_padding });
+    ImGui::Dummy({ window_padding, window_padding });
+
     std::wstring btn_name;
     if (m_fold)
         btn_name = ImGui::UnfoldButtonIcon;

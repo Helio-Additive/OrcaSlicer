@@ -187,7 +187,6 @@ class MainFrame : public DPIFrame
     {
         eSliceAll = 0,
         eSlicePlate = 1,
-        eSliceHelio = 2
     };
 
     //jump to editor under preview only mode

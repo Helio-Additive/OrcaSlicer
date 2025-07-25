@@ -18,17 +18,17 @@
 
 namespace Slic3r {
 
-HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::string helio_api_url, const std::string helio_api_key)
+HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::string helio_api_endpoint, const std::string helio_api_key)
 {
     HelioQuery::PresignedURLResult res;
     std::string                    query_body = R"( {
-			"query": "query PresignedURL($fileName: String!) { presignedUrl(fileName: $fileName) { mimeType url key } }",
-			"variables": {
-				"fileName": "test.gcode"
-			}
-		} )";
+						"query": "query getPresignedURL($fileName: String!) { getPresignedUrl(fileName: $fileName) { mimeType url key } }",
+						"variables": {
+							"fileName": "test.gcode"
+						}
+						} )";
 
-    auto http = Http::post(helio_api_url);
+    auto http = Http::post(helio_api_endpoint);
 
     http.header("Content-Type", "application/json").header("Authorization", helio_api_key).set_post_body(query_body);
 
@@ -40,9 +40,9 @@ HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::strin
             if (parsed_obj.contains("error")) {
                 res.error = parsed_obj["error"];
             } else {
-                res.key      = parsed_obj["data"]["presignedUrl"]["key"];
-                res.mimeType = parsed_obj["data"]["presignedUrl"]["mimeType"];
-                res.url      = parsed_obj["data"]["presignedUrl"]["url"];
+                res.key      = parsed_obj["data"]["getPresignedUrl"]["key"];
+                res.mimeType = parsed_obj["data"]["getPresignedUrl"]["mimeType"];
+                res.url      = parsed_obj["data"]["getPresignedUrl"]["url"];
             }
         })
         .on_error([&res](std::string body, std::string error, unsigned status) {
@@ -79,20 +79,22 @@ HelioQuery::UploadFileResult HelioQuery::upload_file_to_presigned_url(const std:
 }
 
 HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
-                                                       const std::string helio_api_url,
+                                                       const std::string helio_api_endpoint,
                                                        const std::string helio_api_key,
                                                        const std::string printer_id,
-                                                       const std::string filament_id)
+                                                       const std::string filament_id,
+													   bool is_single_shell)
 {
     HelioQuery::CreateGCodeResult res;
     std::string                   query_body_template = R"( {
-			"query": "mutation CreateGcode($input: CreateGcodeInput!) { createGcode(input: $input) {  missingInfo criticalErrors warnings gcode { id name sizeKb } } }",
+			"query": "mutation CreateGcode($input: CreateGcodeInput!) { createGcode(input: $input) {  errors gcode { id name sizeKb } } }",
 			"variables": {
 			  "input": {
 				"name": "%1%",
 				"printerId": "%2%",
 				"materialId": "%3%",
-				"gcodeKey": "%4%"
+				"gcodeKey": "%4%",
+				"isSingleShell": %5%
 			  }
 			}
 		  } )";
@@ -102,9 +104,10 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
 
     std::string gcode_name = key_split.back();
 
-    std::string query_body = (boost::format(query_body_template) % gcode_name % printer_id % filament_id % key).str();
+    std::string query_body =
+        (boost::format(query_body_template) % gcode_name % printer_id % filament_id % key % (is_single_shell ? "true" : "false")).str();
 
-    auto http = Http::post(helio_api_url);
+    auto http = Http::post(helio_api_endpoint);
 
     http.header("Content-Type", "application/json").header("Authorization", helio_api_key).set_post_body(query_body);
 
@@ -159,7 +162,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
     return res;
 }
 
-HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::string helio_api_url,
+HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::string helio_api_endpoint,
                                                                  const std::string helio_api_key,
                                                                  const std::string gcode_id,
                                                                  const float       initial_room_airtemp,
@@ -168,7 +171,7 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
 {
     HelioQuery::CreateSimulationResult res;
     std::string                        query_body_template = R"( {
-	  "query": "mutation CreateSimulation($input: CreateSimulationInput!) { createSimulation(input: $input) { id name progress status gcode { id name } printer { id name } material { id name } reportUrl thermalIndexGcodeUrl estimatedSimulationDurationSeconds insertedAt updatedAt } }",
+	  "query": "mutation CreateSimulation($input: CreateSimulationInput!) { createSimulation(input: $input) { id name progress status gcode { id name } printer { id name } material { id name } reportJsonUrl thermalIndexGcodeUrl estimatedSimulationDurationSeconds insertedAt updatedAt } }",
 	  "variables": {
 		"input": {
 		  "name": "%1%",
@@ -176,10 +179,10 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
 		  "simulationSettings": {
 			"airTemperatureAboveBuildPlate": %3%,
 			"temperatureStabilizationHeight": %4%,
-			"stabilizedTemperature": %5%,
-			"platformTemperature": null,
-			"nozzleTemperature": null,
-			"fanSpeed": null
+			"stabilizedAirTemperature": %5%,
+			"constantPlatformTemperature": null,
+			"constantNozzleTemperature": null,
+			"constantFanSpeed": null
 		  }
 		}
 	  }
@@ -193,7 +196,7 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
                               layer_threshold_meters % object_proximity_airtemp_kelvin)
                                  .str();
 
-    auto http = Http::post(helio_api_url);
+    auto http = Http::post(helio_api_endpoint);
 
     http.header("Content-Type", "application/json").header("Authorization", helio_api_key).set_post_body(query_body);
 
@@ -221,7 +224,7 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
     return res;
 }
 
-HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(const std::string helio_api_url,
+HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(const std::string helio_api_endpoint,
                                                                                 const std::string helio_api_key,
                                                                                 const std::string simulation_id)
 {
@@ -235,7 +238,7 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
 
     std::string query_body = (boost::format(query_body_template) % simulation_id).str();
 
-    auto http = Http::post(helio_api_url);
+    auto http = Http::post(helio_api_endpoint);
 
     http.header("Content-Type", "application/json").header("Authorization", helio_api_key).set_post_body(query_body);
 
@@ -296,9 +299,9 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
         Slic3r::SlicingStatusEvent*      evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
         wxQueueEvent(GUI::wxGetApp().plater(), evt);
 
-        BOOST_LOG_TRIVIAL(debug) << boost::format("url: %1%, key: %2%") % helio_api_url % helio_api_key;
+        BOOST_LOG_TRIVIAL(debug) << boost::format("url: %1%, key: %2%") % helio_api_endpoint % helio_api_key;
 
-        HelioQuery::PresignedURLResult create_presigned_url_res = HelioQuery::create_presigned_url(helio_api_url, helio_api_key);
+        HelioQuery::PresignedURLResult create_presigned_url_res = HelioQuery::create_presigned_url(helio_api_endpoint, helio_api_key);
 
         if (create_presigned_url_res.error.empty() && create_presigned_url_res.status == 200 && !was_canceled()) {
             status = Slic3r::PrintBase::SlicingStatus(5, "Helio: Presigned URL Created");
@@ -313,8 +316,10 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
                 evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
                 wxQueueEvent(GUI::wxGetApp().plater(), evt);
 
-                HelioQuery::CreateGCodeResult create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_url,
-                                                                                          helio_api_key, printer_id, filament_id);
+				auto              print_config             = GUI::wxGetApp().preset_bundle->full_config();
+				const bool        is_single_shell          = print_config.opt_bool("spiral_mode");
+                HelioQuery::CreateGCodeResult create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_endpoint,
+                                                                                          helio_api_key, printer_id, filament_id, is_single_shell);
 
                 create_simulation_step(create_gcode_res, notification_manager);
 
@@ -361,7 +366,7 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
         const float bed_temp             = print_config.option<ConfigOptionInts>(bed_temp_key)->get_at(0);
         const float initial_room_airtemp = (object_proximity_airtemp + bed_temp) / 2;
 
-        HelioQuery::CreateSimulationResult create_simulation_res = HelioQuery::create_simulation(helio_api_url, helio_api_key, gcode_id,
+        HelioQuery::CreateSimulationResult create_simulation_res = HelioQuery::create_simulation(helio_api_endpoint, helio_api_key, gcode_id,
                                                                                                  initial_room_airtemp, layer_threshold,
                                                                                                  object_proximity_airtemp);
 
@@ -376,7 +381,7 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
 
             while (!was_canceled()) {
                 HelioQuery::CheckSimulationProgressResult check_simulation_progress_res =
-                    HelioQuery::check_simulation_progress(helio_api_url, helio_api_key, create_simulation_res.id);
+                    HelioQuery::check_simulation_progress(helio_api_endpoint, helio_api_key, create_simulation_res.id);
 
                 if (check_simulation_progress_res.status == 200) {
                     times_tried = 0;
