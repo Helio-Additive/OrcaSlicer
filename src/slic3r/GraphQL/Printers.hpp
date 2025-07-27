@@ -18,12 +18,7 @@ namespace Helio {
 	public:
         Printer(std::string id, std::string name, std::string orca_name) : name(name), id(id), orca_name(orca_name) {}
         std::string getId() { return id; }
-        std::optional<std::string> checkNameMatch(std::string printer_name) { 
-            if (boost::algorithm::icontains(printer_name, name) || boost::algorithm::icontains(printer_name, orca_name))
-                return id;
-            else
-                return std::nullopt;
-        }
+        std::optional<std::string> checkNameMatch(std::string printer_name);
 	};
 
 	class Printers: QueryBase

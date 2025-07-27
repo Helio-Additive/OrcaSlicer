@@ -22,6 +22,21 @@ std::optional<std::string> Helio::Materials::Result::getMaterildIdByName(std::st
 	return id;
 }
 
+std::optional<std::string> Helio::Material::checkNameMatch(std::string filament_name) { 
+
+	std::vector<std::string> split_name;
+	boost::split(split_name, filament_name, boost::is_any_of("@"));
+
+	std::string trimmed_name = boost::trim_copy(name);
+	std::string trimmed_orca_name = boost::trim_copy(orca_name);
+	std::string trimmed_filament_name = boost::trim_copy(split_name[0]);
+
+	if (boost::algorithm::iequals(trimmed_name, trimmed_filament_name) || boost::algorithm::iequals(trimmed_orca_name, trimmed_filament_name))
+		return id;
+	else
+		return std::nullopt;
+}
+
 Helio::Materials::Result Helio::Materials::Result::mergeResults(Helio::Materials::Result resB) { 
     std::vector<Material> current_materials = this->isSuccess() ? this->getMaterials() : std::vector<Material>{}; 
     std::vector<Material> new_materials = resB.isSuccess() ? resB.getMaterials() : std::vector<Material>{}; 

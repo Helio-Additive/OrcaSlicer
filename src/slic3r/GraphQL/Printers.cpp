@@ -22,6 +22,13 @@ std::optional<std::string> Helio::Printers::Result::getPrinterIdByName(std::stri
 	return id;
 }
 
+std::optional<std::string> Helio::Printer::checkNameMatch(std::string printer_name) { 
+	if (boost::algorithm::icontains(printer_name, name) || (!orca_name.empty() && boost::algorithm::icontains(printer_name, orca_name)))
+		return id;
+	else
+		return std::nullopt;
+}
+
 Helio::Printers::Result Helio::Printers::Result::mergeResults(Helio::Printers::Result resB) { 
     std::vector<Printer> current_printers = this->isSuccess() ? this->getPrinters() : std::vector<Printer>{}; 
     std::vector<Printer> new_printers = resB.isSuccess() ? resB.getPrinters() : std::vector<Printer>{}; 

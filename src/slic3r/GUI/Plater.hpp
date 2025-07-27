@@ -838,8 +838,12 @@ private:
 
 public:
     void fetch_materials_and_printers_from_helio();
+    std::optional<std::string> get_helio_material_id_for_the_current_selection();
+    std::optional<std::string> get_helio_printer_id_for_the_current_selection();
     std::optional<std::string> get_material_id_from_name(std::string name);
     std::optional<std::string> get_printer_id_from_name(std::string name);
+    void                       set_helio_processing_disabled(bool status);
+    bool                       get_helio_processing_disabled();
 };
 
 class SuppressBackgroundProcessingUpdate

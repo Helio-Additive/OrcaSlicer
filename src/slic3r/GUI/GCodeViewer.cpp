@@ -4579,7 +4579,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         return;
 
     if (m_helio_logo_id == nullptr)
-		IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 14, 14, m_helio_logo_id);
+		IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 134*3, 131*3, m_helio_logo_id);
 
     const Size cnv_size = wxGetApp().plater()->get_current_canvas3D()->get_canvas_size();
 
@@ -4860,38 +4860,82 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     ImGui::Dummy({ window_padding, window_padding });
 
     auto create_helio_button = [&window_padding, &draw_list, &imgui,this]() {
-        ImVec2 pos = ImVec2(ImGui::GetCursorScreenPos().x + window_padding * 3, ImGui::GetCursorScreenPos().y);
-        ImVec2 size(100, 20); // Adjust to your button size
-        size           = {size.x * m_scale, size.y * m_scale};
-        float rounding = size.y * 0.5f; // Pill shape
+        Plater* plater = wxGetApp().plater();
+        std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection();
+        std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
+        bool                       helio_button_active = helio_filament_id.has_value() && helio_printer_id.has_value() && !plater->get_helio_processing_disabled();
 
+        ImVec2 pos = ImVec2(ImGui::GetCursorScreenPos().x + window_padding * 3, ImGui::GetCursorScreenPos().y);
+
+        std::string button_text = "Helio Action";
+
+        imgui.push_large_font();
+        ImVec2      text_size   = ImGui::CalcTextSize(button_text.c_str(), nullptr, false);
+        imgui.pop_large_font();
+
+        float  padding = 6.0f;
+        ImVec2 logo_size = {134 / 131 * text_size.y, text_size.y};
+
+        ImVec2 rect_size = { (logo_size.x + 3*padding + text_size.x) * m_scale, (text_size.y + 2*padding) * m_scale};
+        
+        float rounding = rect_size.y * 0.5f; // Pill shape
         ImU32 bgColor     = IM_COL32(255, 255, 255, 255); // white background
 
-        draw_list->AddRectFilled(pos, {pos.x + size.x, pos.y + size.y}, bgColor, rounding);
-        bool pressed = ImGui::InvisibleButton("##HelioAction", size);
-        if (pressed) {
+        bool pressed = ImGui::InvisibleButton("##HelioAction", rect_size);
+        if (pressed && helio_button_active) {
             wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_HELIO));
         }
 
-        float padding  = 10.0f * m_scale;
-        float logoSize = (size.y - padding * 2) * m_scale;
+        if (!helio_button_active)
+        {
+            std::string tooltip_text = "";
+            if (!helio_filament_id.has_value())
+                tooltip_text += "Selected filament is not supported\n ";
+            if (!helio_printer_id.has_value())
+                tooltip_text += "Selected printer is not supported\n";
+
+			if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text(tooltip_text.c_str());
+                ImGui::EndTooltip();
+            }
+
+            bgColor = ImGui::GetColorU32(ImVec4(0.5f, 0.5f, 0.5f, 0.2f));
+        }
+        else if (ImGui::IsItemActive()) {
+            bgColor = ImGui::GetColorU32(ImVec4(0.0f, 0.59f, 0.53f, 0.78f));
+        }
+        else if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::Text("This will run Helio Processing");
+            ImGui::EndTooltip();
+            bgColor = ImGui::GetColorU32(ImVec4(0.0f, 0.59f, 0.53f, 1.00f));
+        }
+
+        draw_list->AddRectFilled(pos, {pos.x + rect_size.x, pos.y + rect_size.y}, bgColor, rounding);
+
 
         ImGui::SetCursorScreenPos({pos.x + padding, pos.y + padding});
 
-        GLuint      gl_tex_id    = 2; // From glGenTextures or your loader
-        ImTextureID imgui_tex_id = (ImTextureID) (intptr_t) gl_tex_id;
-        ImGui::Image(imgui_tex_id, ImVec2(logoSize, logoSize));
+        GLuint tex_id = (GLuint) (intptr_t) m_helio_logo_id;
+        GLboolean exists = glIsTexture(tex_id);
 
-        auto logo_end_pos = ImVec2(logoSize + 2 * padding, (size.y - ImGui::GetTextLineHeight()) * 0.5f);
+        if (exists)
+            draw_list->AddImage(m_helio_logo_id, ImVec2(pos.x+padding, pos.y+padding), // top-left
+                                                     ImVec2(pos.x+padding+logo_size.x, pos.y+padding+logo_size.y),            // bottom-right
+                                                     ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE);
+
+        ImVec2 logo_end_pos = ImVec2(logo_size.x + 2 * padding, padding);
         ImGui::SetCursorScreenPos({pos.x + logo_end_pos.x, pos.y + logo_end_pos.y});
-        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 255)); // Red
-        imgui.bold_text("Helio Action");
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 255)); 
+        imgui.large_text(button_text);
         ImGui::PopStyleColor();
 
-        ImGui::SetCursorScreenPos({pos.x, pos.y + size.y});
+        ImGui::SetCursorScreenPos({pos.x, pos.y + rect_size.y});
+        return rect_size;
     };
 
-    create_helio_button();
+    ImVec2  helio_button_size = create_helio_button();
     ImGui::Dummy({ window_padding, window_padding });
     ImGui::Dummy({ window_padding, window_padding });
 
@@ -4944,7 +4988,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     ImGui::Dummy({ window_padding, window_padding });
 
     if (m_fold) {
-        legend_height = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() + window_padding * 2.5;
+        legend_height = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() + window_padding * 4 + helio_button_size.y;
         imgui.end();
         ImGui::PopStyleColor(6);
         ImGui::PopStyleVar(2);

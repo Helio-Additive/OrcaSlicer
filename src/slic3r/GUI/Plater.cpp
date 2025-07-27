@@ -2248,8 +2248,9 @@ struct Plater::priv
     Plater *q;
     MainFrame *main_frame;
 
-    Helio::Materials::Result           helio_materials_result;
+    Helio::Materials::Result          helio_materials_result;
     Helio::Printers::Result           helio_printers_result;
+    bool                              helio_processing_disabled = false;
     MenuFactory menus;
 
     SelectMachineDialog* m_select_machine_dlg = nullptr;
@@ -2770,6 +2771,40 @@ private:
     void record_start_print_preset(std::string action);
 };
 
+std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection() {
+
+    const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
+    std::string filament_name = wxGetApp().preset_bundle->filaments.get_selected_preset_name();
+    std::string helio_filament_id = config.opt_string("helio_filament_id");
+
+	if (helio_filament_id.empty()) {
+	std::optional<std::string> helio_filament_id_optional = get_material_id_from_name(filament_name);
+        if (helio_filament_id_optional.has_value())
+            helio_filament_id = helio_filament_id_optional.value();
+        else
+            return nullopt;
+	}
+
+    return helio_filament_id;
+}
+
+std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selection() {
+
+    const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
+	std::string printer_name = wxGetApp().preset_bundle->printers.get_selected_preset_name();
+	std::string helio_printer_id = config.opt_string("helio_printer_id");
+
+    if (helio_printer_id.empty()) {
+	std::optional<std::string> helio_printer_id_optional = get_printer_id_from_name(printer_name);
+        if (helio_printer_id_optional.has_value())
+            helio_printer_id = helio_printer_id_optional.value();
+        else
+            return nullopt;
+	}
+
+    return helio_printer_id;
+}
+
 std::optional<std::string> Plater::get_material_id_from_name(std::string name)
 {
     return p->helio_materials_result.getMaterildIdByName(name);
@@ -2778,6 +2813,9 @@ std::optional<std::string> Plater::get_material_id_from_name(std::string name)
 std::optional<std::string> Plater::get_printer_id_from_name(std::string name) {
     return p->helio_printers_result.getPrinterIdByName(name);
 }
+
+void Plater::set_helio_processing_disabled(bool finished) { p->helio_processing_disabled = finished; }
+bool Plater::get_helio_processing_disabled() { return p->helio_processing_disabled; }
 
 void Plater::fetch_materials_and_printers_from_helio() {
         AppConfig *app_config = wxGetApp().app_config;
@@ -7188,6 +7226,7 @@ void Plater::priv::on_action_slice_plate(SimpleEvent&)
 {
     if (q != nullptr) {
         helio_background_process.reset();
+        helio_processing_disabled = false;
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":received slice plate event\n" ;
         //BBS update extruder params and speed table before slicing
         const Slic3r::DynamicPrintConfig& config = wxGetApp().preset_bundle->full_config();
@@ -7208,6 +7247,7 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
 {
     if (q != nullptr) {
         helio_background_process.reset();
+        helio_processing_disabled = true;
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":received slice project event\n" ;
         //BBS update extruder params and speed table before slicing
         const Slic3r::DynamicPrintConfig& config = wxGetApp().preset_bundle->full_config();
@@ -7233,6 +7273,7 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
 void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
     if (!(partplate_list.get_curr_plate()->empty())) {
+        helio_processing_disabled                      = true;
         auto                             app_config    = wxGetApp().app_config;
         std::string                      helio_api_key = app_config->get("helio_access_token");
         std::string                      helio_api_url = app_config->get("helio_api_url");
@@ -7241,16 +7282,8 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
         std::string printer_name = wxGetApp().preset_bundle->printers.get_selected_preset_name();
         std::string filament_name = wxGetApp().preset_bundle->filaments.get_selected_preset_name();
 
-        std::string helio_printer_id = config.opt_string("helio_printer_id");
-        std::string helio_filament_id = config.opt_string("helio_filament_id");
-
-        if (helio_printer_id.empty()) {
-            helio_printer_id = q->get_printer_id_from_name(printer_name).value_or("");
-        }
-
-        if (helio_filament_id.empty()) {
-            helio_filament_id = q->get_printer_id_from_name(filament_name).value_or("");
-        }
+        std::string helio_printer_id  = q->get_helio_printer_id_for_the_current_selection().value_or("");
+        std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection().value_or("");
 
         auto                             g_result      = background_process.get_current_gcode_result();
 
@@ -7265,6 +7298,7 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
 {
     if (a.is_successful) {
+        helio_processing_disabled = true;
         this->reset_gcode_toolpaths();
 
         int deleted = boost::nowide::remove(a.tmp_path.c_str());
@@ -7289,6 +7323,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
         this->update();
     }
     else {
+        helio_processing_disabled                      = false;
 		notification_manager->push_helio_error_notification(a.error_message);
     }
 }

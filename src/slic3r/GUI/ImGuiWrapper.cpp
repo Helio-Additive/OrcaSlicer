@@ -1850,6 +1850,18 @@ void ImGuiWrapper::bold_text(const std::string& str)
         text(str);
     }
 }
+
+void ImGuiWrapper::large_text(const std::string& str)
+{
+    if (large_font){
+        ImGui::PushFont(large_font);
+        text(str);
+        ImGui::PopFont();
+    } else {
+        text(str);
+    }
+}
+
 bool ImGuiWrapper::push_bold_font() {
     if (bold_font) {
         ImGui::PushFont(bold_font);
@@ -1861,6 +1873,26 @@ bool ImGuiWrapper::push_bold_font() {
 }
 bool ImGuiWrapper::pop_bold_font() {
     if (bold_font) {
+        ImGui::PopFont();
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+bool ImGuiWrapper::push_large_font() {
+    if (large_font) {
+        ImGui::PushFont(large_font);
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+bool ImGuiWrapper::pop_large_font() {
+    if (large_font) {
         ImGui::PopFont();
         return true;
     }
@@ -2694,6 +2726,12 @@ void ImGuiWrapper::init_font(bool compress)
     }
 
     bold_font        = io.Fonts->AddFontFromFileTTF((Slic3r::resources_dir() + "/fonts/" + font_name_bold).c_str(), m_font_size, &cfg, ranges.Data);
+    if (bold_font == nullptr) {
+        bold_font = io.Fonts->AddFontDefault();
+        if (bold_font == nullptr) { throw Slic3r::RuntimeError("ImGui: Could not load deafult font"); }
+    }
+
+    large_font        = io.Fonts->AddFontFromFileTTF((Slic3r::resources_dir() + "/fonts/" + font_name_regular).c_str(), m_font_size*1.5, &cfg, ranges.Data);
     if (bold_font == nullptr) {
         bold_font = io.Fonts->AddFontDefault();
         if (bold_font == nullptr) { throw Slic3r::RuntimeError("ImGui: Could not load deafult font"); }

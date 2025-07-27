@@ -183,6 +183,7 @@ public:
                      int &                         mouse_wheel,
                      bool                          is_localized);
     void bold_text(const std::string &str);
+    void large_text(const std::string &str);
     void title(const std::string& str);
     void title(const std::string &str, bool suppress_seperator);
 
@@ -190,6 +191,8 @@ public:
     const std::vector<std::string> get_fonts_names() const { return m_fonts_names; }
     bool push_bold_font();
     bool pop_bold_font();
+    bool push_large_font();
+    bool pop_large_font();
     bool push_font_by_name(std::string font_name);
     bool pop_font_by_name(std::string font_name);
     void load_fonts_texture();
@@ -377,6 +380,7 @@ private:
     LastSliderStatus m_last_slider_status;
     ImFont* default_font = nullptr;
     ImFont* bold_font = nullptr;
+    ImFont* large_font = nullptr;
     std::map<std::string, ImFont*> im_fonts_map;
     std::vector<std::string> m_fonts_names;
 };
