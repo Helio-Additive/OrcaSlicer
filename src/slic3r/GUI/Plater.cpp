@@ -2250,6 +2250,7 @@ struct Plater::priv
 
     Helio::Materials::Result          helio_materials_result;
     Helio::Printers::Result           helio_printers_result;
+    bool                              helio_elements_fetched;
     bool                              helio_processing_disabled = false;
     MenuFactory menus;
 
@@ -2841,7 +2842,10 @@ void Plater::fetch_materials_and_printers_from_helio() {
 
         p->helio_materials_result = all_materials;
         p->helio_printers_result = all_printers;
+        p->helio_elements_fetched = all_materials.isSuccess() && all_printers.isSuccess();
 }
+
+bool Plater::helio_elements_have_been_loaded() { return p->helio_elements_fetched; }
 
 const std::regex Plater::priv::pattern_bundle(".*[.](amf|amf[.]xml|zip[.]amf|3mf)", std::regex::icase);
 const std::regex Plater::priv::pattern_3mf(".*3mf", std::regex::icase);
@@ -9022,6 +9026,9 @@ Plater::Plater(wxWindow *parent, MainFrame *main_frame)
 	if (enable_helio_processing) {
 		fetch_materials_and_printers_from_helio();
 	}
+    else {
+        p->helio_elements_fetched = false;
+    }
 }
 
 bool Plater::Show(bool show)

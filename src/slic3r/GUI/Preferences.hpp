@@ -104,6 +104,7 @@ public:
     // ComboBoxSelectorList    m_comxbo_group;
 
     wxBoxSizer *create_item_title(wxString title, wxWindow *parent, wxString tooltip);
+    wxBoxSizer *create_item_hyperlink(wxWindow *parent, wxString title, wxString url);
     wxBoxSizer *create_item_combobox(wxString title, wxWindow *parent, wxString tooltip, std::string param, std::vector<wxString> vlist);
     wxBoxSizer *create_item_combobox(wxString title, wxWindow *parent, wxString tooltip, std::string param, std::vector<wxString> vlist, std::vector<std::string> config_name_index);
     wxBoxSizer *create_item_region_combobox(wxString title, wxWindow *parent, wxString tooltip, std::vector<wxString> vlist);

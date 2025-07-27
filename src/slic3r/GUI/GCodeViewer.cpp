@@ -4861,6 +4861,11 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
 
     auto create_helio_button = [&window_padding, &draw_list, &imgui,this]() {
         Plater* plater = wxGetApp().plater();
+        bool show_helio_button = wxGetApp().app_config->get_bool("enable_helio_processing") && plater->helio_elements_have_been_loaded();
+
+        if (!show_helio_button)
+            return ImVec2(0.0,0.0);
+
         std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection();
         std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
         bool                       helio_button_active = helio_filament_id.has_value() && helio_printer_id.has_value() && !plater->get_helio_processing_disabled();

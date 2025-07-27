@@ -67,6 +67,18 @@ wxBoxSizer *PreferencesDialog::create_item_title(wxString title, wxWindow *paren
     return m_sizer_title;
 }
 
+wxBoxSizer *PreferencesDialog::create_item_hyperlink(wxWindow *parent, wxString title, wxString url) {
+    wxBoxSizer *link_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    auto link_obj = new wxHyperlinkCtrl(parent, wxID_ANY, title, url, wxPoint(50, 50));
+    link_obj->SetForegroundColour(DESIGN_GRAY800_COLOR);
+    link_obj->SetFont(::Label::Head_13);
+
+    link_sizer->Add(link_obj, 0, wxLEFT, 23);
+
+    return link_sizer;
+}
+
 std::tuple<wxBoxSizer*, ComboBox*> PreferencesDialog::create_item_combobox_base(wxString title, wxWindow* parent, wxString tooltip, std::string param, std::vector<wxString> vlist, unsigned int current_index)
 {
     wxBoxSizer *m_sizer_combox = new wxBoxSizer(wxHORIZONTAL);
@@ -490,7 +502,7 @@ wxBoxSizer *PreferencesDialog::create_item_input(wxString title, wxString title2
 
     sizer_input->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
     sizer_input->Add(input_title, 0, wxALIGN_CENTER_VERTICAL | wxALL, 3);
-    sizer_input->Add(input, 0, wxALIGN_CENTER_VERTICAL, 0);
+    sizer_input->Add(input, 1, wxEXPAND | wxALIGN_CENTER_VERTICAL, 0); // <- Changed
     sizer_input->Add(0, 0, 0, wxEXPAND | wxLEFT, 3);
     sizer_input->Add(second_title, 0, wxALIGN_CENTER_VERTICAL | wxALL, 3);
 
@@ -988,7 +1000,11 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
     wxGetApp().UpdateDlgDarkUI(this);
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
         try {
-            NetworkAgent* agent = GUI::wxGetApp().getAgent();
+
+			if ( wxGetApp().app_config->get_bool("enable_helio_processing") && !wxGetApp().plater()->helio_elements_have_been_loaded()) 
+                wxGetApp().plater()->fetch_materials_and_printers_from_helio();
+
+			NetworkAgent* agent = GUI::wxGetApp().getAgent();
             if (agent) {
                 json j;
                 std::string value;
@@ -997,6 +1013,7 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
                 value = wxGetApp().app_config->get("auto_calculate_when_filament_change");
                 j["auto_calculate_when_filament_change"] = value;
                 agent->track_event("preferences_changed", j.dump());
+
             }
         } catch(...) {}
         event.Skip();
@@ -1238,9 +1255,12 @@ wxWindow* PreferencesDialog::create_general_page()
 
     //Helio options
     auto title_helio_options = create_item_title(_L("Helio Options"), page, _L("Helio Options"));
-    auto item_helio_enabled_check = create_item_checkbox(_L("Enable Helio Processing"), page, _L("Enable Helio Processing"), 50, "enable_helio_processing");
+    auto item_helio_enabled_check = create_item_checkbox(_L("Enable Helio Slice"), page, _L("This will enable all the Helio processing features"), 50, "enable_helio_processing");
     auto input_helio_api_url = create_item_input(_L("Helio API URL"), "", page, _L("This is the endpoint the slicer will communicate with"),
         "helio_api_url", wxFILTER_ASCII, [](wxString value) {});
+    auto item_helio_about_link = create_item_hyperlink(page, "About Helio", "https://wiki.helioadditive.com/en/FAQ");
+    auto item_helio_privacy_policy_link = create_item_hyperlink(page, "Privacy Policy", "https://wiki.helioadditive.com/en/FAQ");
+    auto item_helio_tos_link = create_item_hyperlink(page, "Terms of Service", "https://www.helioadditive.com/en-us/policies/terms");
 
     sizer_page->Add(title_general_settings, 0, wxEXPAND, 0);
     sizer_page->Add(item_language, 0, wxTOP, FromDIP(3));
@@ -1314,7 +1334,10 @@ wxWindow* PreferencesDialog::create_general_page()
 
     sizer_page->Add(title_helio_options, 0, wxTOP| wxEXPAND, FromDIP(20));
     sizer_page->Add(item_helio_enabled_check, 0, wxTOP, FromDIP(3));
-    sizer_page->Add(input_helio_api_url, 0, wxTOP, FromDIP(10));
+    sizer_page->Add(input_helio_api_url, 0, wxTOP | wxEXPAND, FromDIP(5));
+    sizer_page->Add(item_helio_about_link, 0, wxTOP, FromDIP(5));
+    item_helio_about_link->Add(item_helio_privacy_policy_link, 0, wxLEFT, FromDIP(20));
+    item_helio_about_link->Add(item_helio_tos_link, 0, wxLEFT, FromDIP(20));
 
     page->SetSizer(sizer_page);
     page->Layout();
