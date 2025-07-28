@@ -2250,7 +2250,7 @@ struct Plater::priv
 
     Helio::Materials::Result          helio_materials_result;
     Helio::Printers::Result           helio_printers_result;
-    bool                              helio_elements_fetched;
+    bool                              helio_elements_fetched = false;
     bool                              helio_processing_disabled = false;
     MenuFactory menus;
 
@@ -2839,6 +2839,12 @@ void Plater::fetch_materials_and_printers_from_helio() {
 
         Helio::Printers printers = Helio::Printers(helio_api_url, helio_auth_token);
         Helio::Printers::Result all_printers = printers.getAllPrinters();
+
+		if (!all_materials.isSuccess() || !all_printers.isSuccess()) {
+			MessageDialog msg_window(nullptr, _L("Despite best efforts Helio features could not be started") + "\n" + _L("Please make sure your internet connection is working and restart the app. If the problem persists please contact Helio support."),
+										 L("Helio Error"), wxICON_WARNING | wxOK );
+			msg_window.ShowModal();
+		}
 
         p->helio_materials_result = all_materials;
         p->helio_printers_result = all_printers;
@@ -9022,13 +9028,6 @@ Plater::Plater(wxWindow *parent, MainFrame *main_frame)
 
     auto app_config              = wxGetApp().app_config;
 	bool enable_helio_processing = app_config->get_bool("enable_helio_processing");
-
-	if (enable_helio_processing) {
-		fetch_materials_and_printers_from_helio();
-	}
-    else {
-        p->helio_elements_fetched = false;
-    }
 }
 
 bool Plater::Show(bool show)

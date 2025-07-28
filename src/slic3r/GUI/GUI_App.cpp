@@ -2552,6 +2552,7 @@ bool GUI_App::on_init_inner()
 
     BOOST_LOG_TRIVIAL(info) << "create the main window";
     mainframe = new MainFrame();
+    
     // hide settings tabs after first Layout
     if (is_editor()) {
         mainframe->select_tab(size_t(0));
@@ -2563,6 +2564,12 @@ bool GUI_App::on_init_inner()
 
 //     update_mode(); // !!! do that later
     SetTopWindow(mainframe);
+
+	bool enable_helio_processing = app_config->get_bool("enable_helio_processing");
+
+	if (enable_helio_processing) {
+		plater_->fetch_materials_and_printers_from_helio();
+	}
 
     plater_->init_notification_manager();
 
