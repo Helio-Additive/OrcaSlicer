@@ -38,7 +38,7 @@ on:
       do-not-sign-mac-app:
         description: "Disables signing for macOS DMG"
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -63,5 +63,5 @@ jobs:
       os: ${{ matrix.os }}
       arch: ${{ matrix.arch }}
       build-deps-only: ${{ inputs.build-deps-only || false }}
-      do-not-sign-mac-app: ${{ inputs.do-not-sign-mac-app || true }}
+      do-not-sign-mac-app: ${{ inputs.do-not-sign-mac-app || false }}
     secrets: inherit
