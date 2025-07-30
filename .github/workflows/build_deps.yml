@@ -19,6 +19,9 @@ on:
       build-deps-only:
         required: false
         type: boolean
+      do-not-sign-mac-app:
+        required: false
+        type: boolean
 
 jobs:
   build_deps:
@@ -28,12 +31,11 @@ jobs:
     env:
       date:
     steps:
-
       # Setup the environment
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          lfs: 'true'
+          lfs: "true"
 
       - name: load cached deps
         uses: actions/cache@v4
@@ -43,7 +45,7 @@ jobs:
 
       - uses: lukka/get-cmake@latest
         with:
-          cmakeVersion: "~3.28.0"  # use most recent 3.28.x version
+          cmakeVersion: "~3.28.0" # use most recent 3.28.x version
 
       - name: setup dev on Windows
         if: inputs.os == 'windows-latest'
@@ -59,29 +61,27 @@ jobs:
         run: echo "date=$(Get-Date -Format 'yyyyMMdd')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
         shell: pwsh
 
-
       # Build Dependencies
       - name: Build on Windows
         if: inputs.os == 'windows-latest'
         working-directory: ${{ github.workspace }}
         run: |
-            choco install strawberryperl
-            .\build_release_vs2022.bat deps
-            .\build_release_vs2022.bat pack
-            cd ${{ github.workspace }}/deps/build
+          choco install strawberryperl
+          .\build_release_vs2022.bat deps
+          .\build_release_vs2022.bat pack
+          cd ${{ github.workspace }}/deps/build
 
       - name: Build on Mac ${{ inputs.arch }}
         if: inputs.os == 'macos-14'
         working-directory: ${{ github.workspace }}
         run: |
-            brew install automake texinfo ninja libtool
-            brew list
-            mkdir -p ${{ github.workspace }}/deps/build_${{ inputs.arch }}
-            mkdir -p ${{ github.workspace }}/deps/build_${{ inputs.arch }}/OrcaSlicer_dep_${{ inputs.arch }}
-            brew uninstall --ignore-dependencies zstd
-            ./build_release_macos.sh -dpx -a ${{ inputs.arch }} -t 10.15 -1
-            brew install zstd
-
+          brew install automake texinfo ninja libtool
+          brew list
+          mkdir -p ${{ github.workspace }}/deps/build_${{ inputs.arch }}
+          mkdir -p ${{ github.workspace }}/deps/build_${{ inputs.arch }}/OrcaSlicer_dep_${{ inputs.arch }}
+          brew uninstall --ignore-dependencies zstd
+          ./build_release_macos.sh -dpx -a ${{ inputs.arch }} -t 10.15 -1
+          brew install zstd
 
       - name: Install Ubuntu Build Dependencies
         if: inputs.os == 'ubuntu-20.04' || inputs.os == 'ubuntu-24.04'
@@ -90,25 +90,24 @@ jobs:
           apt-cmd: ${{ (inputs.os == 'ubuntu-20.04' && 'apt-fast') || (inputs.os == 'ubuntu-24.04' && 'sudo apt-get') || '' }}
           webkit-ver: ${{ (inputs.os == 'ubuntu-20.04' && '4.0') || (inputs.os == 'ubuntu-24.04' && '4.1') || '' }}
         run: |
-            ${{ env.apt-cmd }} update
-            ${{ env.apt-cmd }} install -y cmake git g++ build-essential libgl1-mesa-dev m4 \
-            libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules pkgconf \
-            libglu1-mesa-dev libcairo2-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-${{ env.webkit-ver }}-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-good1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-bad libosmesa6-dev wget sudo autoconf curl libunwind-dev texinfo
+          ${{ env.apt-cmd }} update
+          ${{ env.apt-cmd }} install -y cmake git g++ build-essential libgl1-mesa-dev m4 \
+          libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules pkgconf \
+          libglu1-mesa-dev libcairo2-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-${{ env.webkit-ver }}-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-good1.0-dev libgstreamer-plugins-base1.0-dev \
+          gstreamer1.0-plugins-bad libosmesa6-dev wget sudo autoconf curl libunwind-dev texinfo
 
       - name: Build on Ubuntu
         if: inputs.os == 'ubuntu-20.04' || inputs.os == 'ubuntu-24.04'
         working-directory: ${{ github.workspace }}
         run: |
-            mkdir -p ${{ github.workspace }}/deps/build
-            mkdir -p ${{ github.workspace }}/deps/build/destdir
-            sudo ./BuildLinux.sh -ur
-            sudo chown $USER -R ./
-            ./BuildLinux.sh -dr
-            cd deps/build
-            tar -czvf OrcaSlicer_dep_ubuntu_$(date +"%Y%m%d").tar.gz destdir
-
+          mkdir -p ${{ github.workspace }}/deps/build
+          mkdir -p ${{ github.workspace }}/deps/build/destdir
+          sudo ./BuildLinux.sh -ur
+          sudo chown $USER -R ./
+          ./BuildLinux.sh -dr
+          cd deps/build
+          tar -czvf OrcaSlicer_dep_ubuntu_$(date +"%Y%m%d").tar.gz destdir
 
       # Upload Artifacts
       - name: Upload Mac ${{ inputs.arch }} artifacts
@@ -144,4 +143,5 @@ jobs:
       cache-path: ${{ inputs.cache-path }}
       os: ${{ inputs.os }}
       arch: ${{ inputs.arch }}
+      do-not-sign-mac-app: ${{ inputs.do-not-sign-mac-app }}
     secrets: inherit

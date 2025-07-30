@@ -13,6 +13,9 @@ on:
       arch:
         required: false
         type: string
+      do-not-sign-mac-app:
+        required: false
+        type: boolean
 
 jobs:
   build_orca:
@@ -102,7 +105,7 @@ jobs:
 
       # Thanks to RaySajuuk, it's working now
       - name: Sign app and notary
-        if: inputs.os == 'macos-14'
+        if: inputs.do-not-sign-mac-app != true && inputs.os == 'macos-14'
         working-directory: ${{ github.workspace }}
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
@@ -128,7 +131,7 @@ jobs:
           xcrun stapler staple OrcaSlicer_Mac_${{inputs.arch}}_${{ env.ver }}.dmg
 
       - name: Create DMG without notary
-        if: false && inputs.os == 'macos-14'
+        if: inputs.do-not-sign-mac-app && inputs.os == 'macos-14'
         working-directory: ${{ github.workspace }}
         run: |
           ln -s /Applications ${{ github.workspace }}/build_${{inputs.arch}}/OrcaSlicer/Applications
