@@ -2629,6 +2629,7 @@ struct Plater::priv
     void on_action_open_project(SimpleEvent&);
     void on_action_slice_plate(SimpleEvent&);
     void on_action_slice_all(SimpleEvent&);
+    void on_action_show_helio_platform_temp_window(SimpleEvent&);
     void on_action_helio_processing(SimpleEvent&);
     void on_helio_processing_complete(HelioCompletionEvent&);
     void on_helio_processing_start(SimpleEvent&);
@@ -2841,7 +2842,10 @@ void Plater::fetch_materials_and_printers_from_helio() {
         Helio::Printers::Result all_printers = printers.getAllPrinters();
 
 		if (!all_materials.isSuccess() || !all_printers.isSuccess()) {
-			MessageDialog msg_window(nullptr, _L("Despite best efforts Helio features could not be started") + "\n" + _L("Please make sure your internet connection is working and restart the app. If the problem persists please contact Helio support."),
+            MessageDialog msg_window(nullptr,
+                                          _L("Despite best efforts Helio features could not be started") + "\n" +
+                                              _L("Please make sure your internet connection is working and restart the app. If the problem "
+                                                 "persists please contact Helio support."),
 										 L("Helio Error"), wxICON_WARNING | wxOK );
 			msg_window.ShowModal();
 		}
@@ -3229,6 +3233,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         q->Bind(EVT_GLVIEWTOOLBAR_PREVIEW, [q](SimpleEvent&) { q->select_view_3D("Preview", false); });
         q->Bind(EVT_GLTOOLBAR_SLICE_PLATE, &priv::on_action_slice_plate, this);
         q->Bind(EVT_GLTOOLBAR_ACTION_HELIO, &priv::on_action_helio_processing, this);
+        q->Bind(EVT_GLTOOLBAR_ACTION_SHOW_HELIO_PLATFORM_TEMP_WINDOW, &priv::on_action_show_helio_platform_temp_window, this);
         q->Bind(EVT_GLTOOLBAR_SLICE_ALL, &priv::on_action_slice_all, this);
         q->Bind(EVT_GLTOOLBAR_PRINT_PLATE, &priv::on_action_print_plate, this);
         q->Bind(EVT_PRINT_FROM_SDCARD_VIEW, &priv::on_action_print_plate_from_sdcard, this);
@@ -7277,6 +7282,14 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
             q->select_view_3D("Preview");
         //BBS: wish to select all plates stats item
         preview->get_canvas3d()->_update_select_plate_toolbar_stats_item(true);
+    }
+}
+
+void Plater::priv::on_action_show_helio_platform_temp_window(SimpleEvent& a) {
+	PlatformTemperatureEntryDialog msg_window(nullptr);
+	auto action = msg_window.ShowModal();
+    if (action == wxID_OK) {
+        wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_HELIO));
     }
 }
 

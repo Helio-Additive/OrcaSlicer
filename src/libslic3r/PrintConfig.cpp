@@ -915,6 +915,12 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(0.));
 
+    def = this->add("helio_chamber_temperature", coFloat);
+    def->label = L("Helio Chamber temperature");
+    def->sidetext = L("C");
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
     def = this->add("gap_fill_target", coEnum);
     def->label = L("Apply gap fill");
     def->category = L("Strength");

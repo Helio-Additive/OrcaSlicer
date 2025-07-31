@@ -93,6 +93,23 @@ protected:
 	wxStaticBitmap *logo;
     MsgButtonsHash  m_buttons;
 	CheckBox* m_checkbox_dsa{nullptr};
+    DynamicPrintConfig *m_project_config;
+};
+
+class PlatformTemperatureEntryDialog : public MsgDialog
+{
+public:
+	// NOTE! Don't change a signature of contsrucor. It have to  be tha same as for wxMessageDialog
+	PlatformTemperatureEntryDialog(	wxWindow *parent );
+	PlatformTemperatureEntryDialog(PlatformTemperatureEntryDialog&&) = delete;
+	PlatformTemperatureEntryDialog(const PlatformTemperatureEntryDialog&) = delete;
+	PlatformTemperatureEntryDialog &operator=(PlatformTemperatureEntryDialog&&) = delete;
+	PlatformTemperatureEntryDialog &operator=(const PlatformTemperatureEntryDialog&) = delete;
+	virtual ~PlatformTemperatureEntryDialog() = default;
+
+private: 
+    wxBoxSizer* add_input_field(wxWindow *parent, std::string param, wxTextValidatorStyle validator_filter, std::function<void(wxString)> onchange);
+	void add_temperature_entry_box();
 };
 
 

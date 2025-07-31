@@ -1,5 +1,6 @@
 #include "MsgDialog.hpp"
 
+#include <wx/wx.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -33,6 +34,7 @@ MsgDialog::MsgDialog(wxWindow *parent, const wxString &title, const wxString &he
 	, content_sizer(new wxBoxSizer(wxVERTICAL))
 	, btn_sizer(new wxBoxSizer(wxHORIZONTAL))
 {
+    m_project_config = &wxGetApp().preset_bundle->project_config;
 	boldfont.SetWeight(wxFONTWEIGHT_BOLD);
     SetBackgroundColour(0xFFFFFF);
     SetFont(wxGetApp().normal_font());
@@ -321,9 +323,81 @@ static void add_msg_content(wxWindow* parent, wxBoxSizer* content_sizer, wxStrin
         // Code formatting will be preserved. This is useful for reporting errors from the placeholder parser.
         msg_escaped = std::string("<pre><code>") + msg_escaped + "</code></pre>";
     html->SetPage("<html><body bgcolor=\"" + bgr_clr_str + "\"><font color=\"" + text_clr_str + "\">" + wxString::FromUTF8(msg_escaped.data()) + "</font></body></html>");
-    content_sizer->Add(html, 1, wxEXPAND|wxRIGHT, 8);
+    content_sizer->Add(html, 1, wxEXPAND|wxRIGHT, 1);
     wxGetApp().UpdateDarkUIWin(html);
 }
+
+wxBoxSizer* PlatformTemperatureEntryDialog::add_input_field(wxWindow *parent, std::string param, wxTextValidatorStyle validator_filter, std::function<void(wxString)> onchange)
+{
+    auto       input      = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition,
+                                            wxSize(FromDIP(100), -1), wxTE_PROCESS_ENTER);
+    StateColor input_bg(std::pair<wxColour, int>(wxColour("#F0F0F1"), StateColor::Disabled), std::pair<wxColour, int>(*wxWHITE, StateColor::Enabled));
+    input->SetBackgroundColor(input_bg);
+    input->GetTextCtrl()->SetValue((boost::format("%.2f") % m_project_config->opt_float(param)).str());
+    wxTextValidator validator(validator_filter);
+    input->GetTextCtrl()->SetValidator(validator);
+
+    wxBoxSizer* input_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    auto second_title = new wxStaticText(parent, wxID_ANY, wxString::FromUTF8("\u00B0C"), wxDefaultPosition, wxSize(FromDIP(100), -1), 0);
+    second_title->SetForegroundColour(wxColour(38, 46, 48));
+    second_title->SetFont(::Label::Body_13);
+    second_title->Wrap(-1);
+
+    input_sizer->Add(input, 1, wxRIGHT, FromDIP(3));
+    input_sizer->Add(second_title, 1, wxALIGN_CENTER, FromDIP(0));
+
+    content_sizer->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
+    content_sizer->Add(input_sizer, 1, wxALL | wxALIGN_CENTER_VERTICAL, FromDIP(3));
+    content_sizer->Add(0, 0, 0, wxEXPAND | wxLEFT, 3);
+    content_sizer->Add(0, 0, 0, wxEXPAND | wxBOTTOM, 3);
+
+     input->GetTextCtrl()->Bind(wxEVT_TEXT_ENTER, [this, param, input, onchange](wxCommandEvent& e) {
+        auto value = input->GetTextCtrl()->GetValue();
+        double numeric_value = 2.0;
+        value.ToDouble(&numeric_value);
+
+        m_project_config->set_key_value(param, new ConfigOptionFloat{numeric_value});
+        onchange(value);
+        e.Skip();
+    });
+
+    input->GetTextCtrl()->Bind(wxEVT_KILL_FOCUS, [this, param, input, onchange](wxFocusEvent& e) {
+        auto value = input->GetTextCtrl()->GetValue();
+        double numeric_value = 2.0;
+        value.ToDouble(&numeric_value);
+
+        m_project_config->set_key_value(param, new ConfigOptionFloat{numeric_value});
+        onchange(value);
+        e.Skip();
+    });
+
+    add_msg_content(this, content_sizer, "Note: Please set above temperature according to the actual situation. The more accurate the data is, the more precise the analysis results will be.");
+
+    wxBoxSizer *link_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    auto link_obj = new wxHyperlinkCtrl(parent, wxID_ANY, "Find out more", "https://wiki.helioadditive.com/en/FAQ", wxPoint(50, 50));
+    link_obj->SetForegroundColour(wxColour(50, 58, 61));
+    link_obj->SetFont(::Label::Head_13);
+
+    link_sizer->Add(link_obj, 0, wxLEFT, FromDIP(3));
+
+    content_sizer->Add(link_sizer, 1, wxALIGN_CENTER_VERTICAL | wxALIGN_LEFT | wxTOP, FromDIP(5));
+
+    return content_sizer;
+}
+
+PlatformTemperatureEntryDialog::PlatformTemperatureEntryDialog(wxWindow* parent): 
+    MsgDialog(parent, "Helio Settings", wxEmptyString, wxOK | wxCANCEL) 
+{
+    add_msg_content(this, content_sizer, "Enter chamber temperature");
+    add_input_field(this, "helio_chamber_temperature", wxFILTER_NUMERIC, [](wxString value){});
+    finalize();
+    wxGetApp().UpdateDlgDarkUI(this);
+}
+
+void PlatformTemperatureEntryDialog::add_temperature_entry_box() 
+{  }
 
 // ErrorDialog
 

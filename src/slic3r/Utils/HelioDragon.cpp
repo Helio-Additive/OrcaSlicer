@@ -359,7 +359,7 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
         auto              print_config             = GUI::wxGetApp().preset_bundle->full_config();
         const std::string gcode_id                 = create_gcode_res.id;
         const float       layer_threshold          = print_config.opt_float("helio_layer_threshold");
-        const float       object_proximity_airtemp = print_config.opt_float("helio_object_proximity_airtemp");
+        const float       object_proximity_airtemp = print_config.opt_float("helio_chamber_temperature");
 
         std::string bed_temp_key = Slic3r::get_bed_temp_1st_layer_key((Slic3r::BedType)(print_config.option("curr_bed_type")->getInt()));
 

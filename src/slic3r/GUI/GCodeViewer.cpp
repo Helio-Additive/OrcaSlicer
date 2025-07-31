@@ -4888,7 +4888,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
 
         bool pressed = ImGui::InvisibleButton("##HelioAction", rect_size);
         if (pressed && helio_button_active) {
-            wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_HELIO));
+            wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_SHOW_HELIO_PLATFORM_TEMP_WINDOW));
         }
 
         if (!helio_button_active)
