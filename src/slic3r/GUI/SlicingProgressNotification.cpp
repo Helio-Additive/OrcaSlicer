@@ -74,6 +74,7 @@ bool NotificationManager::SlicingProgressNotification::set_progress_state(Notifi
         return true;
 	case Slic3r::GUI::NotificationManager::SlicingProgressNotification::SlicingProgressState::SP_BEGAN:
 		m_state = EState::Hidden;
+        m_put_on_top = true;
 		set_percentage(-1);
 		m_has_print_info = false;
 		set_export_possible(false);
@@ -248,7 +249,10 @@ void NotificationManager::SlicingProgressNotification::render(GLCanvas3D& canvas
 		ImGuiWindowFlags_NoScrollbar |
 		ImGuiWindowFlags_NoScrollWithMouse;
 
-	ImGui::SetNextWindowFocus();
+	if (m_put_on_top) {
+        ImGui::SetNextWindowFocus();
+        m_put_on_top = false;
+    }
 	if (imgui.begin(name, window_flags)) {
 		ImGuiWindow* parent_window = ImGui::GetCurrentWindow();
 

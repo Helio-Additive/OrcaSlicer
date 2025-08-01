@@ -571,6 +571,8 @@ private:
 	    // Target for wxWidgets events sent by clicking on the hyperlink available at some notifications.
 		wxEvtHandler*    m_evt_handler;
 
+		bool m_put_on_top;
+
 		float m_scale = 1.0f;
 	};
 
