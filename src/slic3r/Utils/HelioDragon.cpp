@@ -392,7 +392,7 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                             trailing_dots += "....";
                         }
 
-                        status = Slic3r::PrintBase::SlicingStatus(35 + (80 - 35) * check_simulation_progress_res.progress,
+                        status = Slic3r::PrintBase::SlicingStatus(35 + (80 - 35) * check_simulation_progress_res.progress/100,
                                                                   "Helio: simulation working" + trailing_dots);
                         evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
                         wxQueueEvent(GUI::wxGetApp().plater(), evt);
