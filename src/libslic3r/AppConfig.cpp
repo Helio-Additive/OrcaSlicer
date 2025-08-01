@@ -355,7 +355,7 @@ void AppConfig::set_defaults()
     }
     
     if (get("helio_api_url").empty()) {
-        set("helio_api_url", "https://api.helioadditive.com/");
+        set("helio_api_url", "https://api.helioadditive.com");
     }
 
     if (get("enable_helio_processing").empty()) {
