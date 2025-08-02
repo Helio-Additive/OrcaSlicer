@@ -20736,3 +20736,147 @@ msgstr ""
 #~ "Zusammenführung der Äste und spart viel Material (Standard), während der "
 #~ "Hybridmodus bei großen überhängenden Flächen eine ähnliche Struktur wie "
 #~ "bei normalen Stützstrukturen erzeugt."
+
+#: resources/data/hints.ini: [hint:Single-Material Only]
+msgid ""
+"Single-Material Only\n"
+"Helio currently simulates one material and one nozzle per job. Multi-material or multi-extruder G-code adds long pauses that break thermal continuity, so results wouldn’t be meaningful."
+msgstr ""
+"Nur ein Material\n"
+"Helio simuliert derzeit nur ein Material und eine Düse pro Auftrag. G-Code mit mehreren Materialien oder Extrudern verursacht lange Pausen, die die thermische Kontinuität unterbrechen – daher wären die Ergebnisse nicht aussagekräftig."
+
+
+#: resources/data/hints.ini: [hint:One Plate per Job]
+msgid ""
+"One Plate per Job\n"
+"Upload G-code with a single build plate—multi-plate projects aren’t yet supported, so only the first plate would run."
+msgstr ""
+"Eine Bauplatte pro Auftrag\n"
+"Laden Sie ein G-Code mit nur einer Bauplatte hoch – Projekte mit mehreren Platten werden derzeit nicht unterstützt, daher wird nur die erste Platte simuliert."
+
+
+#: resources/data/hints.ini: [hint:What is the Thermal Quality Index?]
+msgid ""
+"What is the Thermal Quality Index?\n"
+"The Thermal Quality Index (scale –100 to +100) shows how hot or cold each region prints—green (≈ 0) is the “just right” zone for strong, warp-free parts. Keep most of the part green for best results."
+msgstr ""
+"Was ist der thermische Qualitätsindex?\n"
+"Der Thermische Qualitätsindex (Skala –100 bis +100) zeigt, wie heiß oder kalt jede Region gedruckt wird – grün (≈ 0) ist der optimale Bereich für starke, verzugsfreie Teile. Halten Sie den Großteil des Teils im grünen Bereich für beste Ergebnisse."
+
+
+#: resources/data/hints.ini: [hint:Voxel-Level Accuracy]
+msgid ""
+"Voxel-Level Accuracy\n"
+"We predict temperature in every voxel at every time-step, and for standard jobs the forecast is typically within ±5–10 °C. Pauses, custom firmware or odd cooling can widen that margin."
+msgstr ""
+"Genauigkeit auf Voxel-Ebene\n"
+"Wir prognostizieren die Temperatur in jedem Voxel zu jedem Zeitpunkt. Bei Standardaufträgen liegt die Genauigkeit typischerweise bei ±5–10 °C. Pausen, benutzerdefinierte Firmware oder ungewöhnliche Kühlung können diesen Bereich vergrößern."
+
+
+#: resources/data/hints.ini: [hint:Fan & Airflow Model]
+msgid ""
+"Fan & Airflow Model\n"
+"A simplified fan-and-room model shows how cooling settings change part temps without slow CFD maths—great for day-to-day tuning. Chamber vortices aren’t yet simulated so runs stay fast."
+msgstr ""
+"Modell für Lüfter und Luftstrom\n"
+"Ein vereinfachtes Modell für Lüfter und Raumluft zeigt, wie Kühl-Einstellungen die Bauteiltemperatur beeinflussen – ohne langsame CFD-Berechnungen. Kammerwirbel werden derzeit nicht simuliert, um die Simulation schnell zu halten."
+
+
+#: resources/data/hints.ini: [hint:TQI Limits Explained]
+msgid ""
+"TQI Limits Explained\n"
+"-100 → too cold: tensile strength is ~50 % lower than parts printed at the ideal 0 (ASTM D638 dog-bone tests). +100 → too hot: layers stay molten and may sag or collapse. Keep regions near 0 for peak strength and accuracy."
+msgstr ""
+"TQI-Grenzen erklärt\n"
+"-100 → zu kalt: Die Zugfestigkeit ist ca. 50 % geringer als bei ideal gedruckten Teilen bei 0 (ASTM D638 Tests). +100 → zu heiß: Die Schichten bleiben geschmolzen und könnten absacken oder kollabieren. Halten Sie Bereiche nahe 0 für maximale Festigkeit und Genauigkeit."
+
+
+#: resources/data/hints.ini: [hint:What Drives Runtime?]
+msgid ""
+"What Drives Runtime?\n"
+"Extra layers, dense infill, lots of tiny arcs (small mesh elements) or very slow printing speeds all extend simulation time because the solver must step through more seconds. Multi-core CPUs or CUDA GPUs speed things up."
+msgstr ""
+"Was beeinflusst die Simulationsdauer?\n"
+"Zusätzliche Schichten, dichte Füllung, viele kleine Bögen (feine Mesh-Elemente) oder sehr langsame Druckgeschwindigkeiten verlängern die Simulationszeit, da der Solver mehr Zeitschritte durchlaufen muss. Multi-Core-CPUs oder CUDA-GPUs beschleunigen den Vorgang."
+
+
+#: resources/data/hints.ini: [hint:Nozzle Temp Range]
+msgid ""
+"Nozzle Temp Range\n"
+"Supported set-points are 190 – 320 °C; anything outside is clamped to keep physics realistic."
+msgstr ""
+"Temperaturbereich der Düse\n"
+"Unterstützte Sollwerte liegen zwischen 190 – 320 °C; Werte außerhalb dieses Bereichs werden begrenzt, um eine realistische Physik zu gewährleisten."
+
+
+#: resources/data/hints.ini: [hint:Debugging Flowchart]
+msgid ""
+"Debugging Flowchart\n"
+"Not sure why a result looks off? Follow our step-by-step debugging flowchart to trace settings, G-code and material issues in minutes."
+msgstr ""
+"Fehlerbehebungs-Flowchart\n"
+"Unsicher, warum ein Ergebnis merkwürdig aussieht? Folgen Sie unserem Schritt-für-Schritt-Diagramm zur Fehlersuche und prüfen Sie Einstellungen, G-Code und Materialprobleme in wenigen Minuten."
+
+
+#: resources/data/hints.ini: [hint:Why Cooling Varies]
+msgid ""
+"Why Cooling Varies\n"
+"Outer walls and bridges cool fastest while thick interiors stay warmer—geometry, airflow and tool-path all play a part, and the simulation visualises these differences."
+msgstr ""
+"Warum variiert die Kühlung?\n"
+"Außenwände und Brücken kühlen am schnellsten ab, während dicke Innenbereiche länger warm bleiben – Geometrie, Luftstrom und Werkzeugpfad beeinflussen dies, und die Simulation zeigt diese Unterschiede."
+
+
+#: resources/data/hints.ini: [hint:Extrusion Temp Model]
+msgid ""
+"Extrusion Temp Model\n"
+"Material properties shape the melt curve, but printer geometry decides how much heat the filament actually gains, so the model is material-specific and printer-calibrated."
+msgstr ""
+"Extrusionstemperaturmodell\n"
+"Materialeigenschaften bestimmen die Schmelzkurve, aber die Geometrie des Druckers entscheidet, wie viel Wärme das Filament tatsächlich aufnimmt. Das Modell ist daher materialspezifisch und druckerkalibriert."
+
+
+#: resources/data/hints.ini: [hint:Nozzle setting of 190 °C vs 320 °C?]
+msgid ""
+"Nozzle setting of 190 °C vs 320 °C?\n"
+"A 100 °C nozzle change only nudges the thermal index because extrusion temp, flow rate and post-deposition cooling dominate the part’s heat history."
+msgstr ""
+"Düseneinstellung: 190 °C vs 320 °C?\n"
+"Eine Änderung der Düseneinstellung um 100 °C beeinflusst den thermischen Index nur geringfügig, da Extrusionstemperatur, Flussrate und Abkühlung nach der Ablagerung den Wärmeverlauf des Bauteils dominieren."
+
+
+#: resources/data/hints.ini: [hint:Bed Temperature influence]
+msgid ""
+"Bed Temperature influence\n"
+"Only the first-layer bed temp feeds the model right now; later bed changes aren’t yet captured."
+msgstr ""
+"Einfluss der Bett-Temperatur\n"
+"Aktuell wird nur die Betttemperatur der ersten Schicht vom Modell berücksichtigt; spätere Änderungen werden noch nicht erfasst."
+
+
+#: resources/data/hints.ini: [hint:Actual Tool-Path]
+msgid ""
+"Actual Tool-Path\n"
+"Yes—your exact G-code path, speeds and fan commands are simulated."
+msgstr ""
+"Tatsächlicher Werkzeugpfad\n"
+"Ja – Ihr exakter G-Code-Pfad, die Geschwindigkeiten und Lüfterbefehle werden simuliert."
+
+
+#: resources/data/hints.ini: [hint:Mesh Resolution]
+msgid ""
+"Mesh Resolution\n"
+"The voxel grid is finer than the G-code line spacing, capturing layer-by-layer detail without wasting compute."
+msgstr ""
+"Mesh-Auflösung\n"
+"Das Voxel-Raster ist feiner als der G-Code-Zeilenabstand und erfasst Details Schicht für Schicht, ohne Rechenleistung zu verschwenden."
+
+
+#: resources/data/hints.ini: [hint:Shrinkage, Warping & Stress]
+msgid ""
+"Shrinkage, Warping & Stress\n"
+"By controlling the thermal index you can remove the heat-driven causes of warp and stress."
+msgstr ""
+"Schrumpfung, Verzug & Spannungen\n"
+"Durch Kontrolle des thermischen Index lassen sich wärmebedingte Ursachen für Verzug und Spannungen vermeiden."
+
