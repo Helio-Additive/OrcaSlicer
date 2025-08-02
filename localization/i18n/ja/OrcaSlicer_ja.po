@@ -17732,3 +17732,147 @@ msgstr ""
 
 #~ msgid "Orient the model"
 #~ msgstr "モデルの向きを調整"
+
+#: resources/data/hints.ini: [hint:Single-Material Only]
+msgid ""
+"Single-Material Only\n"
+"Helio currently simulates one material and one nozzle per job. Multi-material or multi-extruder G-code adds long pauses that break thermal continuity, so results wouldn’t be meaningful."
+msgstr ""
+"単一材料のみ対応\n"
+"Helio は現在、1つのジョブにつき1つの材料と1つのノズルのみをシミュレートします。マルチマテリアルやマルチエクストルーダーの G-code は長い停止を生じさせ、熱的連続性が失われるため、結果は意味を成しません。"
+
+
+#: resources/data/hints.ini: [hint:One Plate per Job]
+msgid ""
+"One Plate per Job\n"
+"Upload G-code with a single build plate—multi-plate projects aren’t yet supported, so only the first plate would run."
+msgstr ""
+"1ジョブにつき1枚のプレートのみ対応\n"
+"G-code は1つのビルドプレートのみでアップロードしてください。複数プレートのプロジェクトは現在未対応のため、最初のプレートだけが実行されます。"
+
+
+#: resources/data/hints.ini: [hint:What is the Thermal Quality Index?]
+msgid ""
+"What is the Thermal Quality Index?\n"
+"The Thermal Quality Index (scale –100 to +100) shows how hot or cold each region prints—green (≈ 0) is the “just right” zone for strong, warp-free parts. Keep most of the part green for best results."
+msgstr ""
+"熱品質指数（TQI）とは？\n"
+"熱品質指数（–100 ～ +100 のスケール）は、各領域がどれくらい熱いまたは冷たいかを示します。緑（≈ 0）は強度が高く反りのない理想的なゾーンです。最良の結果を得るには、できるだけ多くの領域を緑に保ってください。"
+
+
+#: resources/data/hints.ini: [hint:Voxel-Level Accuracy]
+msgid ""
+"Voxel-Level Accuracy\n"
+"We predict temperature in every voxel at every time-step, and for standard jobs the forecast is typically within ±5–10 °C. Pauses, custom firmware or odd cooling can widen that margin."
+msgstr ""
+"ボクセルレベルの精度\n"
+"私たちはすべての時間ステップで各ボクセルの温度を予測しています。標準的なジョブでは ±5〜10 ℃の範囲内で予測されますが、印刷の一時停止やカスタムファームウェア、異常な冷却などがあると誤差が拡大する可能性があります。"
+
+
+#: resources/data/hints.ini: [hint:Fan & Airflow Model]
+msgid ""
+"Fan & Airflow Model\n"
+"A simplified fan-and-room model shows how cooling settings change part temps without slow CFD maths—great for day-to-day tuning. Chamber vortices aren’t yet simulated so runs stay fast."
+msgstr ""
+"ファンと気流のモデル\n"
+"ファンと室内気流の簡易モデルにより、CFD のような計算を使わずに冷却設定が部品温度に与える影響を確認できます。チューニングに便利で、チャンバー内の渦流はまだシミュレートされていないため、高速に処理されます。"
+
+
+#: resources/data/hints.ini: [hint:TQI Limits Explained]
+msgid ""
+"TQI Limits Explained\n"
+"-100 → too cold: tensile strength is ~50 % lower than parts printed at the ideal 0 (ASTM D638 dog-bone tests). +100 → too hot: layers stay molten and may sag or collapse. Keep regions near 0 for peak strength and accuracy."
+msgstr ""
+"TQI の限界値について\n"
+"-100 → 冷えすぎ：TQI が理想値 0 のパーツに比べて引張強度が約 50% 低くなります（ASTM D638ドッグボーン試験による）。+100 → 熱すぎ：層が溶けたままとなり、垂れたり崩れたりする可能性があります。最大の強度と精度を得るには、0 付近を保ちましょう。"
+
+
+#: resources/data/hints.ini: [hint:What Drives Runtime?]
+msgid ""
+"What Drives Runtime?\n"
+"Extra layers, dense infill, lots of tiny arcs (small mesh elements) or very slow printing speeds all extend simulation time because the solver must step through more seconds. Multi-core CPUs or CUDA GPUs speed things up."
+msgstr ""
+"シミュレーション時間に影響する要因は？\n"
+"追加レイヤー、密なインフィル、小さなアーク（細かいメッシュ要素）が多い場合や、非常に低速な印刷は、解法ステップが増えるためシミュレーション時間が長くなります。マルチコアCPUやCUDA対応GPUを使えば高速化できます。"
+
+
+#: resources/data/hints.ini: [hint:Nozzle Temp Range]
+msgid ""
+"Nozzle Temp Range\n"
+"Supported set-points are 190 – 320 °C; anything outside is clamped to keep physics realistic."
+msgstr ""
+"ノズル温度範囲\n"
+"対応するノズル設定温度は 190～320 ℃です。それ以外の範囲は物理的に妥当な範囲に制限されます。"
+
+
+#: resources/data/hints.ini: [hint:Debugging Flowchart]
+msgid ""
+"Debugging Flowchart\n"
+"Not sure why a result looks off? Follow our step-by-step debugging flowchart to trace settings, G-code and material issues in minutes."
+msgstr ""
+"デバッグフローチャート\n"
+"結果がなぜおかしいのかわからない？設定・Gコード・材料の問題を数分で確認できるステップ式デバッグフローチャートをご覧ください。"
+
+
+#: resources/data/hints.ini: [hint:Why Cooling Varies]
+msgid ""
+"Why Cooling Varies\n"
+"Outer walls and bridges cool fastest while thick interiors stay warmer—geometry, airflow and tool-path all play a part, and the simulation visualises these differences."
+msgstr ""
+"なぜ冷却に差が出るのか？\n"
+"外壁やブリッジ部分は最も早く冷却され、厚い内部は温度が高く保たれます。形状、気流、ツールパスすべてが影響し、その違いはシミュレーションに可視化されます。"
+
+
+#: resources/data/hints.ini: [hint:Extrusion Temp Model]
+msgid ""
+"Extrusion Temp Model\n"
+"Material properties shape the melt curve, but printer geometry decides how much heat the filament actually gains, so the model is material-specific and printer-calibrated."
+msgstr ""
+"押出温度モデル\n"
+"材料特性が融解曲線を決定しますが、プリンターの構造が実際にフィラメントが受け取る熱量を決めます。そのため、このモデルは材料依存であり、プリンターに合わせて調整されています。"
+
+
+#: resources/data/hints.ini: [hint:Nozzle setting of 190 °C vs 320 °C?]
+msgid ""
+"Nozzle setting of 190 °C vs 320 °C?\n"
+"A 100 °C nozzle change only nudges the thermal index because extrusion temp, flow rate and post-deposition cooling dominate the part’s heat history."
+msgstr ""
+"ノズル設定 190 ℃ vs 320 ℃？\n"
+"ノズル温度を100℃変えても、熱指数への影響はわずかです。なぜなら、押出温度・流量・堆積後の冷却が部品の熱履歴に強く影響するためです。"
+
+
+#: resources/data/hints.ini: [hint:Bed Temperature influence]
+msgid ""
+"Bed Temperature influence\n"
+"Only the first-layer bed temp feeds the model right now; later bed changes aren’t yet captured."
+msgstr ""
+"ベッド温度の影響\n"
+"現在のモデルでは、最初のレイヤーのベッド温度のみが考慮されており、以降の温度変化はまだ反映されていません。"
+
+
+#: resources/data/hints.ini: [hint:Actual Tool-Path]
+msgid ""
+"Actual Tool-Path\n"
+"Yes—your exact G-code path, speeds and fan commands are simulated."
+msgstr ""
+"実際のツールパス\n"
+"はい、ご自身の正確な G-code パス、速度、ファン指令がすべてシミュレーションされます。"
+
+
+#: resources/data/hints.ini: [hint:Mesh Resolution]
+msgid ""
+"Mesh Resolution\n"
+"The voxel grid is finer than the G-code line spacing, capturing layer-by-layer detail without wasting compute."
+msgstr ""
+"メッシュ解像度\n"
+"ボクセルグリッドは G-code のライン間隔よりも細かく、各レイヤーのディテールを無駄な計算なしに捉えます。"
+
+
+#: resources/data/hints.ini: [hint:Shrinkage, Warping & Stress]
+msgid ""
+"Shrinkage, Warping & Stress\n"
+"By controlling the thermal index you can remove the heat-driven causes of warp and stress."
+msgstr ""
+"収縮・反り・応力\n"
+"熱指数をコントロールすることで、反りや応力の熱的な原因を取り除くことができます。"
+
