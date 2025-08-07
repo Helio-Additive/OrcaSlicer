@@ -4881,7 +4881,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         float  padding = 6.0f;
         ImVec2 logo_size = {134 / 131 * text_size.y, text_size.y};
 
-        ImVec2 rect_size = { (logo_size.x + 3*padding + text_size.x), (text_size.y + 2*padding) * m_scale};
+        ImVec2 rect_size = { (logo_size.x + 3*padding + text_size.x), (text_size.y + 2*padding)};
         
         float rounding = rect_size.y * 0.5f; // Pill shape
         ImU32 bgColor     = IM_COL32(255, 255, 255, 255); // white background
