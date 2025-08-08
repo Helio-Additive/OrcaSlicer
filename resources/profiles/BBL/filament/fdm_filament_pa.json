@@ -7,6 +7,12 @@
     "activate_air_filtration": [
         "1"
     ],
+    "supertack_plate_temp": [
+        "0"
+    ],
+    "supertack_plate_temp_initial_layer": [
+        "0"
+    ],
     "cool_plate_temp": [
         "0"
     ],
@@ -70,12 +76,6 @@
     "slow_down_min_speed": [
         "20"
     ],
-    "supertack_plate_temp": [
-        "0"
-    ],
-    "supertack_plate_temp_initial_layer": [
-        "0"
-    ],
     "temperature_vitrification": [
         "108"
     ],
@@ -84,11 +84,5 @@
     ],
     "textured_plate_temp_initial_layer": [
         "100"
-    ],
-    "filament_adhesiveness_category": [
-        "400"
-    ],
-    "filament_end_gcode": [
-        "; filament end gcode \n\n"
     ]
 }

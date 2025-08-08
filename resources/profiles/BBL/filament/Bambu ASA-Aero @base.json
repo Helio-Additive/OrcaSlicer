@@ -31,7 +31,7 @@
         "1.5"
     ],
     "filament_type": [
-        "ASA-AERO"
+        "ASA-Aero"
     ],
     "filament_vendor": [
         "Bambu Lab"
@@ -59,8 +59,5 @@
     ],
     "filament_scarf_seam_type": [
         "none"
-    ],
-    "impact_strength_z": [
-        "3.4"
     ]
 }

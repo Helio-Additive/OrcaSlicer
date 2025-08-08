@@ -21,20 +21,11 @@
     "filament_density": [
         "1.26"
     ],
-    "filament_deretraction_speed": [
-        "10"
-    ],
     "filament_flow_ratio": [
         "0.97"
     ],
     "filament_max_volumetric_speed": [
         "18"
-    ],
-    "filament_retraction_length": [
-        "2"
-    ],
-    "filament_retraction_speed": [
-        "10"
     ],
     "filament_type": [
         "TPU-AMS"
@@ -59,6 +50,5 @@
     ],
     "slow_down_layer_time": [
         "10"
-    ],
-    "impact_strength_z":["9.6"]
+    ]
 }
