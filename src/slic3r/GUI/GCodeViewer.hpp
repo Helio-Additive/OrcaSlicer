@@ -700,6 +700,7 @@ public:
         public:
             const SequentialView& m_sequential_view;
 
+            float m_scale = 1.0f;
             GCodeWindow(const SequentialView& outer_view): m_sequential_view(outer_view) {}
             ~GCodeWindow() { stop_mapping_file(); }
             void load_gcode(const std::string& filename, const std::vector<size_t> &lines_ends);
