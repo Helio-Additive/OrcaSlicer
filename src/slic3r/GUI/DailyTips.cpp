@@ -164,12 +164,10 @@ void DailyTipsDataRenderer::render_text(const ImVec2& start_pos, const ImVec2& s
     ImGui::SetCursorPos(start_pos);
     imgui.text(title_line);
     
-    bool is_zh = false;
-    for (int i = 0; i < content_lines.size() - 1; i += 2) {
-        if ((content_lines[i] & 0x80) && (content_lines[i + 1] & 0x80))
-            is_zh = true;
-    }
-    if (!is_zh) {
+    auto language_code = wxGetApp().app_config->get_language_code();
+    bool is_zh_script = language_code == "zh-cn" || language_code == "zh" || language_code == "ko" || language_code == "ja" ;
+    
+    if (!is_zh_script) {
         // problem in Chinese with spaces
         ImGui::SetCursorPosX(start_pos.x);
         imgui.text_wrapped(content_lines, size.x);
