@@ -367,7 +367,7 @@ void AppConfig::set_defaults()
     }
 
     if (get("enable_helio_processing").empty()) {
-        set_bool("enable_helio_processing", true);
+        set_bool("enable_helio_processing", false);
     }
 
     // if (get("staff_pick_switch").empty()) {

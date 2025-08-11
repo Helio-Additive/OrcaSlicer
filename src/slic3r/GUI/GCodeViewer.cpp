@@ -32,6 +32,7 @@
 #include <GL/glew.h>
 #include <boost/log/trivial.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/nowide/cstdio.hpp>
 #include <boost/nowide/fstream.hpp>
@@ -1076,6 +1077,9 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
 
     m_gl_data_initialized = true;
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
+
+    //Load the helio logo from svg
+	IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 134*3, 131*3, m_helio_logo_id);
 }
 
 void GCodeViewer::on_change_color_mode(bool is_dark) {
@@ -4579,13 +4583,35 @@ void GCodeViewer::render_all_plates_stats(const std::vector<const GCodeProcessor
     return;
 }
 
+std::vector<std::string> GCodeViewer::get_helio_button_errors() {
+    std::vector<std::string>        errors;
+	Plater* plater = wxGetApp().plater();
+    const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
+
+    size_t extruder_count = config.option<ConfigOptionFloats>("filament_diameter")->values.size();
+    size_t model_count = wxGetApp().model().objects.size();
+	std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection();
+	std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
+
+	if (!helio_filament_id.has_value())
+        errors.push_back("Selected filament is not supported");
+
+	if (!helio_printer_id.has_value())
+        errors.push_back("Selected printer is not supported");
+
+	if (extruder_count > 1)
+        errors.push_back("Feature is not supported for multimaterial prints");
+
+	if (model_count > 1)
+        errors.push_back("Feature is not supported for multi object prints");
+
+    return errors;
+}
+
 void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canvas_height, int right_margin)
 {
     if (!m_legend_enabled)
         return;
-
-    if (m_helio_logo_id == nullptr)
-		IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 134*3, 131*3, m_helio_logo_id);
 
     const Size cnv_size = wxGetApp().plater()->get_current_canvas3D()->get_canvas_size();
 
@@ -4884,9 +4910,8 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         if (!show_helio_button)
             return ImVec2(0.0,0.0);
 
-        std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection();
-        std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
-        bool                       helio_button_active = helio_filament_id.has_value() && helio_printer_id.has_value() && !plater->get_helio_processing_disabled();
+        std::vector<std::string> helio_button_errors = get_helio_button_errors();
+        bool                helio_button_active = helio_button_errors.size() == 0;
 
         ImVec2 pos = ImVec2(ImGui::GetCursorScreenPos().x + window_padding * 3, ImGui::GetCursorScreenPos().y);
 
@@ -4911,11 +4936,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
 
         if (!helio_button_active)
         {
-            std::string tooltip_text = "";
-            if (!helio_filament_id.has_value())
-                tooltip_text += "Selected filament is not supported\n ";
-            if (!helio_printer_id.has_value())
-                tooltip_text += "Selected printer is not supported\n";
+            std::string tooltip_text = boost::algorithm::join(helio_button_errors, "\n");
 
 			if (ImGui::IsItemHovered()) {
                 ImGui::BeginTooltip();
