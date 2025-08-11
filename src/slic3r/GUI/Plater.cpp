@@ -2773,10 +2773,10 @@ private:
     void record_start_print_preset(std::string action);
 };
 
-std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection() {
+std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection(size_t extruder_id) {
 
     const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
-    std::string filament_name = wxGetApp().preset_bundle->filaments.get_selected_preset_name();
+    std::string filament_name = sidebar().combos_filament()[extruder_id]->GetValue().ToStdString();
     std::string helio_filament_id = config.opt_string("helio_filament_id");
 
 	if (helio_filament_id.empty()) {
@@ -7339,11 +7339,10 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
         std::string                      helio_api_url = app_config->get("helio_api_url");
         const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
 
-        std::string printer_name = wxGetApp().preset_bundle->printers.get_selected_preset_name();
-        std::string filament_name = wxGetApp().preset_bundle->filaments.get_selected_preset_name();
-
         std::string helio_printer_id  = q->get_helio_printer_id_for_the_current_selection().value_or("");
-        std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection().value_or("");
+
+        size_t extruder_id = get_current_canvas3D()->get_gcode_viewer().get_extruder_ids()[0];
+        std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection(extruder_id).value_or("");
 
         auto                             g_result      = background_process.get_current_gcode_result();
 

@@ -864,6 +864,7 @@ public:
     void update_shells_color_by_extruder(const DynamicPrintConfig* config);
     void set_shell_transparency(float alpha = 0.15f);
     std::vector<std::string> get_helio_button_errors();
+    const std::vector<unsigned char> get_extruder_ids();
 
     void reset();
     //BBS: always load shell at preview

@@ -4583,14 +4583,17 @@ void GCodeViewer::render_all_plates_stats(const std::vector<const GCodeProcessor
     return;
 }
 
+const std::vector<unsigned char> GCodeViewer::get_extruder_ids() { return m_extruder_ids; }
+
 std::vector<std::string> GCodeViewer::get_helio_button_errors() {
     std::vector<std::string>        errors;
 	Plater* plater = wxGetApp().plater();
-    const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
 
-    size_t extruder_count = config.option<ConfigOptionFloats>("filament_diameter")->values.size();
+    size_t extruder_count = get_extruder_ids().size();
+    size_t extruder_id    = get_extruder_ids()[0];
     size_t model_count = wxGetApp().model().objects.size();
-	std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection();
+
+	std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection(extruder_id);
 	std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
 
 	if (!helio_filament_id.has_value())
