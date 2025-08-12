@@ -515,13 +515,6 @@ void PrintConfigDef::init_common_params()
     def->sidetext = L("mm");
     def->set_default_value(new ConfigOptionFloat(20));
 
-    def = this->add("helio_object_proximity_airtemp", coFloat);
-    def->label = L("Initial air temperature");
-    def->tooltip = L("Refers to the ambient air temperature at a distance of 10 centimeters from the vertical surface of the printed object.");
-    def->mode = comSimple;
-    def->sidetext = L("°C");
-    def->set_default_value(new ConfigOptionFloat(30));
-
     def = this->add("printable_area", coPoints);
     def->label = L("Printable area");
     //BBS

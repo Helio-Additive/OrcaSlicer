@@ -2777,14 +2777,16 @@ std::optional<std::string> Plater::get_helio_material_id_for_the_current_selecti
 
     const Slic3r::DynamicPrintConfig config        = wxGetApp().preset_bundle->full_config();
     std::string filament_name = sidebar().combos_filament()[extruder_id]->GetValue().ToStdString();
+
+
     std::string helio_filament_id = config.opt_string("helio_filament_id");
 
 	if (helio_filament_id.empty()) {
-	std::optional<std::string> helio_filament_id_optional = get_material_id_from_name(filament_name);
-        if (helio_filament_id_optional.has_value())
-            helio_filament_id = helio_filament_id_optional.value();
-        else
-            return nullopt;
+		std::optional<std::string> helio_filament_id_optional = get_material_id_from_name(filament_name);
+			if (helio_filament_id_optional.has_value())
+				helio_filament_id = helio_filament_id_optional.value();
+			else
+				return nullopt;
 	}
 
     return helio_filament_id;
@@ -2807,9 +2809,13 @@ std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selectio
     return helio_printer_id;
 }
 
-std::optional<std::string> Plater::get_material_id_from_name(std::string name)
+std::optional<std::string> Plater::get_material_id_from_name(std::string filament_name)
 {
-    return p->helio_materials_result.getMaterildIdByName(name);
+	if (filament_name._Starts_with("* ")) {
+		filament_name.erase(0, 2);
+	}
+
+    return p->helio_materials_result.getMaterildIdByName(filament_name);
 }
 
 std::optional<std::string> Plater::get_printer_id_from_name(std::string name) {
