@@ -287,7 +287,7 @@ static t_config_option_keys full_print_config_diffs(const DynamicPrintConfig &cu
     for (const t_config_option_key &opt_key : new_full_config.keys()) {
         const ConfigOption *opt_old = current_full_config.option(opt_key);
         const ConfigOption *opt_new = new_full_config.option(opt_key);
-        if (opt_old == nullptr || *opt_new != *opt_old) {
+        if (opt_key != "helio_chamber_temperature" && (opt_old == nullptr || *opt_new != *opt_old)) {
             //BBS: add plate_index logic for wipe_tower_x/wipe_tower_y
             if (opt_old && (!opt_key.compare("wipe_tower_x") || !opt_key.compare("wipe_tower_y"))) {
                 const ConfigOptionFloats* option_new = dynamic_cast<const ConfigOptionFloats*>(opt_new);
@@ -1135,7 +1135,9 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     // Do not use the ApplyStatus as we will use the max function when updating apply_status.
     unsigned int apply_status = APPLY_STATUS_UNCHANGED;
     auto update_apply_status = [&apply_status](bool invalidated)
-        { apply_status = std::max<unsigned int>(apply_status, invalidated ? APPLY_STATUS_INVALIDATED : APPLY_STATUS_CHANGED); };
+        { 
+            apply_status = std::max<unsigned int>(apply_status, invalidated ? APPLY_STATUS_INVALIDATED : APPLY_STATUS_CHANGED); 
+        };
     if (! (print_diff.empty() && object_diff.empty() && region_diff.empty())) {
         update_apply_status(false);
         //BBS: add more logs
