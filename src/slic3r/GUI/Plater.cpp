@@ -11,6 +11,7 @@
 #include <regex>
 #include <future>
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/iterator/counting_iterator.hpp>
 #include <boost/optional.hpp>
 #include <boost/filesystem/path.hpp>
@@ -2811,7 +2812,7 @@ std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selectio
 
 std::optional<std::string> Plater::get_material_id_from_name(std::string filament_name)
 {
-	if (filament_name._Starts_with("* ")) {
+    if (boost::algorithm::starts_with(filament_name, "* ")) {
 		filament_name.erase(0, 2);
 	}
 
