@@ -915,6 +915,9 @@ public:
             reset_visible(EViewType::FeatureType);
         }
     }
+
+    void set_view_type_sel(int view_type_sel) { m_view_type_sel = view_type_sel; }
+
     void reset_visible(EViewType type) {
         if (type == EViewType::FeatureType) {
             for (size_t i = 0; i < m_roles.size(); ++i) {

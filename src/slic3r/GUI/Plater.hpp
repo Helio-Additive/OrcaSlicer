@@ -81,6 +81,7 @@ struct Camera;
 class GLToolbar;
 class PlaterPresetComboBox;
 class PartPlateList;
+class GCodeViewer;
 
 using t_optgroups = std::vector <std::shared_ptr<ConfigOptionsGroup>>;
 

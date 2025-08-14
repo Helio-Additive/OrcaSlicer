@@ -7386,6 +7386,8 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
         res2->lines_ends = helio_background_process.m_gcode_result->lines_ends;
         res2->moves                = helio_background_process.m_gcode_result->moves;
 
+        this->get_current_canvas3D()->get_gcode_viewer().set_view_type(GCodeViewer::EViewType::ThermalIndexMean);
+        this->get_current_canvas3D()->get_gcode_viewer().set_view_type_sel(12);
         this->update();
     }
     else {
