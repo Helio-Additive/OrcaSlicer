@@ -4591,10 +4591,18 @@ std::vector<std::string> GCodeViewer::get_helio_button_errors() {
 
     size_t extruder_count = get_extruder_ids().size();
     size_t extruder_id    = get_extruder_ids()[0];
-    size_t model_count = wxGetApp().model().objects.size();
+    size_t model_count    = plater->get_partplate_list().get_curr_plate()->get_objects_on_this_plate().size();
+    size_t plate_index    = plater->get_partplate_list().get_curr_plate_index();
 
 	std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection(extruder_id);
 	std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
+    bool                       helio_processing_disabled = plater->get_helio_processing_disabled();
+
+    if (plate_index > 0)
+        errors.push_back("Helio Procesing is only supported on the first plate");
+
+    if (helio_processing_disabled)
+        errors.push_back("Plate is already being processed or has been processed");
 
 	if (!helio_filament_id.has_value())
         errors.push_back("Selected filament is not supported");
