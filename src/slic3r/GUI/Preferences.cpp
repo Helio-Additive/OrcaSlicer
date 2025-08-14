@@ -360,9 +360,15 @@ wxBoxSizer *PreferencesDialog::create_item_region_combobox(wxString title, wxWin
             area = "US";
         else
             area = "Others";*/
+
         combobox->SetSelection(region_index);
         NetworkAgent* agent = wxGetApp().getAgent();
         AppConfig* config = GUI::wxGetApp().app_config;
+
+		config->set("helio_access_token", "");
+
+        wxGetApp().plater()->set_helio_elements_have_been_loaded(false);
+
         if (agent) {
             MessageDialog msg_wingow(this, _L("Changing the region will log out your account.\n") + "\n" + _L("Do you want to continue?"), L("Region selection"),
                                      wxICON_QUESTION | wxOK | wxCANCEL);
@@ -1040,6 +1046,13 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
         try {
 
             //This will refresh the sidebar and load helio materials and printers
+
+			if (wxGetApp().app_config->get("region") == "China") {
+				wxGetApp().app_config->set("helio_api_url", "https://api.helioam.cn");
+			} else {
+				wxGetApp().app_config->set("helio_api_url", "https://api.helioadditive.com");
+			}
+
             if (wxGetApp().app_config->get_bool("enable_helio_processing") && !wxGetApp().plater()->helio_elements_have_been_loaded()) {
                 wxGetApp().plater()->fetch_materials_and_printers_from_helio();
                 wxGetApp().sidebar().update_all_preset_comboboxes();
@@ -1299,8 +1312,6 @@ wxWindow* PreferencesDialog::create_general_page()
     //Helio options
     auto title_helio_options = create_item_title(_L("Helio Options"), page, _L("Helio Options"));
     auto item_helio_enabled_check = create_item_checkbox(_L("Enable Helio Slice"), page, _L("This will enable all the Helio processing features"), 50, "enable_helio_processing");
-    auto input_helio_api_url = create_item_input(_L("Helio API URL"), "", page, _L("This is the endpoint the slicer will communicate with"),
-        "helio_api_url", wxFILTER_ASCII, [](wxString value) {});
     auto item_helio_about_link = create_item_hyperlink(page, "About Helio", "https://wiki.helioadditive.com/en/FAQ");
     auto item_helio_privacy_policy_link = create_item_hyperlink(page, "Privacy Policy", "https://wiki.helioadditive.com/en/FAQ");
     auto item_helio_tos_link = create_item_hyperlink(page, "Terms of Service", "https://www.helioadditive.com/en-us/policies/terms");
@@ -1381,7 +1392,6 @@ wxWindow* PreferencesDialog::create_general_page()
 
     sizer_page->Add(title_helio_options, 0, wxTOP| wxEXPAND, FromDIP(20));
     sizer_page->Add(item_helio_enabled_check, 0, wxTOP, FromDIP(3));
-    sizer_page->Add(input_helio_api_url, 0, wxTOP | wxEXPAND, FromDIP(5));
     sizer_page->Add(item_helio_about_link, 0, wxTOP, FromDIP(5));
     item_helio_about_link->Add(item_helio_privacy_policy_link, 0, wxLEFT, FromDIP(20));
     item_helio_about_link->Add(item_helio_tos_link, 0, wxLEFT, FromDIP(20));

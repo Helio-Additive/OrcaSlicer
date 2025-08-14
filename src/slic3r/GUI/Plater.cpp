@@ -2863,6 +2863,7 @@ void Plater::fetch_materials_and_printers_from_helio() {
 }
 
 bool Plater::helio_elements_have_been_loaded() { return p->helio_elements_fetched; }
+void Plater::set_helio_elements_have_been_loaded(bool status) { p->helio_elements_fetched = status; }
 
 const std::regex Plater::priv::pattern_bundle(".*[.](amf|amf[.]xml|zip[.]amf|3mf)", std::regex::icase);
 const std::regex Plater::priv::pattern_3mf(".*3mf", std::regex::icase);

@@ -843,6 +843,7 @@ private:
 public:
     void fetch_materials_and_printers_from_helio();
     bool                       helio_elements_have_been_loaded();
+    void set_helio_elements_have_been_loaded(bool status);
     std::optional<std::string> get_helio_material_id_for_the_current_selection(size_t extruder_id);
     std::optional<std::string> get_helio_printer_id_for_the_current_selection();
     std::optional<std::string> get_material_id_from_name(std::string name);
