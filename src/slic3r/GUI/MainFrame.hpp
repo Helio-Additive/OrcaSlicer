@@ -393,6 +393,13 @@ public:
     SideButton* m_slice_option_btn{ nullptr };
     SideButton* m_print_btn{ nullptr };
     SideButton* m_print_option_btn{ nullptr };
+
+    wxWindowID  expand_program_id = wxNewId();
+    wxWindowID  expand_helio_id   = wxNewId();
+
+    wxStaticBitmap*     split_line_icon{nullptr};
+    ExpandButtonHolder* expand_program_holder{nullptr};
+
     mutable bool          m_slice_enable{ true };
     mutable bool          m_print_enable{ true };
     bool get_enable_slice_status();

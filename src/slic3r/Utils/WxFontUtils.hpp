@@ -40,6 +40,7 @@ public:
 
     static bool is_italic(const wxFont &font);
     static bool is_bold(const wxFont &font);
+    static void get_suitable_font_size(int max_height, wxDC& dc);
 
     /// <summary>
     /// Set italic into wx font

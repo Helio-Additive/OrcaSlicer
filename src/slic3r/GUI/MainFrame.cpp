@@ -1557,6 +1557,33 @@ wxBoxSizer* MainFrame::create_side_tools()
     int em = em_unit();
     wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
 
+	split_line_icon = new wxStaticBitmap(this, wxID_ANY, create_scaled_bitmap("topbar_line", this, 22), wxDefaultPosition,
+                                         wxSize(FromDIP(3), FromDIP(22)), 0);
+    expand_program_holder = new ExpandButtonHolder(this);
+    expand_program_holder->addExpandButton(expand_helio_id, "helio_icon");
+    expand_program_holder->addExpandButton(expand_program_id, "expand_program");
+    /* expand_program_holder->Bind(wxEXPAND_LEFT_DOWN, [=](const wxCommandEvent& e) {
+        if (e.GetInt() == expand_helio_id) {
+            BOOST_LOG_TRIVIAL(info) << "Helio button clicked";
+            Plater*        plater = wxGetApp().plater();
+            wxCommandEvent evt(EVT_HELIO_INPUT_DLG);
+            evt.SetEventObject(plater);
+            wxPostEvent(plater, evt);
+        }
+
+        if (e.GetInt() == expand_program_id) {
+            ExpandCenterDialog dlg;
+            dlg.ShowModal();
+        }
+    });*/
+
+     if (wxGetApp().app_config->get_bool("enable_helio_processing")) {
+        expand_program_holder->ShowExpandButton(expand_helio_id, true);
+    } else {
+        expand_program_holder->ShowExpandButton(expand_helio_id, false);
+    }
+
+
     m_slice_select = eSlicePlate;
     m_print_select = ePrintPlate;
 
@@ -1572,6 +1599,9 @@ wxBoxSizer* MainFrame::create_side_tools()
     m_print_option_btn->Enable();
     // sizer->Add(m_publish_btn, 0, wxLEFT | wxALIGN_CENTER_VERTICAL, FromDIP(1));
     // sizer->Add(FromDIP(15), 0, 0, 0, 0);
+
+    sizer->Add(expand_program_holder, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(4));
+    sizer->Add(split_line_icon, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(10));
     sizer->Add(m_slice_option_btn, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(2));
     sizer->Add(m_slice_btn       , 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(15));
     sizer->Add(m_print_option_btn, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(2));

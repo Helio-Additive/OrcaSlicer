@@ -348,3 +348,36 @@ std::unique_ptr<Emboss::FontFile> WxFontUtils::set_bold(wxFont &font, const Embo
     font.SetWeight(orig_weight);
     return nullptr;
 }
+
+void Slic3r::GUI::WxFontUtils::get_suitable_font_size(int max_height, wxDC& dc)
+{
+    wxFont font = dc.GetFont();
+    if (!font.IsOk())
+        return;
+
+    int font_size = font.GetPointSize();
+    int height    = dc.GetFontMetrics().height;
+    if (height < max_height) /*go smaller*/
+    {
+        while (height < max_height) {
+            font_size++;
+            font.SetPointSize(font_size);
+            dc.SetFont(font);
+            height = dc.GetFontMetrics().height;
+        }
+
+        if (height > max_height) {
+            font_size--;
+            font.SetPointSize(font_size);
+            dc.SetFont(font);
+        }
+    } else if (height > max_height) /*go bigger*/
+    {
+        while (height > max_height && font_size > 1) {
+            font_size--;
+            font.SetPointSize(font_size);
+            dc.SetFont(font);
+            height = dc.GetFontMetrics().height;
+        }
+    }
+}
