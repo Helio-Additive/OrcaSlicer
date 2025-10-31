@@ -335,6 +335,27 @@ public:
     void on_dpi_changed(const wxRect& suggested_rect) override;
 };
 
+class SendFailedConfirm : public DPIDialog
+{
+public:
+    SendFailedConfirm(wxWindow* parent = nullptr);
+    ~SendFailedConfirm() {};
+
+    // void on_ok(wxMouseEvent &evt);
+    void on_dpi_changed(const wxRect& suggested_rect) override;
+};
+
+class ExpandCenterDialog : public DPIDialog
+{
+public:
+    ExpandCenterDialog(wxWindow* parent = nullptr);
+    ~ExpandCenterDialog() {};
+
+    // void on_ok(wxMouseEvent &evt);
+    void on_dpi_changed(const wxRect& suggested_rect) override;
+    void on_open_expand(const wxMouseEvent& evt);
+    //void report_consent_unstall();
+};
 
 wxDECLARE_EVENT(EVT_CLOSE_IPADDRESS_DLG, wxCommandEvent);
 wxDECLARE_EVENT(EVT_CHECKBOX_CHANGE, wxCommandEvent);

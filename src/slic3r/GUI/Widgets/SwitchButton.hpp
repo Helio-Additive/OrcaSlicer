@@ -6,6 +6,9 @@
 
 #include <wx/tglbtn.h>
 
+wxDECLARE_EVENT(wxCUSTOMEVT_SWITCH_POS, wxCommandEvent);
+wxDECLARE_EVENT(wxEXPAND_LEFT_DOWN, wxCommandEvent);
+
 class SwitchButton : public wxBitmapToggleButton
 {
 public:

@@ -2118,5 +2118,198 @@ void InputIpAddressDialog::on_dpi_changed(const wxRect& suggested_rect)
 
 }
 
+ SendFailedConfirm::SendFailedConfirm(wxWindow* parent /*= nullptr*/)
+    : DPIDialog(static_cast<wxWindow*>(wxGetApp().mainframe),
+                wxID_ANY,
+                _L("sending failed"),
+                wxDefaultPosition,
+                wxDefaultSize,
+                wxCAPTION | wxCLOSE_BOX)
+{
+    SetMinSize(wxSize(FromDIP(560), -1));
+    SetMaxSize(wxSize(FromDIP(560), -1));
+
+    std::string icon_path = (boost::format("%1%/images/BambuStudioTitle.ico") % resources_dir()).str();
+    SetIcon(wxIcon(encode_path(icon_path.c_str()), wxBITMAP_TYPE_ICO));
+
+    SetBackgroundColour(*wxWHITE);
+    auto m_sizer_main = new wxBoxSizer(wxVERTICAL);
+    auto m_line_top   = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(400), 1));
+    m_line_top->SetBackgroundColour(wxColour(166, 169, 170));
+
+    auto tip = new Label(this,
+                         _L("Failed to send. Click Retry to attempt sending again. If retrying does not work, please check the reason."));
+    tip->Wrap(FromDIP(480));
+    tip->SetMinSize(wxSize(FromDIP(480), -1));
+    tip->SetMaxSize(wxSize(FromDIP(480), -1));
+
+    wxBoxSizer* button_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+    StateColor btn_bg_green(std::pair<wxColour, int>(wxColour(27, 136, 68), StateColor::Pressed),
+                            std::pair<wxColour, int>(wxColour(61, 203, 115), StateColor::Hovered),
+                            std::pair<wxColour, int>(AMS_CONTROL_BRAND_COLOUR, StateColor::Normal));
+
+    StateColor btn_bg_white(std::pair<wxColour, int>(wxColour(206, 206, 206), StateColor::Pressed),
+                            std::pair<wxColour, int>(wxColour(238, 238, 238), StateColor::Hovered),
+                            std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
+
+    auto m_button_retry = new Button(this, _L("Retry"));
+    m_button_retry->SetBackgroundColor(btn_bg_green);
+    m_button_retry->SetBorderColor(*wxWHITE);
+    m_button_retry->SetTextColor(wxColour("#FFFFFE"));
+    m_button_retry->SetFont(Label::Body_12);
+    m_button_retry->SetSize(wxSize(-1, FromDIP(24)));
+    m_button_retry->SetMinSize(wxSize(FromDIP(58), FromDIP(24)));
+    m_button_retry->SetCornerRadius(FromDIP(12));
+
+    m_button_retry->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) { EndModal(wxYES); });
+
+    auto m_button_input = new Button(this, _L("reconnect"));
+    m_button_input->SetBackgroundColor(btn_bg_white);
+    m_button_input->SetBorderColor(wxColour(38, 46, 48));
+    m_button_input->SetFont(Label::Body_12);
+    m_button_input->SetSize(wxSize(-1, FromDIP(24)));
+    m_button_input->SetMinSize(wxSize(FromDIP(58), FromDIP(24)));
+    m_button_input->SetCornerRadius(FromDIP(12));
+
+    m_button_input->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) { EndModal(wxAPPLY); });
+
+    button_sizer->Add(0, 0, 1, wxEXPAND, 5);
+    button_sizer->Add(m_button_retry, 0, wxALL, 5);
+    button_sizer->Add(m_button_input, 0, wxALL, 5);
+
+    m_sizer_main->Add(m_line_top, 0, wxEXPAND, 0);
+    m_sizer_main->Add(0, 0, 0, wxTOP, FromDIP(20));
+    m_sizer_main->Add(tip, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(25));
+    m_sizer_main->Add(0, 0, 0, wxTOP, FromDIP(25));
+    m_sizer_main->Add(button_sizer, 0, wxEXPAND | wxRIGHT, FromDIP(25));
+    m_sizer_main->Add(0, 0, 0, wxTOP, FromDIP(20));
+
+    SetSizer(m_sizer_main);
+    Layout();
+    Fit();
+
+    CentreOnParent();
+    wxGetApp().UpdateDlgDarkUI(this);
+}
+
+void SendFailedConfirm::on_dpi_changed(const wxRect& suggested_rect) {}
+
+ExpandCenterDialog::ExpandCenterDialog(wxWindow* parent /*= nullptr*/)
+    : DPIDialog(static_cast<wxWindow*>(wxGetApp().mainframe),
+                wxID_ANY,
+                _L("Third-party Extension"),
+                wxDefaultPosition,
+                wxDefaultSize,
+                wxCAPTION | wxCLOSE_BOX)
+{
+    //std::string icon_path = (boost::format("%1%/images/BambuStudioTitle.ico") % resources_dir()).str();
+    //SetIcon(wxIcon(encode_path(icon_path.c_str()), wxBITMAP_TYPE_ICO));
+
+    SetBackgroundColour(*wxWHITE);
+
+    wxBoxSizer* main_sizer = new wxBoxSizer(wxVERTICAL);
+
+    wxPanel* line = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 1), wxTAB_TRAVERSAL);
+    line->SetBackgroundColour(wxColour(166, 169, 170));
+
+    auto sm           = create_scaled_bitmap("expand_helio", nullptr, 144);
+    auto expand_image = new wxStaticBitmap(this, wxID_ANY, sm, wxDefaultPosition, wxSize(FromDIP(480), FromDIP(144)));
+    expand_image->SetMinSize(wxSize(FromDIP(450), FromDIP(144)));
+    expand_image->SetMaxSize(wxSize(FromDIP(450), FromDIP(144)));
+
+    auto expand_name = new Label(this, Label::Head_16, wxString("Helio Additive"));
+    expand_name->SetForegroundColour("#262E30");
+    wxFont bold_font = expand_name->GetFont();
+    bold_font.SetWeight(wxFONTWEIGHT_BOLD);
+    expand_name->SetFont(bold_font);
+
+    auto expand_description = new Label(this,
+                                        _L("Stronger parts, less warping, faster prints - powered by fast physics-based FEM simulation"));
+    expand_description->SetMinSize(wxSize(FromDIP(450), -1));
+    expand_description->SetMaxSize(wxSize(FromDIP(450), -1));
+    expand_description->Wrap(FromDIP(450));
+    expand_description->SetForegroundColour("#5C5C5C");
+
+    StateColor btn_bg_green = StateColor(std::pair<wxColour, int>(wxColour(61, 203, 115), StateColor::Hovered),
+                                         std::pair<wxColour, int>(wxColour(0, 174, 66), StateColor::Normal));
+    StateColor btn_bg_white(std::pair<wxColour, int>(wxColour(206, 206, 206), StateColor::Pressed),
+                            std::pair<wxColour, int>(wxColour(238, 238, 238), StateColor::Hovered),
+                            std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
+
+    Button* m_button_uninstall = new Button(this, _L("Uninstall the Helio Additive extension"));
+    m_button_uninstall->SetBackgroundColor(btn_bg_white);
+    m_button_uninstall->SetBorderColor(*wxWHITE);
+    m_button_uninstall->SetBorderColor(wxColour(38, 46, 48));
+    m_button_uninstall->SetTextColor(wxColour("#6B6B6B"));
+    m_button_uninstall->SetFont(Label::Head_13);
+    m_button_uninstall->SetSize(wxSize(-1, FromDIP(28)));
+    m_button_uninstall->SetMinSize(wxSize(-1, FromDIP(28)));
+    m_button_uninstall->SetCornerRadius(FromDIP(8));
+    m_button_uninstall->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+        wxGetApp().app_config->set_bool("enable_helio_processing", false);
+        if (wxGetApp().getAgent()) {
+            json j;
+            j["operate"] = "switch";
+            j["content"] = "disable";
+            wxGetApp().getAgent()->track_event("helio_state", j.dump());
+        }
+
+        /*hide helio on main windows*/
+        if (wxGetApp().mainframe->expand_program_holder) {
+            wxGetApp().mainframe->expand_program_holder->ShowExpandButton(wxGetApp().mainframe->expand_helio_id, false);
+            wxGetApp().mainframe->Layout();
+        }
+
+        EndModal(wxID_NO);
+    });
+
+    if (wxGetApp().app_config->get("enable_helio_processing") == "true") {
+        m_button_uninstall->Show();
+    } else {
+        m_button_uninstall->Hide();
+    }
+
+    wxBoxSizer* button_sizer    = new wxBoxSizer(wxHORIZONTAL);
+    Button*     m_button_launch = new Button(this, _L("Use Immediately"));
+    m_button_launch->SetBackgroundColor(btn_bg_green);
+    m_button_launch->SetBorderColor(*wxWHITE);
+    m_button_launch->SetTextColor(wxColour(255, 255, 254));
+    m_button_launch->SetFont(Label::Head_13);
+    m_button_launch->SetSize(wxSize(FromDIP(58), FromDIP(28)));
+    m_button_launch->SetMinSize(wxSize(FromDIP(58), FromDIP(29)));
+    m_button_launch->SetCornerRadius(FromDIP(12));
+    m_button_launch->Bind(wxEVT_LEFT_DOWN, &ExpandCenterDialog::on_open_expand, this);
+    button_sizer->Add(0, 0, 1, wxEXPAND, 0);
+    button_sizer->Add(m_button_launch, 0, wxRIGHT, FromDIP(40));
+
+    main_sizer->Add(line, 0, wxEXPAND, 0);
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(26));
+    main_sizer->Add(expand_image, 0, wxLEFT | wxRIGHT, FromDIP(40));
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(12));
+    main_sizer->Add(expand_name, 0, wxLEFT, FromDIP(40));
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(8));
+    main_sizer->Add(expand_description, 0, wxLEFT, FromDIP(40));
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(10));
+    main_sizer->Add(m_button_uninstall, 0, wxLEFT, FromDIP(40));
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(10));
+    main_sizer->Add(button_sizer, 0, wxEXPAND, 0);
+    main_sizer->Add(0, 0, 0, wxTOP, FromDIP(38));
+
+    wxGetApp().UpdateDlgDarkUI(this);
+
+    SetSizer(main_sizer);
+    Layout();
+    Fit();
+}
+
+void ExpandCenterDialog::on_dpi_changed(const wxRect& suggested_rect) {}
+
+void ExpandCenterDialog::on_open_expand(const wxMouseEvent& evt)
+{
+    EndModal(wxID_CLOSE);
+    /* HelioStatementDialog dlg;
+    auto                 res = dlg.ShowModal();*/
+}
 
  }} // namespace Slic3r::GUI

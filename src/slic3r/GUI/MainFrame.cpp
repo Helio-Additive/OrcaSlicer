@@ -1562,20 +1562,20 @@ wxBoxSizer* MainFrame::create_side_tools()
     expand_program_holder = new ExpandButtonHolder(this);
     expand_program_holder->addExpandButton(expand_helio_id, "helio_icon");
     expand_program_holder->addExpandButton(expand_program_id, "expand_program");
-    /* expand_program_holder->Bind(wxEXPAND_LEFT_DOWN, [=](const wxCommandEvent& e) {
-        if (e.GetInt() == expand_helio_id) {
+    expand_program_holder->Bind(wxEXPAND_LEFT_DOWN, [=](const wxCommandEvent& e) {
+        /* if (e.GetInt() == expand_helio_id) {
             BOOST_LOG_TRIVIAL(info) << "Helio button clicked";
             Plater*        plater = wxGetApp().plater();
             wxCommandEvent evt(EVT_HELIO_INPUT_DLG);
             evt.SetEventObject(plater);
             wxPostEvent(plater, evt);
-        }
+        }*/
 
         if (e.GetInt() == expand_program_id) {
             ExpandCenterDialog dlg;
             dlg.ShowModal();
         }
-    });*/
+    });
 
      if (wxGetApp().app_config->get_bool("enable_helio_processing")) {
         expand_program_holder->ShowExpandButton(expand_helio_id, true);
