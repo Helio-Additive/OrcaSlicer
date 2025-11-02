@@ -267,6 +267,67 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
     return res;
 }
 
+std::string HelioQuery::get_helio_pat()
+{
+    std::string helio_pat;
+    if (GUI::wxGetApp().app_config->get("region") == "China") {
+        helio_pat = GUI::wxGetApp().app_config->get("helio_pat_china");
+    } else {
+        helio_pat = GUI::wxGetApp().app_config->get("helio_pat_other");
+    }
+    return helio_pat;
+}
+
+void HelioQuery::set_helio_pat(std::string pat)
+{
+    if (GUI::wxGetApp().app_config->get("region") == "China") {
+        GUI::wxGetApp().app_config->set("helio_pat_china", pat);
+    } else {
+        GUI::wxGetApp().app_config->set("helio_pat_other", pat);
+    }
+}
+
+void HelioQuery::request_pat_token(std::function<void(std::string)> func)
+{
+    std::string url_copy = "";
+
+    if (GUI::wxGetApp().app_config->get("region") == "China") {
+        url_copy = "https://api.helioam.cn/rest/auth/anonymous_token/bambustudio";
+    } else {
+        url_copy = "https://api.helioadditive.com/rest/auth/anonymous_token/bambustudio";
+    }
+
+    auto http = Http::get(url_copy);
+    http.timeout_connect(20)
+        .timeout_max(100)
+        .on_complete([url_copy, func](std::string body, unsigned status) {
+            // success
+            if (status == 200) {
+                nlohmann::json parsed_obj = nlohmann::json::parse(body);
+                try {
+                    if (parsed_obj.contains("pat") && parsed_obj["pat"].is_string()) {
+                        func(parsed_obj["pat"].get<std::string>());
+                    } else {
+                        func("error");
+                    }
+
+                } catch (...) {}
+            } else if (status == 429) {
+                func("not_enough");
+            }
+        })
+        .on_error([func](std::string body, std::string error, unsigned status) {
+            if (status == 429) {
+                func("not_enough");
+            } else {
+                func("error");
+            }
+            // BOOST_LOG_TRIVIAL(info) << (boost::format("request pat token error: %1%, message: %2%") % error % body).str());
+        })
+        .perform();
+}
+
+
 void HelioBackgroundProcess::helio_thread_start(std::mutex&                                slicing_mutex,
                                                 std::condition_variable&                   slicing_condition,
                                                 BackgroundSlicingProcess::State&           slicing_state,

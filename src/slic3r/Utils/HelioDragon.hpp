@@ -77,6 +77,9 @@ public:
         std::string error;
     };
 
+    static std::string get_helio_pat();
+    static void        set_helio_pat(std::string pat);
+    static void        request_pat_token(std::function<void(std::string)> func);
     static PresignedURLResult create_presigned_url(const std::string helio_api_url, const std::string helio_api_key);
     static UploadFileResult   upload_file_to_presigned_url(const std::string file_path_string, const std::string upload_url);
     static CreateGCodeResult  create_gcode(const std::string key,

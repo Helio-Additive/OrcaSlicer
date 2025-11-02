@@ -34,6 +34,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
+#include "../Utils/HelioDragon.hpp"
 #include <wx/stdpaths.h>
 #include <wx/imagpng.h>
 #include <wx/display.h>
@@ -4085,6 +4086,12 @@ void GUI_App::handle_script_message(std::string msg)
         ;
     }
 }
+
+void GUI_App::request_helio_pat(std::function<void(std::string)> func) 
+{ 
+    Slic3r::HelioQuery::request_pat_token(func); 
+}
+
 
 void GUI_App::request_model_download(wxString url)
 {

@@ -34,6 +34,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/PopupWindow.hpp
     GUI/Widgets/Label.cpp
     GUI/Widgets/Label.hpp
+    GUI/Widgets/LinkLabel.cpp
+    GUI/Widgets/LinkLabel.hpp
     GUI/Widgets/Scrollbar.cpp
     GUI/Widgets/Scrollbar.hpp
     GUI/Widgets/ScrolledWindow.cpp
@@ -456,6 +458,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/AmsMappingPopup.cpp
     GUI/ReleaseNote.hpp
     GUI/ReleaseNote.cpp
+    GUI/HelioReleaseNote.hpp
+    GUI/HelioReleaseNote.cpp
     GUI/SingleChoiceDialog.hpp
     GUI/SingleChoiceDialog.cpp
     GUI/CaliHistoryDialog.hpp

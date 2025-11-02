@@ -1,5 +1,5 @@
 #include "ReleaseNote.hpp"
-#include "I18N.hpp"
+#include "./I18N.hpp"
 
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Thread.hpp"
@@ -7,6 +7,7 @@
 #include "GUI_App.hpp"
 #include "GUI_Preview.hpp"
 #include "MainFrame.hpp"
+#include "HelioReleaseNote.hpp"
 #include "format.hpp"
 #include "Widgets/ProgressDialog.hpp"
 #include "Widgets/RoundedRectangle.hpp"
@@ -2308,8 +2309,8 @@ void ExpandCenterDialog::on_dpi_changed(const wxRect& suggested_rect) {}
 void ExpandCenterDialog::on_open_expand(const wxMouseEvent& evt)
 {
     EndModal(wxID_CLOSE);
-    /* HelioStatementDialog dlg;
-    auto                 res = dlg.ShowModal();*/
+    HelioStatementDialog dlg;
+    auto                 res = dlg.ShowModal();
 }
 
  }} // namespace Slic3r::GUI
