@@ -505,6 +505,7 @@ public:
     static bool     catch_error(std::function<void()> cb, const std::string& err);
 
     static void     request_helio_pat(std::function<void(std::string)> func);
+    static void     request_helio_supported_data();
 
     void            persist_window_geometry(wxTopLevelWindow *window, bool default_maximized = false);
     void            update_ui_from_settings();

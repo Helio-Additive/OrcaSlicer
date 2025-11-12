@@ -1563,13 +1563,13 @@ wxBoxSizer* MainFrame::create_side_tools()
     expand_program_holder->addExpandButton(expand_helio_id, "helio_icon");
     expand_program_holder->addExpandButton(expand_program_id, "expand_program");
     expand_program_holder->Bind(wxEXPAND_LEFT_DOWN, [=](const wxCommandEvent& e) {
-        /* if (e.GetInt() == expand_helio_id) {
+        if (e.GetInt() == expand_helio_id) {
             BOOST_LOG_TRIVIAL(info) << "Helio button clicked";
             Plater*        plater = wxGetApp().plater();
             wxCommandEvent evt(EVT_HELIO_INPUT_DLG);
             evt.SetEventObject(plater);
             wxPostEvent(plater, evt);
-        }*/
+        }
 
         if (e.GetInt() == expand_program_id) {
             ExpandCenterDialog dlg;
@@ -2096,6 +2096,12 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
     m_slice_btn->Enable(enable_slice);
     m_slice_enable = enable_slice;
     m_print_enable = enable_print;
+
+	/*for healio*/
+    if (expand_program_holder) {
+        expand_program_holder->updateExpandButtonBitmap(expand_helio_id, m_print_enable ? "helio_icon" : "helio_icon_disable");
+        expand_program_holder->EnableExpandButton(expand_helio_id, m_print_enable);
+    }
 
     if (wxGetApp().mainframe)
         wxGetApp().plater()->update_title_dirty_status();

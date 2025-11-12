@@ -46,6 +46,13 @@ public:
         std::string error;
     };
 
+	struct SupportedData
+    {
+        std::string id;
+        std::string name;
+        std::string native_name;
+    };
+
     struct CreateGCodeResult
     {
         unsigned    status;
@@ -77,8 +84,11 @@ public:
         std::string error;
     };
 
+	static std::string get_helio_api_url();
     static std::string get_helio_pat();
     static void        set_helio_pat(std::string pat);
+    static void        request_support_machine(const std::string helio_api_url, const std::string helio_api_key, int page);
+    static void        request_support_material(const std::string helio_api_url, const std::string helio_api_key, int page);
     static void        request_pat_token(std::function<void(std::string)> func);
     static PresignedURLResult create_presigned_url(const std::string helio_api_url, const std::string helio_api_key);
     static UploadFileResult   upload_file_to_presigned_url(const std::string file_path_string, const std::string upload_url);
@@ -88,6 +98,19 @@ public:
                                            const std::string printer_id,
                                            const std::string filament_id,
 											bool is_single_shell);
+
+	static void request_all_support_machine(const std::string helio_api_url, const std::string helio_api_key)
+    {
+        global_supported_printers.clear();
+        request_support_machine(helio_api_url, helio_api_key, 1);
+    }
+
+    static void request_all_support_materials(const std::string helio_api_url, const std::string helio_api_key)
+    {
+        global_supported_materials.clear();
+        request_support_material(helio_api_url, helio_api_key, 1);
+    }
+
 
     static CreateSimulationResult create_simulation(const std::string helio_api_url,
                                                     const std::string helio_api_key,
@@ -111,6 +134,9 @@ public:
         // Combine with your desired prefix
         return "OrcaSlicer " + iso_datetime;
     }
+
+    static std::vector<SupportedData> global_supported_printers;
+    static std::vector<SupportedData> global_supported_materials;
 };
 
 class HelioBackgroundProcess

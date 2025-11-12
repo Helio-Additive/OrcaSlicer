@@ -500,7 +500,7 @@ void HelioStatementDialog::request_pat()
                     show_pat_option("dview");
 
                     /*request helio data*/
-                    //wxGetApp().request_helio_supported_data();
+                    wxGetApp().request_helio_supported_data();
                 }
             }
         });

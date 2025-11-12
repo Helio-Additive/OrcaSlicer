@@ -2652,7 +2652,9 @@ bool GUI_App::on_init_inner()
 	bool enable_helio_processing = app_config->get_bool("enable_helio_processing");
 
 	if (enable_helio_processing) {
-		plater_->fetch_materials_and_printers_from_helio();
+		if (!Slic3r::HelioQuery::get_helio_api_url().empty() && !Slic3r::HelioQuery::get_helio_pat().empty()) {
+			wxGetApp().request_helio_supported_data();
+		}
 	}
 
     plater_->init_notification_manager();
@@ -4092,6 +4094,17 @@ void GUI_App::request_helio_pat(std::function<void(std::string)> func)
     Slic3r::HelioQuery::request_pat_token(func); 
 }
 
+void GUI_App::request_helio_supported_data()
+{
+std:;
+    string      helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+    if (HelioQuery::global_supported_printers.size() <= 0 || HelioQuery::global_supported_materials.size() <= 0) {
+        Slic3r::HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
+        Slic3r::HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
+    }
+}
 
 void GUI_App::request_model_download(wxString url)
 {

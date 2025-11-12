@@ -1045,7 +1045,8 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
         try {
 
-            //This will refresh the sidebar and load helio materials and printers
+            //This will refresh the sidebar and load helio materials and printers 
+            // TODO remove this
 
 			if (wxGetApp().app_config->get("region") == "China") {
 				wxGetApp().app_config->set("helio_api_url", "https://api.helioam.cn");
@@ -1054,7 +1055,7 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
 			}
 
             if (wxGetApp().app_config->get_bool("enable_helio_processing") && !wxGetApp().plater()->helio_elements_have_been_loaded()) {
-                wxGetApp().plater()->fetch_materials_and_printers_from_helio();
+                wxGetApp().plater()->set_materials_and_printers_from_helio();
                 wxGetApp().sidebar().update_all_preset_comboboxes();
             }
 

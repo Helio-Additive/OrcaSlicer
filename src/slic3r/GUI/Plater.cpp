@@ -209,6 +209,7 @@ wxDEFINE_EVENT(EVT_ADD_CUSTOM_FILAMENT, ColorEvent);
 
 wxDEFINE_EVENT(EVT_HELIO_PROCESSING_COMPLETED, HelioCompletionEvent);
 wxDEFINE_EVENT(EVT_HELIO_PROCESSING_STARTED, SimpleEvent);
+wxDEFINE_EVENT(EVT_HELIO_INPUT_DLG, SimpleEvent);
 
 bool Plater::has_illegal_filename_characters(const wxString& wxs_name)
 {
@@ -2634,6 +2635,7 @@ struct Plater::priv
     void on_action_helio_processing(SimpleEvent&);
     void on_helio_processing_complete(HelioCompletionEvent&);
     void on_helio_processing_start(SimpleEvent&);
+    void on_helio_input_dlg(SimpleEvent&);
     void on_action_publish(wxCommandEvent &evt);
     void on_action_print_plate(SimpleEvent&);
     void on_action_print_all(SimpleEvent&);
@@ -2826,40 +2828,28 @@ std::optional<std::string> Plater::get_printer_id_from_name(std::string name) {
 void Plater::set_helio_processing_disabled(bool finished) { p->helio_processing_disabled = finished; }
 bool Plater::get_helio_processing_disabled() { return p->helio_processing_disabled; }
 
-void Plater::fetch_materials_and_printers_from_helio() {
-        AppConfig *app_config = wxGetApp().app_config;
+void Plater::set_materials_and_printers_from_helio() {
 
-        std::string helio_api_url  = app_config->get("helio_api_url");
-        std::string helio_auth_token  = app_config->get("helio_access_token");
-
-        Helio::Materials materials      = Helio::Materials(helio_api_url, helio_auth_token);
-        Helio::Materials::Result all_materials = materials.getAllMaterials();
-
-        if (!all_materials.isSuccess()) {
-            if (all_materials.getStatus() == 401) {
-                helio_auth_token = Helio::AnonymousToken::get_anonymous_token(helio_api_url).getToken();
-				app_config->set("helio_access_token", helio_auth_token);
-
-				materials      = Helio::Materials(helio_api_url, helio_auth_token);
-				all_materials = materials.getAllMaterials();
-            }
+		std::vector<HelioQuery::SupportedData> printers_supported_data = HelioQuery::global_supported_printers;
+		std::vector<Helio::Printer>                  printers           = {};
+        for (const HelioQuery::SupportedData& printer_data : printers_supported_data) {
+            auto printer = Helio::Printer(printer_data.id, printer_data.name, printer_data.native_name);
+            printers.emplace_back(printer);
         }
+        Helio::Printers::Result printers_result(200, true, "", printers);
 
-        Helio::Printers printers = Helio::Printers(helio_api_url, helio_auth_token);
-        Helio::Printers::Result all_printers = printers.getAllPrinters();
+		std::vector<HelioQuery::SupportedData> material_supported_data = HelioQuery::global_supported_materials;
+		std::vector<Helio::Material>                  materials           = {};
+        for (const HelioQuery::SupportedData& material_data : material_supported_data) {
+            auto printer = Helio::Material(material_data.id, material_data.name, material_data.native_name);
+            materials.emplace_back(printer);
+        }
+        Helio::Materials::Result materials_result(200, true, "", materials);
 
-		if (!all_materials.isSuccess() || !all_printers.isSuccess()) {
-            MessageDialog msg_window(nullptr,
-                                          _L("Despite best efforts Helio features could not be started") + "\n" +
-                                              _L("Please make sure your internet connection is working and restart the app. If the problem "
-                                                 "persists please contact Helio support."),
-										 L("Helio Error"), wxICON_WARNING | wxOK );
-			msg_window.ShowModal();
-		}
-
-        p->helio_materials_result = all_materials;
-        p->helio_printers_result = all_printers;
-        p->helio_elements_fetched = all_materials.isSuccess() && all_printers.isSuccess();
+        p->helio_materials_result = materials_result;
+        p->helio_printers_result = printers_result;
+        p->helio_elements_fetched = true;
+		wxGetApp().sidebar().update_all_preset_comboboxes();
 }
 
 bool Plater::helio_elements_have_been_loaded() { return p->helio_elements_fetched; }
@@ -3268,6 +3258,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
 
         q->Bind(EVT_HELIO_PROCESSING_COMPLETED, &priv::on_helio_processing_complete, this);
         q->Bind(EVT_HELIO_PROCESSING_STARTED, &priv::on_helio_processing_start, this);
+        q->Bind(EVT_HELIO_INPUT_DLG, &priv::on_helio_input_dlg, this);
     }
 
     // Drop target:
@@ -7404,6 +7395,50 @@ void Plater::priv::on_helio_processing_start(SimpleEvent& a)
     notification_manager->set_slicing_progress_began();
     notification_manager->update_slicing_notif_dailytips(true);
 }
+
+void Plater::priv::on_helio_input_dlg(SimpleEvent& a)
+{
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+     if (helio_api_key.empty()) {
+        /* auto dlg = MessageDialog(
+            nullptr, _L("No valid Helio-PAT detected. Helio simulation & optimization cannot proceed. \nPlease request a new Helio-PAT."),
+            _L("Execution Blocked"), wxYES_NO | wxICON_WARNING | wxCENTRE);
+        dlg.SetButtonLabel(wxID_YES, _L("Regenerate PAT"));
+        auto result = dlg.ShowModal();
+        if (result == wxID_YES) {
+            wxGetApp().request_helio_pat([this](std::string pat) {
+                wxTheApp->CallAfter([=]() {
+                    if (pat == "not_enough") {
+                        HelioPatNotEnoughDialog dlg;
+                        dlg.ShowModal();
+                    } else if (pat == "error") {
+                        MessageDialog dlg(nullptr, _L("Failed to obtain Helio PAT, Click Refresh to obtain it again."),
+                                          wxString("Helio Additive"), wxYES | wxICON_WARNING);
+                        dlg.ShowModal();
+                    } else {
+                        Slic3r::HelioQuery::set_helio_pat(pat);
+                        MessageDialog dlg(nullptr, _L("Successfully obtained PAT."), wxString("Helio Additive"), wxYES | wxICON_NONE);
+                        dlg.ShowModal();
+                    }
+                });
+            });
+        } else {
+            return;
+        }*/
+    } else {
+         if (HelioQuery::global_supported_printers.size() <= 0 || HelioQuery::global_supported_materials.size() <= 0) {
+            wxGetApp().request_helio_supported_data();
+
+            auto dlg = MessageDialog(nullptr, _L("The printer list and material list are being synchronized. Please try again later."),
+                                     _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
+        } else {
+            //on_helio_process();
+        }
+    }
+}
+
 
 void Plater::priv::on_action_publish(wxCommandEvent &event)
 {

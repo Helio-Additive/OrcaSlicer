@@ -17,6 +17,8 @@
 #include "cstdio"
 
 namespace Slic3r {
+std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_printers;
+std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_materials;
 
 HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::string helio_api_endpoint, const std::string helio_api_key)
 {
@@ -265,6 +267,164 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
         .perform_sync();
 
     return res;
+}
+
+void HelioQuery::request_support_machine(const std::string helio_api_url, const std::string helio_api_key, int page)
+{
+    std::string query_body = R"( {
+            "query": "query GetPrinters($page: Int) { printers(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Printer  { id name alternativeNames { bambustudio } } } } }",
+            "variables": {"page": %1%}
+		} )";
+
+    query_body = boost::str(boost::format(query_body) % page);
+
+    std::string url_copy  = helio_api_url;
+    std::string key_copy  = helio_api_key;
+    int         page_copy = page;
+
+    std::string response_headers;
+    auto        http = Http::post(url_copy);
+
+    http.header("Content-Type", "application/json")
+        .header("Authorization", "Bearer " + helio_api_key)
+        .header("X-Version-Type", "Official")
+        .header("X-BambuStudio-Version", GUI::VersionInfo::convert_full_version(SLIC3R_VERSION))
+        .set_post_body(query_body);
+
+    http.timeout_connect(20)
+        .timeout_max(100)
+        .on_complete([url_copy, key_copy, page_copy](std::string body, unsigned status) {
+            nlohmann::json                         parsed_obj = nlohmann::json::parse(body);
+            std::vector<HelioQuery::SupportedData> supported_printers;
+
+            try {
+                if (parsed_obj.contains("data") && parsed_obj["data"].contains("printers")) {
+                    auto materials = parsed_obj["data"]["printers"];
+                    if (materials.contains("objects") && materials["objects"].is_array()) {
+                        for (const auto& pobj : materials["objects"]) {
+                            HelioQuery::SupportedData sp;
+                            if (pobj.contains("id") && !pobj["id"].is_null()) {
+                                sp.id = pobj["id"].get<std::string>();
+                            }
+                            if (pobj.contains("name") && !pobj["id"].is_null()) {
+                                sp.name = pobj["name"].get<std::string>();
+                            }
+
+                            if (pobj.contains("alternativeNames") && pobj["alternativeNames"].is_object()) {
+                                auto alternativeNames = pobj["alternativeNames"];
+
+                                if (alternativeNames.contains("bambustudio") && !alternativeNames["bambustudio"].is_null()) {
+                                    sp.native_name = alternativeNames["bambustudio"].get<std::string>();
+                                }
+                            }
+
+                            supported_printers.push_back(sp);
+                        }
+                    }
+
+                    HelioQuery::global_supported_printers.insert(HelioQuery::global_supported_printers.end(), supported_printers.begin(),
+                                                                 supported_printers.end());
+
+                    if (materials.contains("pageInfo") && materials["pageInfo"].contains("hasNextPage") &&
+                        materials["pageInfo"]["hasNextPage"].get<bool>()) {
+                        HelioQuery::request_support_machine(url_copy, key_copy, page_copy + 1);
+                    } else {
+                        Slic3r::GUI::wxGetApp().plater_->set_materials_and_printers_from_helio();
+                    }
+                }
+            } catch (...) {}
+        })
+        .on_error([](std::string body, std::string error, unsigned status) {
+            // BOOST_LOG_TRIVIAL(info) << (boost::format("error: %1%, message: %2%") % error % body).str()
+        })
+        .perform();
+}
+
+void HelioQuery::request_support_material(const std::string helio_api_url, const std::string helio_api_key, int page)
+{
+    std::string query_body = R"( {
+			"query": "query GetMaterias($page: Int) { materials(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Material  { id name alternativeNames { bambustudio } } } } }",
+            "variables": {"page": %1%}
+		} )";
+
+    query_body = boost::str(boost::format(query_body) % page);
+
+    std::string url_copy  = helio_api_url;
+    std::string key_copy  = helio_api_key;
+    int         page_copy = page;
+
+    auto http = Http::post(url_copy);
+
+    http.header("Content-Type", "application/json")
+        .header("Authorization", "Bearer " + helio_api_key)
+        .header("X-Version-Type", "Official")
+        .header("X-BambuStudio-Version", GUI::VersionInfo::convert_full_version(SLIC3R_VERSION))
+        .set_post_body(query_body);
+
+    http.timeout_connect(20)
+        .timeout_max(100)
+        .on_complete([url_copy, key_copy, page_copy](std::string body, unsigned status) {
+            BOOST_LOG_TRIVIAL(info) << "request_support_material" << body;
+            nlohmann::json                         parsed_obj = nlohmann::json::parse(body);
+            std::vector<HelioQuery::SupportedData> supported_materials;
+
+            try {
+                if (parsed_obj.contains("data") && parsed_obj["data"].contains("materials")) {
+                    auto materials = parsed_obj["data"]["materials"];
+                    if (materials.contains("objects") && materials["objects"].is_array()) {
+                        for (const auto& pobj : materials["objects"]) {
+                            HelioQuery::SupportedData sp;
+                            if (pobj.contains("id") && !pobj["id"].is_null()) {
+                                sp.id = pobj["id"].get<std::string>();
+                            }
+                            if (pobj.contains("name") && !pobj["id"].is_null()) {
+                                sp.name = pobj["name"].get<std::string>();
+                            }
+                            if (pobj.contains("alternativeNames") && pobj["alternativeNames"].is_object()) {
+                                auto alternativeNames = pobj["alternativeNames"];
+
+                                // bambu materials
+                                if (alternativeNames.contains("bambustudio") && !alternativeNames["bambustudio"].is_null()) {
+                                    sp.native_name = alternativeNames["bambustudio"].get<std::string>();
+                                }
+                                // third party materials
+                                else {
+                                    if (pobj.contains("name") && !pobj["id"].is_null()) {
+                                        sp.native_name = pobj["name"].get<std::string>();
+                                    }
+                                }
+                            }
+                            supported_materials.push_back(sp);
+                        }
+                    }
+
+                    HelioQuery::global_supported_materials.insert(HelioQuery::global_supported_materials.end(), supported_materials.begin(),
+                                                                  supported_materials.end());
+
+                    if (materials.contains("pageInfo") && materials["pageInfo"].contains("hasNextPage") &&
+                        materials["pageInfo"]["hasNextPage"].get<bool>()) {
+                        HelioQuery::request_support_material(url_copy, key_copy, page_copy + 1);
+                    } else {
+                        Slic3r::GUI::wxGetApp().plater_->set_materials_and_printers_from_helio();
+                    }
+                }
+            } catch (...) {}
+        })
+        .on_error([](std::string body, std::string error, unsigned status) {
+            // BOOST_LOG_TRIVIAL(info) << (boost::format("error: %1%, message: %2%") % error % body).str()
+        })
+        .perform();
+}
+
+std::string HelioQuery::get_helio_api_url()
+{
+    std::string helio_api_url;
+    if (GUI::wxGetApp().app_config->get("region") == "China") {
+        helio_api_url = GUI::wxGetApp().app_config->get("helio_api_china");
+    } else {
+        helio_api_url = GUI::wxGetApp().app_config->get("helio_api_other");
+    }
+    return helio_api_url;
 }
 
 std::string HelioQuery::get_helio_pat()

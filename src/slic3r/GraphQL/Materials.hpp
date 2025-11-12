@@ -5,6 +5,7 @@
 #include "QueryResultBase.hpp"
 #include "QueryBase.hpp"
 #include <optional>
+#include "HelioDragon.hpp"
 
 namespace Helio {
 
