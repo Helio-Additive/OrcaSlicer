@@ -7359,35 +7359,65 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
 {
     if (a.is_successful) {
-        helio_processing_disabled = true;
         this->reset_gcode_toolpaths();
 
-        int deleted = boost::nowide::remove(a.tmp_path.c_str());
+        /*Keep the original gcode*/
+        // int deleted = boost::nowide::remove(a.tmp_path.c_str());
+        try {
+            fs::path    original_path      = a.tmp_path;
+            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
+            int         renamed            = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
 
-        if (deleted != 0) {
-            BOOST_LOG_TRIVIAL(error) << boost::format("Failed to delete file %1%") % a.tmp_path;
+            if (renamed != 0) {
+                BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
+            }
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
         }
 
         std::string copied;
-        copy_file(a.simulated_path, a.tmp_path, copied);
+        copy_file(a.path, a.tmp_path, copied);
+
+        /*time improvement */
+        float      time_origin_value;
+        float      time_optimized_value;
+        auto       aprint_stats = wxGetApp().plater()->get_partplate_list().get_current_fff_print().print_statistics();
+        PartPlate* plate        = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+        if (plate) {
+            if (plate->get_slice_result()) {
+                time_origin_value = plate->get_slice_result()->print_statistics.modes[0].time;
+                // time_origin = wxString::Format("%s", short_time(get_time_dhms(plate->get_slice_result()->print_statistics.modes[0].time)));
+            }
+        }
 
         BOOST_LOG_TRIVIAL(debug) << boost::format("Failed to delete file %1%") % copied;
 
+        helio_background_process.m_gcode_result->filename = a.tmp_path;
+
         GCodeProcessorResult* res1 = partplate_list.get_curr_plate()->get_gcode_result();
-        res1->lines_ends = helio_background_process.m_gcode_result->lines_ends;
-        res1->moves                = helio_background_process.m_gcode_result->moves;
-
+        *res1                      = *helio_background_process.m_gcode_result;
         GCodeProcessorResult* res2 = background_process.get_current_gcode_result();
-        res2->lines_ends = helio_background_process.m_gcode_result->lines_ends;
-        res2->moves                = helio_background_process.m_gcode_result->moves;
+        *res2                      = *helio_background_process.m_gcode_result;
 
-        this->get_current_canvas3D()->get_gcode_viewer().set_view_type(GCodeViewer::EViewType::ThermalIndexMean);
-        this->get_current_canvas3D()->get_gcode_viewer().set_view_type_sel(12);
         this->update();
-    }
-    else {
-        helio_processing_disabled                      = false;
-		notification_manager->push_helio_error_notification(a.error_message);
+
+        /*show rating*/
+        if (a.action == 1) {
+            auto       aprint_stats1 = wxGetApp().plater()->get_partplate_list().get_current_fff_print().print_statistics();
+            wxString   time1;
+            PartPlate* plate1 = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+            if (plate1) {
+                if (plate->get_slice_result()) {
+                    time_optimized_value = plate->get_slice_result()->print_statistics.modes[0].time;
+                    // time_optimized = wxString::Format("%s", short_time(get_time_dhms(plate->get_slice_result()->print_statistics.modes[0].time)));
+                }
+            }
+
+            //HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
+            //dlg.ShowModal();
+        }
+    } else {
+        notification_manager->push_helio_error_notification(a.error_message);
     }
 }
 
