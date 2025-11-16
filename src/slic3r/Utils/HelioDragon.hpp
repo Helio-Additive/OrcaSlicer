@@ -31,6 +31,27 @@ class AppConfig;
 class HelioQuery
 {
 public:
+    struct SimulationInput
+    {
+        float chamber_temp{-1};
+    };
+
+    struct OptimizationInput
+    {
+        bool               outer_wall{false};
+        float              chamber_temp{-1};
+        float              min_velocity{-1};
+        float              max_velocity{-1};
+        float              min_volumetric_speed{-1};
+        float              max_volumetric_speed{-1};
+        std::array<int, 2> layers_to_optimize = {-1, -1};
+
+        bool isDefault()
+        {
+            return (min_velocity == -1) && (max_velocity == -1) && (min_volumetric_speed == -1) && (max_volumetric_speed == -1);
+        }
+    };
+
     struct PresignedURLResult
     {
         std::string key;
@@ -137,6 +158,8 @@ public:
 
     static std::vector<SupportedData> global_supported_printers;
     static std::vector<SupportedData> global_supported_materials;
+    static std::string                last_simulation_trace_id;
+    static std::string                last_optimization_trace_id;
 };
 
 class HelioBackgroundProcess
@@ -164,10 +187,21 @@ public:
     std::string             printer_id;
     std::string             filament_id;
 
+	int action; // 0-simulation 1-optimization
+
+	HelioQuery::SimulationInput   simulation_input_data;
+    HelioQuery::OptimizationInput optimization_input_data;
+
     Slic3r::GCodeProcessorResult* m_gcode_result;
     Slic3r::GCodeProcessor        m_gcode_processor;
     Slic3r::GUI::Preview*         m_preview;
     std::function<void()>         m_update_function;
+
+    void set_action(int ac) { action = ac; }
+
+    void set_simulation_input_data(HelioQuery::SimulationInput data) { simulation_input_data = data; }
+
+    void set_optimization_input_data(HelioQuery::OptimizationInput data) { optimization_input_data = data; }
 
     void stop()
     {

@@ -321,6 +321,7 @@ public:
     // special for upport G and Support W
     std::string get_filament_type(std::string &display_filament_type);
     std::string get_printer_type(PresetBundle *preset_bundle); // get edited preset type
+    std::string get_printer_name(PresetBundle* preset_bundle);
     std::string get_current_printer_type(PresetBundle *preset_bundle); // get current preset type
 
     bool has_lidar(PresetBundle *preset_bundle);

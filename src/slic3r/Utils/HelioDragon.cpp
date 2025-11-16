@@ -20,6 +20,9 @@ namespace Slic3r {
 std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_printers;
 std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_materials;
 
+std::string HelioQuery::last_simulation_trace_id;
+std::string HelioQuery::last_optimization_trace_id;  
+
 HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::string helio_api_endpoint, const std::string helio_api_key)
 {
     HelioQuery::PresignedURLResult res;

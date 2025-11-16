@@ -77,6 +77,7 @@ enum class NotificationType
 	// thread thowing a SlicingError exception.
 	SlicingError,
 	//Gcode conflict generates slicing severe warning
+    HelioSlicingError,
     SlicingSeriousWarning,
 	// Slicing warnings, issued by the slicing process.
 	// Slicing warnings are registered for a particular Print milestone or a PrintObject and its milestone.

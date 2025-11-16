@@ -40,9 +40,11 @@ TextInput::TextInput(wxWindow *     parent,
                      const wxPoint &pos,
                      const wxSize & size,
                      long           style,
-					 wxString suffix_icon)
+					 wxString suffix_icon,
+					 wxString unit)
     : TextInput()
 {
+    m_unit = unit;
     Create(parent, text, label, icon, pos, size, style, suffix_icon);
 }
 
@@ -190,8 +192,11 @@ void TextInput::DoSetSize(int x, int y, int width, int height, int sizeFlags)
     if (align_right)
         textPos.x += labelSize.x;
     if (text_ctrl) {
+        wxClientDC dc(this);
+        wxSize     unitSize   = dc.GetTextExtent(m_unit);
+        int        unit_space = (m_unit.IsEmpty() ? 0 : unitSize.x + 5) + 10;
         wxSize textSize = text_ctrl->GetSize();
-        textSize.x = size.x - textPos.x - labelSize.x - 10;
+        textSize.x = size.x - textPos.x - labelSize.x - unit_space;
         text_ctrl->SetSize(textSize);
         text_ctrl->SetPosition({textPos.x, (size.y - textSize.y) / 2});
     }
@@ -257,6 +262,19 @@ void TextInput::render(wxDC& dc)
 			dc.DrawBitmap(suffix_icon.bmp(), pt);
 		}
 
+    }
+    if (!m_unit.IsEmpty() && text_ctrl) {
+        wxPoint ctrl_pos  = text_ctrl->GetPosition();
+        wxSize  ctrl_size = text_ctrl->GetSize();
+        wxSize  unit_size = dc.GetTextExtent(m_unit);
+
+        int    x         = ctrl_pos.x + ctrl_size.x + 4;
+        int    y         = ctrl_pos.y + (ctrl_size.y - unit_size.y) / 2;
+        wxFont unit_font = text_ctrl->GetFont();
+        unit_font.SetPointSize(unit_font.GetPointSize() - 1);
+        dc.SetFont(unit_font);
+        dc.SetTextForeground(wxColour(144, 144, 144));
+        dc.DrawText(m_unit, wxPoint(x, y));
     }
 }
 

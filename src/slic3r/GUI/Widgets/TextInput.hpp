@@ -81,6 +81,7 @@ class TextInput : public wxNavigationEnabled<StaticBox>
     StateColor     label_color;
     StateColor     text_color;
     wxTextCtrl * text_ctrl;
+    wxString       m_unit;
 
 	std::vector<std::shared_ptr<TextInputValChecker>> m_checkers;
 
@@ -97,7 +98,8 @@ public:
               const wxPoint &pos   = wxDefaultPosition,
               const wxSize & size  = wxDefaultSize,
               long           style = 0, 
-			  wxString suffix_icon = "");
+			  wxString suffix_icon = "", 
+			  wxString unit = "");
 
 public:
     void Create(wxWindow *     parent,

@@ -1190,6 +1190,20 @@ public:
         return "";
     }
 
+    template<typename T> static T get_value_from_config(const std::string& type_str, const std::string& item1, const std::string& item2)
+    {
+        try {
+            const auto& json_item1 = get_value_from_config<nlohmann::json>(type_str, item1);
+            if (json_item1.contains(item2)) {
+                return json_item1[item2].get<T>();
+            }
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " failed to get " << item1 << ", " << item2;
+        }
+
+        return T();
+    }
+
     static std::string parse_printer_type(std::string type_str);
     static std::string get_printer_display_name(std::string type_str);
     static std::string get_printer_thumbnail_img(std::string type_str);

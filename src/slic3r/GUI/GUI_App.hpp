@@ -504,6 +504,7 @@ public:
 
     static bool     catch_error(std::function<void()> cb, const std::string& err);
 
+	bool            is_helio_enable();
     static void     request_helio_pat(std::function<void(std::string)> func);
     static void     request_helio_supported_data();
 

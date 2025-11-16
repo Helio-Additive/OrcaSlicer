@@ -1,6 +1,7 @@
 #include "Plater.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r_version.h"
+#include "HelioReleaseNote.hpp"
 #include "../Utils/HelioDragon.hpp"
 
 #include <cstddef>
@@ -2636,6 +2637,8 @@ struct Plater::priv
     void on_helio_processing_complete(HelioCompletionEvent&);
     void on_helio_processing_start(SimpleEvent&);
     void on_helio_input_dlg(SimpleEvent&);
+    void on_helio_process();
+    int  update_helio_background_process(std::string& printer_id, std::string& material_id);
     void on_action_publish(wxCommandEvent &evt);
     void on_action_print_plate(SimpleEvent&);
     void on_action_print_all(SimpleEvent&);
@@ -7434,11 +7437,174 @@ void Plater::priv::on_helio_input_dlg(SimpleEvent& a)
                                      _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
             dlg.ShowModal();
         } else {
-            //on_helio_process();
+            on_helio_process();
         }
     }
 }
 
+void Plater::priv::on_helio_process()
+{
+    std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+    std::string printer_id;
+    std::string material_id;
+
+    if (update_helio_background_process(printer_id, material_id) > -1) {
+        HelioInputDialog dlg;
+        while (dlg.ShowModal() == wxID_OK) {
+            if (partplate_list.get_curr_plate()->empty())
+                return;
+            GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
+
+            //simulation
+            int action = dlg.get_action();
+            helio_background_process.set_action(action);
+
+            if (action == 0) {
+                bool                        valid = false;
+                HelioQuery::SimulationInput data  = dlg.get_simulation_input(valid);
+                if (!valid) {
+                    continue;
+                }
+
+                helio_background_process.set_simulation_input_data(data);
+                helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
+                BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio simulation process called";
+
+                if (wxGetApp().getAgent()) {
+                    json j;
+                    j["operate"] = "action";
+                    j["content"] = "simulation";
+                    wxGetApp().getAgent()->track_event("helio_state", j.dump());
+                }
+            }
+            //optimization
+            else if (action == 1) {
+                bool                          valid = false;
+                HelioQuery::OptimizationInput data  = dlg.get_optimization_input(valid);
+                if (!valid) {
+                    continue;
+                }
+
+                helio_background_process.set_optimization_input_data(data);
+                helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
+                BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio optimization process called";
+
+                if (wxGetApp().getAgent()) {
+                    json j;
+                    j["operate"] = "action";
+                    j["content"] = "optimization";
+                    wxGetApp().getAgent()->track_event("helio_state", j.dump());
+                }
+            }
+
+            break;
+        }
+    }
+}
+
+int Plater::priv::update_helio_background_process(std::string& printer_id, std::string& material_id)
+{
+    notification_manager->close_notification_of_type(NotificationType::HelioSlicingError);
+    PresetBundle*            preset_bundle     = wxGetApp().preset_bundle;
+    std::string              preset_name       = preset_bundle->printers.get_edited_preset().get_printer_name(preset_bundle);
+    std::vector<std::string> preset_name_array = wxGetApp().split_str(preset_name, "Bambu Lab ");
+    std::string              preset_pure_name  = preset_name_array.size() >= 2 ? preset_name_array[1] : "";
+
+    /*running helio task*/
+    if (helio_background_process.is_running()) {
+        GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    /*invalid printer preset*/
+    if (preset_pure_name.empty()) {
+        GUI::MessageDialog msgdialog(nullptr, _L("Invalid printer preset. Unable to slice with Helio."), "", wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    bool helio_support = false;
+    for (HelioQuery::SupportedData pdata : HelioQuery::global_supported_printers) {
+        if (!pdata.native_name.empty()) {
+            std::string native_name = pdata.native_name;
+            boost::algorithm::to_lower(native_name);
+            boost::algorithm::to_lower(preset_pure_name);
+            if (native_name.find(preset_pure_name) != std::string::npos) {
+                helio_support = true;
+                printer_id    = pdata.id;
+                break;
+            }
+        }
+    }
+
+    /*unsupported helio printers*/
+    if (!helio_support) {
+        GUI::MessageDialog msgdialog(nullptr, _L("The current printer preset cannot be sliced using Helio."), "", wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    /*check total number of materials*/
+    auto extruders = q->get_partplate_list().get_curr_plate()->get_extruders();
+    if (extruders.size() <= 0) {
+        return -1;
+    }
+
+    /*Check the materials supported by helio*/
+    auto preset_filaments = q->get_current_filaments_preset_names();
+    if (extruders.front() > preset_filaments.size()) {
+        return -1;
+    }
+
+    if (extruders.size() > 1) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": The number of consumables used is > 1";
+        GUI::MessageDialog msgdialog(nullptr, _L("Helio does not support using a number of materials greater than 1."), "",
+                                     wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    std::string used_filament         = preset_filaments[extruders.front() - 1];
+    bool        is_supported_by_helio = false;
+
+    for (HelioQuery::SupportedData pdata : HelioQuery::global_supported_materials) {
+        if (!pdata.native_name.empty()) {
+            std::string native_name = pdata.native_name;
+            boost::algorithm::to_lower(native_name);
+            boost::algorithm::to_lower(used_filament);
+            if (used_filament.find(native_name) != std::string::npos) {
+                is_supported_by_helio = true;
+                material_id           = pdata.id;
+                break;
+            }
+        }
+    }
+
+    if (!is_supported_by_helio) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format("Helio does not support materials %1%") % used_filament;
+        GUI::MessageDialog msgdialog(nullptr, wxString::Format(_L("Helio does not support materials %s"), used_filament), "",
+                                     wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    /*print sequence = by object*/
+    if (!wxGetApp().is_helio_enable()) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "print sequence = by object";
+        GUI::MessageDialog msgdialog(nullptr, _L("Helio functions do not support the print sequence of \"ByObject\"."), "",
+                                     wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    notification_manager->close_notification_of_type(NotificationType::HelioSlicingError);
+    return 0;
+}
 
 void Plater::priv::on_action_publish(wxCommandEvent &event)
 {
@@ -13639,6 +13805,7 @@ bool Plater::is_single_full_object_selection() const
 }
 
 GLCanvas3D* Plater::canvas3D()
+
 {
     // BBS modify view3D->get_canvas3d() to current canvas
     return p->get_current_canvas3D();
@@ -14699,6 +14866,37 @@ void Plater::show_object_info()
 bool Plater::show_publish_dialog(bool show)
 {
     return p->show_publish_dlg(show);
+}
+
+std::vector<std::string> Plater::get_current_filaments_preset_names()
+{
+    std::vector<std::string> filaments_names;
+    PresetBundle*            preset_bundle = wxGetApp().preset_bundle;
+    for (auto filament_name : preset_bundle->filament_presets) {
+        for (int f_index = 0; f_index < preset_bundle->filaments.size(); f_index++) {
+            PresetCollection* filament_presets = &wxGetApp().preset_bundle->filaments;
+            Preset*           preset           = &filament_presets->preset(f_index);
+            int               size             = preset_bundle->filaments.size();
+            if (preset && filament_name.compare(preset->name) == 0) {
+                // std::string display_filament_type;
+                // std::string filament_type = preset->config.get_filament_type(display_filament_type);
+                // std::string m_filament_id = preset->filament_id;
+
+                // //display_materials.push_back(display_filament_type);
+                // //materials.push_back(filament_type);
+                //// m_filaments_id.push_back(m_filament_id);
+
+                // std::string m_vendor_name = "";
+                // auto        vendor        = dynamic_cast<ConfigOptionStrings *>(preset->config.option("filament_vendor"));
+                // if (vendor && (vendor->values.size() > 0)) {
+                //     std::string vendor_name = vendor->values[0];
+                //     m_vendor_name           = vendor_name;
+                // }
+                filaments_names.push_back(filament_name);
+            }
+        }
+    }
+    return filaments_names;
 }
 
 void Plater::post_process_string_object_exception(StringObjectException &err)

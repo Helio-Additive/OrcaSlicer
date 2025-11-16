@@ -273,6 +273,7 @@ public:
     void load_gcode(const wxString& filename);
     void reload_gcode_from_disk();
     void refresh_print();
+    std::vector<std::string> get_current_filaments_preset_names();
 
     // SoftFever
     void calib_pa(const Calib_Params& params);
