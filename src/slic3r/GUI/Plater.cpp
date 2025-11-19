@@ -7413,8 +7413,8 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
                 }
             }
 
-            //HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
-            //dlg.ShowModal();
+            HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
+            dlg.ShowModal();
         }
     } else {
         notification_manager->push_helio_error_notification(a.error_message);
@@ -7434,7 +7434,7 @@ void Plater::priv::on_helio_input_dlg(SimpleEvent& a)
     std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
 
      if (helio_api_key.empty()) {
-        /* auto dlg = MessageDialog(
+        auto dlg = MessageDialog(
             nullptr, _L("No valid Helio-PAT detected. Helio simulation & optimization cannot proceed. \nPlease request a new Helio-PAT."),
             _L("Execution Blocked"), wxYES_NO | wxICON_WARNING | wxCENTRE);
         dlg.SetButtonLabel(wxID_YES, _L("Regenerate PAT"));
@@ -7458,7 +7458,7 @@ void Plater::priv::on_helio_input_dlg(SimpleEvent& a)
             });
         } else {
             return;
-        }*/
+        }
     } else {
          if (HelioQuery::global_supported_printers.size() <= 0 || HelioQuery::global_supported_materials.size() <= 0) {
             wxGetApp().request_helio_supported_data();
@@ -13066,6 +13066,11 @@ void Plater::reslice()
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished, started slicing for plate %1%") % p->partplate_list.get_curr_plate_index();
 
     record_slice_preset("slicing");
+}
+
+void Plater::feedback_helio_process(float rating, std::string commend)
+{
+    p->helio_background_process.feedback_current_helio_action(rating, commend);
 }
 
 void Plater::record_slice_preset(std::string action)

@@ -114,6 +114,14 @@ private:
     Label* m_label_remain_usage_time;
 };
 
+class HelioPatNotEnoughDialog : public DPIDialog
+{
+public:
+    HelioPatNotEnoughDialog(wxWindow* parent = nullptr);
+    ~HelioPatNotEnoughDialog();
+    void on_dpi_changed(const wxRect& suggested_rect) override;
+};
+
 class HelioInputDialog : public DPIDialog
 {
 private:
@@ -173,6 +181,25 @@ private:
     void on_dpi_changed(const wxRect& suggested_rect) override {};
     void update_action(int action);
     void show_advanced_mode();
+};
+
+class HelioRatingDialog : public DPIDialog
+{
+public:
+    HelioRatingDialog(
+        wxWindow* parent = nullptr, int original = 0, int optimized = 0, std::string mean_impro = "", std::string std_impro = "");
+    ~HelioRatingDialog() {};
+
+    wxString             format_improvement(wxString imp);
+    void                 on_dpi_changed(const wxRect& suggested_rect) override;
+    std::shared_ptr<int> shared_ptr{nullptr};
+    void                 show_rating(std::vector<wxStaticBitmap*> stars, int rating);
+    int                  original_time;
+    int                  optimized_time;
+    std::string          optimized_id;
+    bool                 finish_rating = false;
+    wxString             quality_mean_improvement;
+    wxString             quality_std_improvement;
 };
 
 }} // namespace Slic3r::GUI
