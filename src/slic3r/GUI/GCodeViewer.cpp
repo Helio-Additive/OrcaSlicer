@@ -861,7 +861,7 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
 
         std::vector<GCodeProcessor::ThermalIndex> thermal_indexes = get_thermal_index(start_id, end_id);
 
-        render_thermal_index_windows(thermal_indexes, top, previousWindowWidth, wnd_height, f_lines_count, start_id, end_id);
+        render_thermal_index_windows(thermal_indexes, top + 6 * m_scale, previousWindowWidth, wnd_height, f_lines_count, start_id, end_id);
     }
 }
 
@@ -1078,8 +1078,6 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
     m_gl_data_initialized = true;
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
 
-    //Load the helio logo from svg
-	IMTexture::load_from_svg_file(Slic3r::resources_dir() + "/images/helio-logo.svg", 134*3, 131*3, m_helio_logo_id);
 }
 
 void GCodeViewer::on_change_color_mode(bool is_dark) {
@@ -4585,40 +4583,6 @@ void GCodeViewer::render_all_plates_stats(const std::vector<const GCodeProcessor
 
 const std::vector<unsigned char> GCodeViewer::get_extruder_ids() { return m_extruder_ids; }
 
-std::vector<std::string> GCodeViewer::get_helio_button_errors() {
-    std::vector<std::string>        errors;
-	Plater* plater = wxGetApp().plater();
-
-    size_t extruder_count = get_extruder_ids().size();
-    size_t extruder_id    = get_extruder_ids()[0];
-    size_t model_count    = plater->get_partplate_list().get_curr_plate()->get_objects_on_this_plate().size();
-    size_t plate_index    = plater->get_partplate_list().get_curr_plate_index();
-
-	std::optional<std::string> helio_filament_id = plater->get_helio_material_id_for_the_current_selection(extruder_id);
-	std::optional<std::string> helio_printer_id = plater->get_helio_printer_id_for_the_current_selection();
-    bool                       helio_processing_disabled = plater->get_helio_processing_disabled();
-
-    if (plate_index > 0)
-        errors.push_back("Helio Procesing is only supported on the first plate");
-
-    if (helio_processing_disabled)
-        errors.push_back("Plate is already being processed or has been processed");
-
-	if (!helio_filament_id.has_value())
-        errors.push_back("Selected filament is not supported");
-
-	if (!helio_printer_id.has_value())
-        errors.push_back("Selected printer is not supported");
-
-	if (extruder_count > 1)
-        errors.push_back("Feature is not supported for multimaterial prints");
-
-	if (model_count > 1)
-        errors.push_back("Feature is not supported for multi object prints");
-
-    return errors;
-}
-
 void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canvas_height, int right_margin)
 {
     if (!m_legend_enabled)
@@ -4668,10 +4632,6 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 pos_rect = ImGui::GetCursorScreenPos();
     float window_padding = 4.0f * m_scale;
-
-    draw_list->AddRectFilled(ImVec2(pos_rect.x,pos_rect.y - ImGui::GetStyle().WindowPadding.y),
-        ImVec2(pos_rect.x + ImGui::GetWindowWidth() + ImGui::GetFrameHeight(),pos_rect.y + ImGui::GetFrameHeight() + window_padding * 2.5),
-        ImGui::GetColorU32(ImVec4(0,0,0,0.3)));
 
     auto append_item = [icon_size, &imgui, imperial_units, &window_padding, &draw_list, this](
         EItemType type,
@@ -4910,89 +4870,9 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         return ret;
     };
 
-    //BBS display Color Scheme
     ImGui::Dummy({ window_padding, window_padding });
     ImGui::Dummy({ window_padding, window_padding });
-
-    auto create_helio_button = [&window_padding, &draw_list, &imgui,this]() {
-        Plater* plater = wxGetApp().plater();
-        bool show_helio_button = wxGetApp().app_config->get_bool("enable_helio_processing") && plater->helio_elements_have_been_loaded();
-
-        if (!show_helio_button)
-            return ImVec2(0.0,0.0);
-
-        std::vector<std::string> helio_button_errors = get_helio_button_errors();
-        bool                helio_button_active = helio_button_errors.size() == 0;
-
-        ImVec2 pos = ImVec2(ImGui::GetCursorScreenPos().x + window_padding * 3, ImGui::GetCursorScreenPos().y);
-
-        std::string button_text = "Helio Action";
-
-        imgui.push_large_font();
-        ImVec2      text_size   = ImGui::CalcTextSize(button_text.c_str(), nullptr, false);
-        imgui.pop_large_font();
-
-        float  padding = 6.0f;
-        ImVec2 logo_size = {134 / 131 * text_size.y, text_size.y};
-
-        ImVec2 rect_size = { (logo_size.x + 3*padding + text_size.x), (text_size.y + 2*padding)};
-        
-        float rounding = rect_size.y * 0.5f; // Pill shape
-        ImU32 bgColor     = IM_COL32(255, 255, 255, 255); // white background
-
-        bool pressed = ImGui::InvisibleButton("##HelioAction", rect_size);
-        if (pressed && helio_button_active) {
-            wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_ACTION_SHOW_HELIO_PLATFORM_TEMP_WINDOW));
-        }
-
-        if (!helio_button_active)
-        {
-            std::string tooltip_text = boost::algorithm::join(helio_button_errors, "\n");
-
-			if (ImGui::IsItemHovered()) {
-                ImGui::BeginTooltip();
-                ImGui::Text(tooltip_text.c_str());
-                ImGui::EndTooltip();
-            }
-
-            bgColor = ImGui::GetColorU32(ImVec4(0.5f, 0.5f, 0.5f, 0.2f));
-        }
-        else if (ImGui::IsItemActive()) {
-            bgColor = ImGui::GetColorU32(ImVec4(0.0f, 0.59f, 0.53f, 0.78f));
-        }
-        else if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
-            ImGui::Text("This will run Helio Processing");
-            ImGui::EndTooltip();
-            bgColor = ImGui::GetColorU32(ImVec4(0.0f, 0.59f, 0.53f, 1.00f));
-        }
-
-        draw_list->AddRectFilled(pos, {pos.x + rect_size.x, pos.y + rect_size.y}, bgColor, rounding);
-
-
-        ImGui::SetCursorScreenPos({pos.x + padding, pos.y + padding});
-
-        GLuint tex_id = (GLuint) (intptr_t) m_helio_logo_id;
-        GLboolean exists = glIsTexture(tex_id);
-
-        if (exists)
-            draw_list->AddImage(m_helio_logo_id, ImVec2(pos.x+padding, pos.y+padding), // top-left
-                                                     ImVec2(pos.x+padding+logo_size.x, pos.y+padding+logo_size.y),            // bottom-right
-                                                     ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE);
-
-        ImVec2 logo_end_pos = ImVec2(logo_size.x + 2 * padding, padding);
-        ImGui::SetCursorScreenPos({pos.x + logo_end_pos.x, pos.y + logo_end_pos.y});
-        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 255)); 
-        imgui.large_text(button_text);
-        ImGui::PopStyleColor();
-
-        ImGui::SetCursorScreenPos({pos.x, pos.y + rect_size.y});
-        return rect_size;
-    };
-
-    ImVec2  helio_button_size = create_helio_button();
-    ImGui::Dummy({ window_padding, window_padding });
-    ImGui::Dummy({ window_padding, window_padding });
+    ImGui::SameLine(window_padding * 2); // ORCA Ignores item spacing to get perfect window margins since since this part uses dummies for window padding
 
     std::wstring btn_name;
     if (m_fold)
@@ -5054,7 +4934,13 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     float window_width = ImGui::GetWindowWidth();     // ORCA Store window width
 
     if (m_fold) {
-        legend_height = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() + window_padding * 4 + helio_button_size.y;
+        legend_height = ImGui::GetFrameHeight() +
+                        window_padding * 4; // ORCA using 4 instead 2 gives correct toolbar margins while its folded
+
+        ImGui::SameLine(
+            window_width); // ORCA use stored window width while folded. This prevents annoying position change on fold/expand button
+
+        ImGui::Dummy({0, 0});
         imgui.end();
         ImGui::PopStyleColor(6);
         ImGui::PopStyleVar(2);

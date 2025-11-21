@@ -7399,6 +7399,9 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent& a)
         GCodeProcessorResult* res2 = background_process.get_current_gcode_result();
         *res2                      = *helio_background_process.m_gcode_result;
 
+		this->get_current_canvas3D()->get_gcode_viewer().set_view_type(GCodeViewer::EViewType::ThermalIndexMean);
+        this->get_current_canvas3D()->get_gcode_viewer().set_view_type_sel(12);
+
         this->update();
 
         /*show rating*/
