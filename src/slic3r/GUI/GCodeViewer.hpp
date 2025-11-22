@@ -848,6 +848,7 @@ public:
     GCodeViewer();
     ~GCodeViewer();
 
+	bool get_min_max_value_of_option(int index, float& _min, float& _max) const;
     void on_change_color_mode(bool is_dark);
     float m_scale = 1.0;
     void set_scale(float scale = 1.0);

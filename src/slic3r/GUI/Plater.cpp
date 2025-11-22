@@ -2429,6 +2429,9 @@ struct Plater::priv
 
     void set_current_canvas_as_dirty();
     GLCanvas3D* get_current_canvas3D(bool exclude_preview = false);
+
+	bool get_preview_min_max_value_of_option(int index, float& _min, float& _max);
+    int  get_gcode_layers_count();
     void unbind_canvas_event_handlers();
     void reset_canvas_volumes();
 
@@ -8418,6 +8421,23 @@ GLCanvas3D* Plater::priv::get_current_canvas3D(bool exclude_preview)
     //return (current_panel == view3D) ? view3D->get_canvas3d() : ((current_panel == preview) ? preview->get_canvas3d() : nullptr);
 }
 
+bool Plater::priv::get_preview_min_max_value_of_option(int index, float& _min, float& _max)
+{
+    if (current_panel == preview) {
+        auto& gcode_viewer = preview->get_canvas3d()->get_gcode_viewer();
+        return gcode_viewer.get_min_max_value_of_option(index, _min, _max);
+    }
+    return false;
+}
+
+int Plater::priv::get_gcode_layers_count()
+{
+    if (current_panel == preview) {
+        return preview->get_canvas3d()->get_gcode_layers_count();
+    }
+    return 0;
+}
+
 void Plater::priv::unbind_canvas_event_handlers()
 {
     if (view3D != nullptr)
@@ -13876,6 +13896,13 @@ GLCanvas3D* Plater::get_current_canvas3D(bool exclude_preview)
 {
     return p->get_current_canvas3D(exclude_preview);
 }
+
+bool Plater::get_preview_min_max_value_of_option(int index, float& _min, float& _max)
+{
+    return p->get_preview_min_max_value_of_option(index, _min, _max);
+}
+
+int Plater::get_gcode_layers_count() { return p->get_gcode_layers_count(); }
 
 void Plater::arrange()
 {

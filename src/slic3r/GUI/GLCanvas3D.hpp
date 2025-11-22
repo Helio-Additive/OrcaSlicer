@@ -1118,6 +1118,7 @@ public:
 
     const Print* fff_print() const;
     const SLAPrint* sla_print() const;
+    int             get_gcode_layers_count() const;
 
     void reset_old_size() { m_old_size = { 0, 0 }; }
 

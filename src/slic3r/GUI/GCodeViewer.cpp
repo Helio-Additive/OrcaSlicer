@@ -1080,6 +1080,69 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
 
 }
 
+bool GCodeViewer::get_min_max_value_of_option(int index, float& _min, float& _max) const
+{
+    switch ((EViewType) index) {
+    case EViewType::FeatureType: break;
+    case EViewType::Height: {
+        _min = m_extrusions.ranges.height.min;
+        _max = m_extrusions.ranges.height.max;
+        return true;
+    }
+    case EViewType::Width: {
+        _min = m_extrusions.ranges.width.min;
+        _max = m_extrusions.ranges.width.max;
+        return true;
+    }
+    case EViewType::Feedrate: {
+        _min = m_extrusions.ranges.feedrate.min;
+        _max = m_extrusions.ranges.feedrate.max;
+        return true;
+    }
+    case EViewType::FanSpeed: {
+        _min = m_extrusions.ranges.fan_speed.min;
+        _max = m_extrusions.ranges.fan_speed.max;
+        return true;
+    }
+    case EViewType::Temperature: {
+        _min = m_extrusions.ranges.temperature.min;
+        _max = m_extrusions.ranges.temperature.max;
+        return true;
+    }
+    case EViewType::ThermalIndexMin: {
+        _min = m_extrusions.ranges.thermal_index_min.min;
+        _max = m_extrusions.ranges.thermal_index_min.max;
+        return true;
+    }
+    case EViewType::ThermalIndexMax: {
+        _min = m_extrusions.ranges.thermal_index_max.min;
+        _max = m_extrusions.ranges.thermal_index_max.max;
+        return true;
+    }
+    case EViewType::ThermalIndexMean: {
+        _min = m_extrusions.ranges.thermal_index_mean.min;
+        _max = m_extrusions.ranges.thermal_index_mean.max;
+        return true;
+    }
+    case EViewType::VolumetricRate: {
+        _min = m_extrusions.ranges.volumetric_rate.min;
+        _max = m_extrusions.ranges.volumetric_rate.max;
+        return true;
+    }
+    case EViewType::Tool: break;
+    case EViewType::ColorPrint: break;
+    case EViewType::FilamentId: break;
+    case EViewType::LayerTime: {
+        _min = m_extrusions.ranges.layer_duration.min;
+        _max = m_extrusions.ranges.layer_duration.max;
+        return true;
+    }
+    case EViewType::Count:
+    default: break;
+    }
+    return false;
+}
+
 void GCodeViewer::on_change_color_mode(bool is_dark) {
     m_is_dark = is_dark;
     m_sequential_view.marker.on_change_color_mode(m_is_dark);

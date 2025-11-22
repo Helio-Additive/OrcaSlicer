@@ -9890,6 +9890,11 @@ const SLAPrint* GLCanvas3D::sla_print() const
     return (m_process == nullptr) ? nullptr : m_process->sla_print();
 }
 
+int GLCanvas3D::get_gcode_layers_count() const
+{
+    return m_gcode_viewer.get_layers_zs().size();
+}
+
 void GLCanvas3D::WipeTowerInfo::apply_wipe_tower() const
 {
     // BBS: add partplate logic

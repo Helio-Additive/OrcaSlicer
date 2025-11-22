@@ -523,6 +523,8 @@ public:
     GLCanvas3D* get_assmeble_canvas3D();
     wxWindow* get_select_machine_dialog();
 
+	bool get_preview_min_max_value_of_option(int index, float& _min, float& _max);
+    int  get_gcode_layers_count();
     void arrange();
     void orient();
     void find_new_position(const ModelInstancePtrs  &instances);
