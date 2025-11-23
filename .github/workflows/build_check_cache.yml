@@ -36,6 +36,11 @@ jobs:
       - name: Ensure deps folder exists
         run: mkdir -p deps # <---- FIX: prevents hashFiles error
 
+      - name: Ensure deps folder and dummy file exist
+        run: |
+          mkdir -p deps
+          echo "placeholder" > deps/.placeholder
+
       - name: set outputs
         id: set_outputs
         env:
