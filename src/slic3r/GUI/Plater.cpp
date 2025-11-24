@@ -7282,8 +7282,6 @@ void Plater::priv::on_action_open_project(SimpleEvent&)
 void Plater::priv::on_action_slice_plate(SimpleEvent&)
 {
     if (q != nullptr) {
-        helio_background_process.reset();
-        helio_processing_disabled = false;
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":received slice plate event\n" ;
         //BBS update extruder params and speed table before slicing
         const Slic3r::DynamicPrintConfig& config = wxGetApp().preset_bundle->full_config();
@@ -7303,8 +7301,6 @@ void Plater::priv::on_action_slice_plate(SimpleEvent&)
 void Plater::priv::on_action_slice_all(SimpleEvent&)
 {
     if (q != nullptr) {
-        helio_background_process.reset();
-        helio_processing_disabled = false;
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":received slice project event\n" ;
         //BBS update extruder params and speed table before slicing
         const Slic3r::DynamicPrintConfig& config = wxGetApp().preset_bundle->full_config();
@@ -13049,6 +13045,7 @@ void Plater::reslice()
 
     if (result) {
         p->m_is_slicing = true;
+        p->helio_background_process.clear_helio_file_cache();
     }
 
     bool clean_gcode_toolpaths = true;
