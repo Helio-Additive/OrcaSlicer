@@ -14,6 +14,7 @@
 #include "slic3r/Utils/json_diff.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
 #include "boost/bimap/bimap.hpp"
+#include <boost/log/trivial.hpp>
 #include "CameraPopup.hpp"
 #include "libslic3r/calib.hpp"
 #include "libslic3r/Utils.hpp"
