@@ -7628,7 +7628,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id, std::
     /*print sequence = by object*/
     if (!wxGetApp().is_helio_enable()) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "print sequence = by object";
-        GUI::MessageDialog msgdialog(nullptr, _L("Helio functions do not support the print sequence of \"ByObject\"."), "",
+        GUI::MessageDialog msgdialog(nullptr, _L("Please check the following: \n1. Helio functions do not support the print sequence of \"ByObject\".\n2. Helio does not support \"Infill Combination\"."), "",
                                      wxICON_WARNING | wxOK);
         msgdialog.ShowModal();
         return -1;

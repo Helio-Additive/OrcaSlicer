@@ -4101,7 +4101,11 @@ bool GUI_App::is_helio_enable()
         print_sequence = wxGetApp().global_print_sequence();
     }
 
-    if (print_sequence == PrintSequence::ByObject) {
+	auto print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    bool has_infill = print_config.option<ConfigOptionPercent>("sparse_infill_density")->value > 0;
+    bool has_combined_infill = print_config.opt_bool("infill_combination") && has_infill;
+
+    if (print_sequence == PrintSequence::ByObject || has_combined_infill) {
         return false;
     }
 
