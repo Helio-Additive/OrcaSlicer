@@ -8325,8 +8325,10 @@ void Plater::priv::init_notification_manager()
             res1 = false;
 
         else {
+            this->helio_background_process.stop_current_helio_action();
             this->helio_background_process.stop();
             res1 = true;
+            notification_manager->set_slicing_progress_hidden();
         }
 
         if (this->background_process.idle())
@@ -13086,6 +13088,16 @@ void Plater::reslice()
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished, started slicing for plate %1%") % p->partplate_list.get_curr_plate_index();
 
     record_slice_preset("slicing");
+}
+
+void Plater::stop_helio_process()
+{
+    if (p->helio_background_process.is_running()) {
+        p->helio_background_process.clear_helio_file_cache();
+        p->helio_background_process.reset();
+        p->helio_background_process.stop_current_helio_action();
+        p->helio_background_process.stop();
+    }
 }
 
 void Plater::feedback_helio_process(float rating, std::string commend)

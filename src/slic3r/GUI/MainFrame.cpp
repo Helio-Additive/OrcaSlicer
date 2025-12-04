@@ -2091,6 +2091,8 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
         enable_slice = get_enable_slice_status();
     }
 
+    bool old_slice_status = m_slice_btn->IsEnabled();
+
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" m_slice_select %1%: can_slice= %2%, can_print %3%, enable_slice %4%, enable_print %5% ")%m_slice_select % can_slice %can_print %enable_slice %enable_print;
     m_print_btn->Enable(enable_print);
     m_slice_btn->Enable(enable_slice);
@@ -2105,6 +2107,9 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
 
     if (wxGetApp().mainframe)
         wxGetApp().plater()->update_title_dirty_status();
+
+    if (!old_slice_status && enable_slice)
+        m_plater->stop_helio_process();
 }
 
 
