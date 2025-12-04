@@ -4091,7 +4091,7 @@ void GUI_App::handle_script_message(std::string msg)
 
 bool GUI_App::is_helio_enable()
 {
-    /* if (!plater_)
+    if (!plater_)
         return false;
     auto          cfg            = plater_->get_partplate_list().get_curr_plate()->config();
     PrintSequence print_sequence = PrintSequence::ByLayer;
@@ -4103,7 +4103,7 @@ bool GUI_App::is_helio_enable()
 
     if (print_sequence == PrintSequence::ByObject) {
         return false;
-    }*/
+    }
 
     return true;
 }
