@@ -523,7 +523,7 @@ HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_ap
         .on_complete([&result](std::string poll_body, unsigned poll_status) {
             try {
                 json poll_obj = json::parse(poll_body);
-                if (!poll_obj["data"]["gcodeV2"].is_null()) {
+                if (!poll_obj["data"]["gcodeV2"].is_null() && poll_obj["data"]["gcodeV2"]["status"] == "READY") {
                     auto gcode_data   = poll_obj["data"]["gcodeV2"];
                     result.status_str = gcode_data["status"];
                     result.progress   = gcode_data["progress"];
