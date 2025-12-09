@@ -1030,21 +1030,17 @@ void PlaterPresetComboBox::update()
 
         bool helio_supported_item = false;
         auto plater               = wxGetApp().plater();
-        bool helio_elements_fetched = plater->helio_elements_have_been_loaded();
 
-        if (helio_elements_fetched) {
-            if ( m_type == Preset::TYPE_FILAMENT) {
-                std::optional<string> id = plater->get_material_id_from_name(name.ToStdString());
-                if (id.has_value() || preset.config.opt_string("helio_filament_id").length() > 0)
-                    helio_supported_item = true;
-            } else if ( m_type == Preset::TYPE_PRINTER ||
-                       preset.config.opt_string("helio_printer_id").length() > 0) {
-                std::optional<string> id = plater->get_printer_id_from_name(name.ToStdString());
-                if (id.has_value())
-                    helio_supported_item = true;
-            }
-        }
-
+		if ( m_type == Preset::TYPE_FILAMENT) {
+			std::optional<string> id = plater->get_material_id_from_name(name.ToStdString());
+			if (id.has_value() || preset.config.opt_string("helio_filament_id").length() > 0)
+				helio_supported_item = true;
+		} else if ( m_type == Preset::TYPE_PRINTER ||
+				   preset.config.opt_string("helio_printer_id").length() > 0) {
+			std::optional<string> id = plater->get_printer_id_from_name(name.ToStdString());
+			if (id.has_value())
+				helio_supported_item = true;
+		}
 
         preset_descriptions.emplace(name, from_u8(preset.description));
         if (preset.is_default || preset.is_system) {

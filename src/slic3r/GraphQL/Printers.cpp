@@ -10,8 +10,11 @@ std::vector<Helio::Printer> Helio::Printers::Result::getPrinters() {
 }
 
 std::optional<std::string> Helio::Printers::Result::getPrinterIdByName(std::string name) {
-    std::vector<Printer> printers = this->getPrinters();
     std::optional<std::string> id;
+    if (!isSuccess())
+        return id;
+
+    std::vector<Printer> printers = this->getPrinters();
 	for (Printer& printer: printers) {
         id = printer.checkNameMatch(name);
 

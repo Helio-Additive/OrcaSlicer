@@ -213,7 +213,7 @@ void HelioQuery::request_support_machine(const std::string helio_api_url, const 
                         materials["pageInfo"]["hasNextPage"].get<bool>()) {
                         HelioQuery::request_support_machine(url_copy, key_copy, page_copy + 1);
                     } else {
-                        Slic3r::GUI::wxGetApp().plater_->set_materials_and_printers_from_helio();
+                        Slic3r::GUI::wxGetApp().plater_->set_printers_from_helio();
                     }
                 }
             } catch (...) {}
@@ -289,7 +289,7 @@ void HelioQuery::request_support_material(const std::string helio_api_url, const
                         materials["pageInfo"]["hasNextPage"].get<bool>()) {
                         HelioQuery::request_support_material(url_copy, key_copy, page_copy + 1);
                     } else {
-                        Slic3r::GUI::wxGetApp().plater_->set_materials_and_printers_from_helio();
+                        Slic3r::GUI::wxGetApp().plater_->set_materials_from_helio();
                     }
                 }
             } catch (...) {}

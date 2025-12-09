@@ -2833,29 +2833,31 @@ std::optional<std::string> Plater::get_printer_id_from_name(std::string name) {
 
 void Plater::set_helio_processing_disabled(bool finished) { p->helio_processing_disabled = finished; }
 bool Plater::get_helio_processing_disabled() { return p->helio_processing_disabled; }
+void Plater::set_materials_from_helio()
+{
+    std::vector<HelioQuery::SupportedData> material_supported_data = HelioQuery::global_supported_materials;
+    std::vector<Helio::Material>           materials               = {};
+    for (const HelioQuery::SupportedData& material_data : material_supported_data) {
+        auto printer = Helio::Material(material_data.id, material_data.name, material_data.native_name);
+        materials.emplace_back(printer);
+    }
+    Helio::Materials::Result materials_result(200, true, "", materials);
+    p->helio_materials_result = materials_result;
+    wxGetApp().sidebar().update_all_preset_comboboxes();
+}
 
-void Plater::set_materials_and_printers_from_helio() {
+void Plater::set_printers_from_helio()
+{
+    std::vector<HelioQuery::SupportedData> printers_supported_data = HelioQuery::global_supported_printers;
+    std::vector<Helio::Printer>            printers                = {};
+    for (const HelioQuery::SupportedData& printer_data : printers_supported_data) {
+        auto printer = Helio::Printer(printer_data.id, printer_data.name, printer_data.native_name);
+        printers.emplace_back(printer);
+    }
+    Helio::Printers::Result printers_result(200, true, "", printers);
 
-		std::vector<HelioQuery::SupportedData> printers_supported_data = HelioQuery::global_supported_printers;
-		std::vector<Helio::Printer>                  printers           = {};
-        for (const HelioQuery::SupportedData& printer_data : printers_supported_data) {
-            auto printer = Helio::Printer(printer_data.id, printer_data.name, printer_data.native_name);
-            printers.emplace_back(printer);
-        }
-        Helio::Printers::Result printers_result(200, true, "", printers);
-
-		std::vector<HelioQuery::SupportedData> material_supported_data = HelioQuery::global_supported_materials;
-		std::vector<Helio::Material>                  materials           = {};
-        for (const HelioQuery::SupportedData& material_data : material_supported_data) {
-            auto printer = Helio::Material(material_data.id, material_data.name, material_data.native_name);
-            materials.emplace_back(printer);
-        }
-        Helio::Materials::Result materials_result(200, true, "", materials);
-
-        p->helio_materials_result = materials_result;
-        p->helio_printers_result = printers_result;
-        p->helio_elements_fetched = true;
-		wxGetApp().sidebar().update_all_preset_comboboxes();
+    p->helio_printers_result  = printers_result;
+    wxGetApp().sidebar().update_all_preset_comboboxes();
 }
 
 bool Plater::helio_elements_have_been_loaded() { return p->helio_elements_fetched; }
@@ -7561,17 +7563,11 @@ int Plater::priv::update_helio_background_process(std::string& printer_id, std::
     }
 
     bool helio_support = false;
-    for (HelioQuery::SupportedData pdata : HelioQuery::global_supported_printers) {
-        if (!pdata.native_name.empty()) {
-            std::string native_name = pdata.native_name;
-            boost::algorithm::to_lower(native_name);
-            boost::algorithm::to_lower(preset_pure_name);
-            if (native_name.find(preset_pure_name) != std::string::npos) {
-                helio_support = true;
-                printer_id    = pdata.id;
-                break;
-            }
-        }
+
+	std::optional<string> printer_id_option = q->get_printer_id_from_name(preset_name);
+    if (printer_id_option.has_value()) {
+        helio_support = true;
+        printer_id           = printer_id_option.value();
     }
 
     /*unsupported helio printers*/
@@ -7604,17 +7600,10 @@ int Plater::priv::update_helio_background_process(std::string& printer_id, std::
     std::string used_filament         = preset_filaments[extruders.front() - 1];
     bool        is_supported_by_helio = false;
 
-    for (HelioQuery::SupportedData pdata : HelioQuery::global_supported_materials) {
-        if (!pdata.native_name.empty()) {
-            std::string native_name = pdata.native_name;
-            boost::algorithm::to_lower(native_name);
-            boost::algorithm::to_lower(used_filament);
-            if (used_filament.find(native_name) != std::string::npos) {
-                is_supported_by_helio = true;
-                material_id           = pdata.id;
-                break;
-            }
-        }
+	std::optional<string> id = q->get_material_id_from_name(used_filament);
+    if (id.has_value()) {
+        is_supported_by_helio = true;
+        material_id           = id.value();
     }
 
     if (!is_supported_by_helio) {

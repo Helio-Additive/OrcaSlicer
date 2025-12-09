@@ -848,7 +848,8 @@ private:
     friend class PlaterDropTarget;
 
 public:
-    void set_materials_and_printers_from_helio();
+    void set_materials_from_helio();
+    void set_printers_from_helio();
     bool                       helio_elements_have_been_loaded();
     void set_helio_elements_have_been_loaded(bool status);
     std::optional<std::string> get_helio_material_id_for_the_current_selection(size_t extruder_id);

@@ -10,8 +10,11 @@ std::vector<Helio::Material> Helio::Materials::Result::getMaterials() {
 }
 
 std::optional<std::string> Helio::Materials::Result::getMaterildIdByName(std::string name) {
-    std::vector<Material> materials = this->getMaterials();
     std::optional<std::string> id;
+    if (!isSuccess())
+        return id;
+
+    std::vector<Material> materials = this->getMaterials();
 	for (Material& material: materials) {
         id = material.checkNameMatch(name);
 
