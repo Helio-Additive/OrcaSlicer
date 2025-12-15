@@ -509,10 +509,10 @@ HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_ap
     result.success = false;
 
     std::string poll_query = R"( {
-        "query": "query GcodeV2($id: ID!) { gcodeV2(id: $id) { id name sizeKb status progress } }",
+        "query": "query GcodeV2($id: ID!) { gcodeV2(id: $id) { id name sizeKb status progress errors } }",
         "variables": { "id": "%1%" }
     } )";
-    std::string poll_body  = (boost::format(poll_query) % gcode_id).str();
+    std::string poll_body = (boost::format(poll_query) % gcode_id).str();
 
     auto poll_http = Http::post(helio_api_url);
     poll_http.header("Content-Type", "application/json")
@@ -523,19 +523,37 @@ HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_ap
         .on_complete([&result](std::string poll_body, unsigned poll_status) {
             try {
                 json poll_obj = json::parse(poll_body);
-                if (!poll_obj["data"]["gcodeV2"].is_null() && poll_obj["data"]["gcodeV2"]["status"] == "READY") {
-                    auto gcode_data   = poll_obj["data"]["gcodeV2"];
-                    result.status_str = gcode_data["status"];
-                    result.progress   = gcode_data["progress"];
-                    result.sizeKb     = gcode_data["sizeKb"];
-                    result.success    = true;
+                if (!poll_obj["data"]["gcodeV2"].is_null()) {
+                    auto gcode_data = poll_obj["data"]["gcodeV2"];
+                    
+                    // Verify status field exists and is valid before considering the response successful
+                    if (gcode_data.contains("status") && gcode_data["status"].is_string()) {
+                        result.status_str = gcode_data["status"];
+                        result.progress = gcode_data["progress"];
+                        result.sizeKb = gcode_data["sizeKb"];
+                        
+                        // Parse errors if present
+                        if (gcode_data.contains("errors") && !gcode_data["errors"].is_null()) {
+                            auto errors_data = gcode_data["errors"];
+                            if (errors_data.is_array()) {
+                                for (const auto& error : errors_data) {
+                                    if (error.is_string()) {
+                                        result.errors.push_back(error.get<std::string>());
+                                    }
+                                }
+                            }
+                        }
+                        
+                        result.success = true;
+                    }
                 }
-            } catch (...) {
-                // tudo
+            }
+            catch (...) {
+                //tudo
             }
         })
         .on_error([&result](std::string /*poll_body*/, std::string /*poll_error*/, unsigned /*poll_status*/) {
-            // Optionally handle polling error
+        // Optionally handle polling error
         })
         .perform_sync();
 
@@ -619,7 +637,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
                 res.progress   = gcode["progress"];
 
                 int poll_count = 0;
-                while (res.status_str != "READY" && poll_count < 60) {
+                while (res.status_str != "READY" && res.status_str != "ERROR" && poll_count < 60) {
                     std::this_thread::sleep_for(std::chrono::seconds(2));
 
                     PollResult poll_res = poll_gcode_status(helio_api_url, helio_api_key, res.id);
@@ -628,6 +646,12 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
                         res.status_str = poll_res.status_str;
                         res.progress   = poll_res.progress;
                         res.sizeKb     = poll_res.sizeKb;
+                        
+                        if (res.status_str == "ERROR") {
+                            res.success = false;
+                            res.error   = "Something went wrong while creating GCode. Please check your custom GCodes";
+                        }
+
                     }
 
                     poll_count++;
@@ -1317,10 +1341,18 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
                 HelioQuery::CreateGCodeResult create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_url,
                                                                                           helio_api_key, printer_id, filament_id);
 
-                if (action == 0) {
-                    create_simulation_step(create_gcode_res, notification_manager);
-                } else if (action == 1) {
-                    create_optimization_step(create_gcode_res, notification_manager);
+                if (create_gcode_res.success) {
+                    if (action == 0) {
+                        create_simulation_step(create_gcode_res, notification_manager);
+                    } else if (action == 1) {
+                        create_optimization_step(create_gcode_res, notification_manager);
+                    }
+                }
+                else {
+                    set_state(STATE_CANCELED);
+                    Slic3r::HelioCompletionEvent* evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0, "", "", false,
+                                                                                         _u8L(create_gcode_res.error));
+                    wxQueueEvent(GUI::wxGetApp().plater(), evt);
                 }
 
             } else {
