@@ -1154,6 +1154,20 @@ Sidebar::Sidebar(Plater *parent)
 
 Sidebar::~Sidebar() {}
 
+void Sidebar::update_printer_combo_box() {
+    if (p->combo_print) {
+        p->combo_print->update();
+        p->combo_print->Refresh();
+    }
+}
+
+void Sidebar::update_filament_combo_boxes() {
+    for (PlaterPresetComboBox* combo: p->combos_filament) {
+        combo->update();
+        combo->Refresh();
+    }
+}
+
 void Sidebar::create_printer_preset()
 {
     CreatePrinterPresetDialog dlg(wxGetApp().mainframe);
@@ -2843,7 +2857,15 @@ void Plater::set_materials_from_helio()
     }
     Helio::Materials::Result materials_result(200, true, "", materials);
     p->helio_materials_result = materials_result;
-    wxGetApp().sidebar().update_all_preset_comboboxes();
+    
+    wxGetApp().sidebar().update_filament_combo_boxes();
+}
+
+void Plater::set_materials_invalid_from_helio()
+{
+    std::vector<Helio::Material>           materials               = {};
+    Helio::Materials::Result materials_result(404, false, "", materials);
+    p->helio_materials_result = materials_result;
 }
 
 void Plater::set_printers_from_helio()
@@ -2857,7 +2879,15 @@ void Plater::set_printers_from_helio()
     Helio::Printers::Result printers_result(200, true, "", printers);
 
     p->helio_printers_result  = printers_result;
-    wxGetApp().sidebar().update_all_preset_comboboxes();
+    
+    wxGetApp().sidebar().update_printer_combo_box();
+}
+
+void Plater::set_printers_invalid_from_helio()
+{
+    std::vector<Helio::Printer>            printers                = {};
+    Helio::Printers::Result printers_result(404, true, "", printers);
+    p->helio_printers_result  = printers_result;
 }
 
 bool Plater::helio_elements_have_been_loaded() { return p->helio_elements_fetched; }
@@ -7464,13 +7494,26 @@ void Plater::priv::on_helio_input_dlg(SimpleEvent& a)
             return;
         }
     } else {
-         if (HelioQuery::global_supported_printers.size() <= 0 || HelioQuery::global_supported_materials.size() <= 0) {
-            wxGetApp().request_helio_supported_data();
+        if (helio_materials_result.getStatus() == 0 || helio_printers_result.getStatus() == 0) {
+            
+            if (HelioQuery::global_supported_printers.size() <= 0 || HelioQuery::global_supported_materials.size() <= 0)
+                wxGetApp().request_helio_supported_data();
 
             auto dlg = MessageDialog(nullptr, _L("The printer list and material list are being synchronized. Please try again later."),
                                      _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
             dlg.ShowModal();
-        } else {
+        } else if (helio_materials_result.getStatus() == 404) {
+            
+            auto dlg = MessageDialog(nullptr, _L("The material list could not be synchronized. Please check your internet connection."),
+                                     _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
+        } else if (helio_printers_result.getStatus() == 404) {
+            
+            auto dlg = MessageDialog(nullptr, _L("The printer list could not be synchronized. Please check your internet connection."),
+                                     _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
+        }
+        else {
             on_helio_process();
         }
     }

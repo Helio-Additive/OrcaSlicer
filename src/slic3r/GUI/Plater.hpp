@@ -140,6 +140,8 @@ public:
     Sidebar &operator=(const Sidebar &) = delete;
     ~Sidebar();
 
+    void update_printer_combo_box();
+    void update_filament_combo_boxes();
     void create_printer_preset();
     void init_filament_combo(PlaterPresetComboBox **combo, const int filament_idx);
     void remove_unused_filament_combos(const size_t current_extruder_count);
@@ -849,7 +851,9 @@ private:
 
 public:
     void set_materials_from_helio();
+    void set_materials_invalid_from_helio();
     void set_printers_from_helio();
+    void set_printers_invalid_from_helio();
     bool                       helio_elements_have_been_loaded();
     void set_helio_elements_have_been_loaded(bool status);
     std::optional<std::string> get_helio_material_id_for_the_current_selection(size_t extruder_id);

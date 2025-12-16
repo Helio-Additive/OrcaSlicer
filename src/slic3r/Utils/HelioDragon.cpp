@@ -220,6 +220,7 @@ void HelioQuery::request_support_machine(const std::string helio_api_url, const 
         })
         .on_error([](std::string body, std::string error, unsigned status) {
             // BOOST_LOG_TRIVIAL(info) << (boost::format("error: %1%, message: %2%") % error % body).str()
+            Slic3r::GUI::wxGetApp().plater_->set_printers_invalid_from_helio();
         })
         .perform();
 }
@@ -296,6 +297,7 @@ void HelioQuery::request_support_material(const std::string helio_api_url, const
         })
         .on_error([](std::string body, std::string error, unsigned status) {
             // BOOST_LOG_TRIVIAL(info) << (boost::format("error: %1%, message: %2%") % error % body).str()
+            Slic3r::GUI::wxGetApp().plater_->set_materials_invalid_from_helio();
         })
         .perform();
 }
