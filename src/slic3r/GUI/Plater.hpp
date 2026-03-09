@@ -2,6 +2,7 @@
 #define slic3r_Plater_hpp_
 
 #include <memory>
+#include <optional>
 #include <vector>
 #include <boost/filesystem/path.hpp>
 
@@ -50,6 +51,7 @@ class SLAPrint;
 //BBS: add partplatelist and SlicingStatusEvent
 class PartPlateList;
 class SlicingStatusEvent;
+class HelioCompletionEvent;
 enum SLAPrintObjectStep : unsigned int;
 enum class ConversionType : int;
 class DevAms;
@@ -105,6 +107,10 @@ wxDECLARE_EVENT(EVT_UPDATE_PLUGINS_WHEN_LAUNCH,        wxCommandEvent);
 wxDECLARE_EVENT(EVT_PREVIEW_ONLY_MODE_HINT,        wxCommandEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_COLOR_MODE_CHANGED,   SimpleEvent);
 wxDECLARE_EVENT(EVT_PRINT_FROM_SDCARD_VIEW,   SimpleEvent);
+// Helio cloud processing events
+wxDECLARE_EVENT(EVT_HELIO_INPUT_DLG,             wxCommandEvent);
+wxDECLARE_EVENT(EVT_HELIO_PROCESSING_STARTED,    Slic3r::GUI::SimpleEvent);
+wxDECLARE_EVENT(EVT_HELIO_PROCESSING_COMPLETED,  Slic3r::HelioCompletionEvent);
 wxDECLARE_EVENT(EVT_CREATE_FILAMENT, SimpleEvent);
 wxDECLARE_EVENT(EVT_MODIFY_FILAMENT, SimpleEvent);
 wxDECLARE_EVENT(EVT_ADD_FILAMENT, SimpleEvent);
@@ -281,7 +287,7 @@ public:
     Plater(const Plater &) = delete;
     Plater &operator=(Plater &&) = delete;
     Plater &operator=(const Plater &) = delete;
-    ~Plater() = default;
+    ~Plater();
 
     bool Show(bool show = true);
 
@@ -502,6 +508,8 @@ public:
     bool has_toolpaths_to_export() const;
     void export_toolpaths_to_obj() const;
     void reslice();
+    void stop_helio_process();
+    void feedback_helio_process(float rating, std::string commend);
     void record_slice_preset(std::string action);
     void reslice_SLA_supports(const ModelObject &object, bool postpone_error_messages = false);
     void reslice_SLA_hollowing(const ModelObject &object, bool postpone_error_messages = false);
@@ -718,6 +726,8 @@ public:
     void set_bed_position(Vec2d& pos);
     //BBS: is the background process slicing currently
     bool is_background_process_slicing() const;
+
+    int get_helio_process_status() const;
     //BBS: update slicing context
     void update_slicing_context_to_current_partplate();
     //BBS: show object info
@@ -954,6 +964,20 @@ private:
     void on_filament_map_mode_change();
     friend class SuppressBackgroundProcessingUpdate;
     friend class PlaterDropTarget;
+
+public:
+    void set_materials_from_helio();
+    void set_materials_invalid_from_helio();
+    void set_printers_from_helio();
+    void set_printers_invalid_from_helio();
+    bool                       helio_elements_have_been_loaded();
+    void set_helio_elements_have_been_loaded(bool status);
+    std::optional<std::string> get_helio_material_id_for_the_current_selection(size_t extruder_id);
+    std::optional<std::string> get_helio_printer_id_for_the_current_selection();
+    std::optional<std::string> get_material_id_from_name(std::string name);
+    std::optional<std::string> get_printer_id_from_name(std::string name);
+    void                       set_helio_processing_disabled(bool status);
+    bool                       get_helio_processing_disabled();
 };
 
 class SuppressBackgroundProcessingUpdate

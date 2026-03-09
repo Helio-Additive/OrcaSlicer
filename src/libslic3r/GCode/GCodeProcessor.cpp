@@ -3044,6 +3044,17 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
         return;
     }
 
+    // Helio thermal index: ;helioadditive=...ti.max=X,ti.min=Y,ti.mean=Z
+    if (boost::starts_with(comment, "helioadditive=")) {
+        static const std::regex thermal_re("ti\\.max=(-?[0-9]*\\.?[0-9]+),ti\\.min=(-?[0-9]*\\.?[0-9]+),ti\\.mean=(-?[0-9]*\\.?[0-9]+)");
+        std::smatch match;
+        std::string comment_str(comment);
+        if (std::regex_search(comment_str, match, thermal_re)) {
+            m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
+        }
+        return;
+    }
+
     // wipe start tag
     if (boost::starts_with(comment, reserved_tag(ETags::Wipe_Start))) {
         m_wiping = true;
@@ -5495,6 +5506,8 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_extruder_temps[filament_id],
 // ORCA: Add Pressure Advance visualization support
         m_pressure_advance,
+// Helio: Thermal index from simulation
+        m_thermal_index_mean,
         { 0.0f, 0.0f }, // time
         static_cast<float>(m_layer_id), //layer_duration: set later
         std::max<unsigned int>(1, m_layer_id) - 1,

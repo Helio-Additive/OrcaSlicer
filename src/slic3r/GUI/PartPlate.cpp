@@ -33,6 +33,7 @@
 #include "2DBed.hpp"
 #include "3DBed.hpp"
 #include "PartPlate.hpp"
+#include "../Utils/HelioDragon.hpp"
 #include "Camera.hpp"
 #include "GUI_Colors.hpp"
 #include "GUI_ObjectList.hpp"
@@ -3330,6 +3331,20 @@ void PartPlate::update_slice_context(BackgroundSlicingProcess & process)
 	process.switch_print_preprocess();
 
 	return;
+}
+
+// Helio result per-plate storage
+const HelioPlateResult* PartPlate::get_helio_result() const
+{
+    return m_helio_result.get();
+}
+
+void PartPlate::set_helio_result(const HelioPlateResult& result)
+{
+    if (!m_helio_result) {
+        m_helio_result = std::make_unique<HelioPlateResult>();
+    }
+    *m_helio_result = result;
 }
 
 // BBS: delay calc gcode path in backup dir

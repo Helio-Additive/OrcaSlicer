@@ -625,6 +625,10 @@ public:
     void            popup_ping_bind_dialog();
     void            remove_ping_bind_dialog();
 
+    // Helio cloud processing
+    static void     request_helio_pat(std::function<void(std::string)> func);
+    static void     request_helio_supported_data();
+
     // Parameters extracted from the command line to be passed to GUI after initialization.
     GUI_InitParams* init_params { nullptr };
 

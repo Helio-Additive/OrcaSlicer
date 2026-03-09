@@ -94,6 +94,9 @@ else if (view_type == libvgcode::EViewType::LayerTimeLogarithmic)
 // ORCA: Add Pressure Advance visualization support
     else if (view_type == libvgcode::EViewType::PressureAdvance)
         return _u8L("Pressure Advance");
+// Helio: Thermal index visualization
+    else if (view_type == libvgcode::EViewType::ThermalIndexMean)
+        return _u8L("Thermal Index");
     return "";
 }
 
@@ -1039,6 +1042,8 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
     view_type_items.push_back(libvgcode::EViewType::Temperature);
 // ORCA: Add Pressure Advance visualization support
     view_type_items.push_back(libvgcode::EViewType::PressureAdvance);
+// Helio: Thermal index visualization
+    view_type_items.push_back(libvgcode::EViewType::ThermalIndexMean);
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}

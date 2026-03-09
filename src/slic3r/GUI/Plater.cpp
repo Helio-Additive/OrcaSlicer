@@ -11,6 +11,7 @@
 #include <regex>
 #include <future>
 #include <boost/algorithm/string.hpp>
+#include <boost/nowide/cstdio.hpp>
 #include <boost/iterator/counting_iterator.hpp>
 #include <boost/optional.hpp>
 #include <boost/filesystem/path.hpp>
@@ -101,6 +102,8 @@
 #include "Jobs/PlaterWorker.hpp"
 #include "Jobs/BoostThreadWorker.hpp"
 #include "BackgroundSlicingProcess.hpp"
+#include "../Utils/HelioDragon.hpp"
+#include "HelioReleaseNote.hpp"
 #include "SelectMachine.hpp"
 #include "SendMultiMachinePage.hpp"
 #include "SendToPrinter.hpp"
@@ -178,6 +181,13 @@ static const std::pair<unsigned int, unsigned int> THUMBNAIL_SIZE_3MF = { 512, 5
 namespace Slic3r {
 namespace GUI {
 
+// Flag to pre-select optimization mode when opening HelioInputDialog from simulation results
+static bool g_helio_pre_select_optimization = false;
+
+bool& get_helio_pre_select_optimization_flag() {
+    return g_helio_pre_select_optimization;
+}
+
 wxDEFINE_EVENT(EVT_SCHEDULE_BACKGROUND_PROCESS,     SimpleEvent);
 wxDEFINE_EVENT(EVT_SLICING_UPDATE,                  SlicingStatusEvent);
 wxDEFINE_EVENT(EVT_SLICING_COMPLETED,               wxCommandEvent);
@@ -206,6 +216,10 @@ wxDEFINE_EVENT(EVT_PREVIEW_ONLY_MODE_HINT,          wxCommandEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_COLOR_MODE_CHANGED,     SimpleEvent);
 //BBS: print
 wxDEFINE_EVENT(EVT_PRINT_FROM_SDCARD_VIEW,          SimpleEvent);
+// Helio cloud processing events
+wxDEFINE_EVENT(EVT_HELIO_INPUT_DLG,                 wxCommandEvent);
+wxDEFINE_EVENT(EVT_HELIO_PROCESSING_STARTED,        SimpleEvent);
+wxDEFINE_EVENT(EVT_HELIO_PROCESSING_COMPLETED,      HelioCompletionEvent);
 
 wxDEFINE_EVENT(EVT_CREATE_FILAMENT, SimpleEvent);
 wxDEFINE_EVENT(EVT_MODIFY_FILAMENT, SimpleEvent);
@@ -4276,6 +4290,9 @@ struct Plater::priv
     ProjectDirtyStateManager dirty_state;
 
     BackgroundSlicingProcess    background_process;
+    HelioBackgroundProcess      helio_background_process;
+    bool                        helio_elements_fetched = false;
+    bool                        helio_processing_disabled = false;
     bool suppressed_backround_processing_update { false };
 
     // TODO: A mechanism would be useful for blocking the plater interactions:
@@ -4566,6 +4583,14 @@ struct Plater::priv
     void on_export_began(wxCommandEvent&);
     void on_export_finished(wxCommandEvent&);
     void on_slicing_began();
+
+    // Helio cloud processing handlers
+    void on_helio_processing_complete(HelioCompletionEvent &evt);
+    void on_helio_processing_start(SimpleEvent &evt);
+    void on_helio_input_dlg(wxCommandEvent &evt);
+    void on_helio_process();
+    void on_action_helio_processing(SimpleEvent &evt);
+    int update_helio_background_process_v2(std::string& printer_id, std::string& material_id);
 
     void clear_warnings();
     void add_warning(const Slic3r::PrintStateBase::Warning &warning, size_t oid);
@@ -4880,6 +4905,11 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     this->q->Bind(EVT_NOTICE_CHILDE_SIZE_CHANGED, &Sidebar::on_size, sidebar);
     this->q->Bind(EVT_NOTICE_FULL_SCREEN_CHANGED, &Sidebar::on_full_screen, sidebar);
     this->q->Bind(EVT_ADD_CUSTOM_FILAMENT, &priv::on_add_custom_filament, this);
+    // Helio cloud processing events
+    this->q->Bind(EVT_HELIO_PROCESSING_COMPLETED, &priv::on_helio_processing_complete, this);
+    this->q->Bind(EVT_HELIO_PROCESSING_STARTED, &priv::on_helio_processing_start, this);
+    this->q->Bind(EVT_HELIO_INPUT_DLG, &priv::on_helio_input_dlg, this);
+    this->q->Bind(EVT_GLTOOLBAR_ACTION_HELIO, &priv::on_action_helio_processing, this);
     main_frame->m_tabpanel->Bind(wxEVT_NOTEBOOK_PAGE_CHANGING, &priv::on_tab_selection_changing, this);
 
     auto* panel_3d = new wxPanel(q);
@@ -9406,6 +9436,276 @@ void Plater::priv::on_slicing_completed(wxCommandEvent & evt)
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format("exit.");
 }
 
+// ===== Helio cloud processing handlers =====
+
+void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
+{
+    if (a.is_successful) {
+        this->reset_gcode_toolpaths();
+
+        // Keep original gcode by renaming
+        try {
+            boost::filesystem::path original_path(a.tmp_path);
+            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
+            int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
+            if (renamed != 0) {
+                BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
+            }
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
+        }
+
+        std::string copied;
+        copy_file(a.path, a.tmp_path, copied);
+
+        float time_origin_value = 0;
+        float time_optimized_value = 0;
+        PartPlate* plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+        if (plate && plate->get_slice_result()) {
+            time_origin_value = plate->get_slice_result()->print_statistics.modes[0].time;
+        }
+
+        helio_background_process.m_gcode_result->filename = a.tmp_path;
+
+        GCodeProcessorResult *res1 = partplate_list.get_curr_plate()->get_slice_result();
+        *res1 = *helio_background_process.m_gcode_result;
+        GCodeProcessorResult *res2 = background_process.get_current_gcode_result();
+        *res2 = *helio_background_process.m_gcode_result;
+
+        // Reload the preview with the new gcode result and switch to preview tab
+        preview->reload_print();
+        set_current_panel(preview, true);
+
+        // Switch to Thermal Index view if helio data is available
+        preview->get_canvas3d()->get_gcode_viewer().set_view_type(libvgcode::EViewType::ThermalIndexMean);
+
+        this->update();
+
+        // Show rating dialog for optimization
+        if (a.action == 1) {
+            PartPlate* plate1 = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+            if (plate1 && plate1->get_slice_result()) {
+                time_optimized_value = plate1->get_slice_result()->print_statistics.modes[0].time;
+            }
+
+            if (plate) {
+                HelioPlateResult helio_result;
+                helio_result.action = 1;
+                helio_result.original_print_time_seconds = time_origin_value;
+                helio_result.optimized_print_time_seconds = time_optimized_value;
+                helio_result.quality_mean_improvement = a.quality_mean_improvement;
+                helio_result.quality_std_improvement = a.quality_std_improvement;
+                helio_result.is_valid = true;
+                plate->set_helio_result(helio_result);
+            }
+
+            HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
+            dlg.ShowModal();
+        }
+    } else {
+        notification_manager->push_helio_error_notification(a.error_message);
+    }
+}
+
+void Plater::priv::on_helio_processing_start(SimpleEvent &a)
+{
+    notification_manager->close_notification_of_type(GUI::NotificationType::SignDetected);
+    notification_manager->close_notification_of_type(GUI::NotificationType::ExportFinished);
+    notification_manager->set_slicing_progress_began();
+    notification_manager->update_slicing_notif_dailytips(true);
+}
+
+int Plater::priv::update_helio_background_process_v2(std::string& printer_id, std::string& material_id)
+{
+    notification_manager->close_notification_of_type(NotificationType::HelioSlicingError);
+    PresetBundle* preset_bundle = wxGetApp().preset_bundle;
+    std::string preset_name = preset_bundle->printers.get_edited_preset().name;
+
+    if (helio_background_process.is_running()) {
+        GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    // Match printer by name against supported printers
+    std::string printer_target_name = preset_name;
+    boost::trim(printer_target_name);
+
+    if (printer_target_name.empty()) {
+        GUI::MessageDialog msgdialog(nullptr, _L("Invalid printer preset. Unable to slice with Helio."), "", wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    // Simple name-based matching
+    bool helio_support = false;
+    for (const auto& sp : HelioQuery::global_supported_printers) {
+        if (printer_target_name.find(sp.native_name) != std::string::npos ||
+            sp.native_name.find(printer_target_name) != std::string::npos) {
+            printer_id = sp.id;
+            helio_support = true;
+            break;
+        }
+    }
+
+    if (!helio_support) {
+        GUI::MessageDialog msgdialog(nullptr, _L("The current printer preset is not supported by Helio."), "", wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    // Get active filament and match to Helio material
+    auto extruders = q->get_partplate_list().get_curr_plate()->get_extruders();
+    if (extruders.empty()) return -1;
+
+    auto preset_filaments = wxGetApp().preset_bundle->filament_presets;
+    if (extruders.front() > (int)preset_filaments.size()) return -1;
+
+    std::string filament_preset_name = preset_filaments[extruders.front() - 1];
+    std::string target_name = filament_preset_name;
+    size_t atPos = target_name.find('@');
+    if (atPos != std::string::npos) target_name = target_name.substr(0, atPos);
+    boost::trim(target_name);
+
+    for (const auto& sm : HelioQuery::global_supported_materials) {
+        if (target_name.find(sm.native_name) != std::string::npos ||
+            sm.native_name.find(target_name) != std::string::npos) {
+            material_id = sm.id;
+            break;
+        }
+    }
+
+    if (material_id.empty()) {
+        GUI::MessageDialog msgdialog(nullptr,
+            wxString::Format(_L("Filament '%s' is not supported by Helio. Please select a supported material."), target_name),
+            "", wxICON_WARNING | wxOK);
+        msgdialog.ShowModal();
+        return -1;
+    }
+
+    return 0;
+}
+
+void Plater::priv::on_helio_process()
+{
+    std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+    std::string printer_id;
+    std::string material_id;
+
+    int update_result = update_helio_background_process_v2(printer_id, material_id);
+
+    if (update_result > -1) {
+        HelioInputDialog dlg(nullptr, material_id);
+
+        if (g_helio_pre_select_optimization) {
+            dlg.set_initial_action(1);
+            g_helio_pre_select_optimization = false;
+        }
+
+        while (dlg.ShowModal() == wxID_OK)
+        {
+            if (partplate_list.get_curr_plate()->empty()) return;
+            GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
+
+            int action = dlg.get_action();
+            helio_background_process.set_action(action);
+
+            if (action == 0) {
+                bool valid = false;
+                HelioQuery::SimulationInput data = dlg.get_simulation_input(valid);
+                if (!valid) { continue; }
+
+                helio_background_process.set_simulation_input_data(data);
+                helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
+                BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio simulation process called (V2)";
+            }
+            else if (action == 1) {
+                bool valid = false;
+                HelioQuery::OptimizationInput data = dlg.get_optimization_input(valid);
+                if (!valid) { continue; }
+
+                helio_background_process.set_optimization_input_data(data);
+                helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
+                BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio optimization process called (V2)";
+            }
+
+            break;
+        }
+    }
+}
+
+void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
+{
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+    if (helio_api_key.empty()) {
+        auto dlg = MessageDialog(nullptr, _L("No valid Helio-PAT detected. Helio simulation & optimization cannot proceed.\nPlease request a new Helio-PAT."),
+            _L("Execution Blocked"), wxYES_NO | wxICON_WARNING | wxCENTRE);
+        dlg.SetButtonLabel(wxID_YES, _L("Regenerate PAT"));
+        auto result = dlg.ShowModal();
+        if (result == wxID_YES) {
+            wxGetApp().request_helio_pat([this](std::string pat) {
+                wxTheApp->CallAfter([=]() {
+                    if (pat == "not_enough") {
+                        HelioPatNotEnoughDialog dlg;
+                        dlg.ShowModal();
+                    }
+                    else if (pat == "error") {
+                        MessageDialog dlg(nullptr, _L("Failed to obtain Helio PAT, Click Refresh to obtain it again."), wxString("Helio Additive"), wxYES | wxICON_WARNING);
+                        dlg.ShowModal();
+                    }
+                    else {
+                        Slic3r::HelioQuery::set_helio_pat(pat);
+                        MessageDialog dlg(nullptr, _L("Successfully obtained PAT."), wxString("Helio Additive"), wxYES | wxICON_NONE);
+                        dlg.ShowModal();
+                    }
+                });
+            });
+        }
+        else {
+            return;
+        }
+    }
+    else {
+        if (!HelioQuery::global_printers_fully_loaded || !HelioQuery::global_materials_fully_loaded) {
+            wxGetApp().request_helio_supported_data();
+            auto dlg = MessageDialog(nullptr, _L("The printer list and material list are being synchronized. Please try again later."), _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
+        }
+        else {
+            on_helio_process();
+        }
+    }
+}
+
+void Plater::priv::on_action_helio_processing(SimpleEvent& a)
+{
+    if (!(partplate_list.get_curr_plate()->empty())) {
+        helio_processing_disabled = true;
+        auto    app_config    = wxGetApp().app_config;
+        std::string helio_api_key = app_config->get("helio_access_token");
+        std::string helio_api_url = app_config->get("helio_api_url");
+
+        std::string helio_printer_id  = q->get_helio_printer_id_for_the_current_selection().value_or("");
+
+        // Use first extruder (index 0) for material selection
+        size_t extruder_id = 0;
+        std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection(extruder_id).value_or("");
+
+        auto g_result = background_process.get_current_gcode_result();
+
+        helio_background_process.init(helio_api_key, helio_api_url, helio_printer_id, helio_filament_id,
+                                      g_result, preview, [this]() {});
+
+        helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state,
+                                                    notification_manager);
+    }
+}
+
 void Plater::priv::on_export_began(wxCommandEvent& evt)
 {
     if (show_warning_dialog)
@@ -11591,6 +11891,23 @@ Plater::Plater(wxWindow *parent, MainFrame *main_frame)
     // Initialization performed in the private c-tor
     enable_wireframe(true);
     m_only_gcode = false;
+}
+
+Plater::~Plater()
+{
+    // Stop helio background thread before destroying priv
+    if (p) {
+        p->helio_background_process.stop();
+        if (p->helio_background_process.m_thread.joinable())
+            p->helio_background_process.m_thread.join();
+    }
+
+    // Reset p to nullptr BEFORE base class ~wxWindow() runs DestroyChildren().
+    // C++ destruction order: destructor body → member destruction → base destructors.
+    // Without this, p gets destroyed in step 2, then step 3 calls DestroyChildren()
+    // which triggers GLCanvas3D::~GLCanvas3D() → Selection::clear() → canvas3D()
+    // accessing the already-destroyed p. canvas3D() has a null guard on p.
+    p.reset();
 }
 
 bool Plater::Show(bool show)
@@ -15448,6 +15765,122 @@ bool Plater::is_multi_extruder_ams_empty()
 }
 
 //BBS: add multiple plate reslice logic
+void Plater::feedback_helio_process(float rating, std::string commend)
+{
+    p->helio_background_process.feedback_current_helio_action(rating, commend);
+}
+
+void Plater::stop_helio_process()
+{
+    p->helio_background_process.stop();
+    p->helio_background_process.clear_helio_file_cache();
+    p->helio_processing_disabled = false;
+}
+
+int Plater::get_helio_process_status() const
+{
+    return static_cast<int>(p->helio_background_process.get_state());
+}
+
+void Plater::set_materials_from_helio()
+{
+    p->helio_elements_fetched = HelioQuery::global_materials_fully_loaded;
+}
+
+void Plater::set_materials_invalid_from_helio()
+{
+    p->helio_elements_fetched = false;
+}
+
+void Plater::set_printers_from_helio()
+{
+    p->helio_elements_fetched = p->helio_elements_fetched && HelioQuery::global_printers_fully_loaded;
+}
+
+void Plater::set_printers_invalid_from_helio()
+{
+    p->helio_elements_fetched = false;
+}
+
+bool Plater::helio_elements_have_been_loaded()
+{
+    return p->helio_elements_fetched;
+}
+
+void Plater::set_helio_elements_have_been_loaded(bool status)
+{
+    p->helio_elements_fetched = status;
+}
+
+std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection(size_t extruder_id)
+{
+    if (!HelioQuery::global_materials_fully_loaded)
+        return std::nullopt;
+
+    // Get current filament preset name for the given extruder
+    auto* preset_bundle = wxGetApp().preset_bundle;
+    if (!preset_bundle || extruder_id >= preset_bundle->filament_presets.size())
+        return std::nullopt;
+
+    std::string filament_name = preset_bundle->filament_presets[extruder_id];
+    return get_material_id_from_name(filament_name);
+}
+
+std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selection()
+{
+    if (!HelioQuery::global_printers_fully_loaded)
+        return std::nullopt;
+
+    // First check printer config for explicit helio_printer_id
+    const auto& full_config = wxGetApp().preset_bundle->full_config();
+    if (full_config.has("helio_printer_id")) {
+        std::string config_id = full_config.opt_string("helio_printer_id");
+        if (!config_id.empty())
+            return config_id;
+    }
+
+    // Fall back to name matching
+    std::string printer_name = wxGetApp().preset_bundle->printers.get_selected_preset().name;
+    return get_printer_id_from_name(printer_name);
+}
+
+std::optional<std::string> Plater::get_material_id_from_name(std::string name)
+{
+    // Split at '@' and trim (filament presets are often "PLA @Printer")
+    auto at_pos = name.find('@');
+    std::string search_name = (at_pos != std::string::npos) ? name.substr(0, at_pos) : name;
+    // Trim trailing spaces
+    while (!search_name.empty() && search_name.back() == ' ')
+        search_name.pop_back();
+
+    for (auto& mat : HelioQuery::global_supported_materials) {
+        if (boost::algorithm::iequals(mat.name, search_name) ||
+            (!mat.native_name.empty() && boost::algorithm::iequals(mat.native_name, search_name)))
+            return mat.id;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> Plater::get_printer_id_from_name(std::string name)
+{
+    for (auto& pr : HelioQuery::global_supported_printers) {
+        if (boost::algorithm::icontains(name, pr.name) ||
+            (!pr.native_name.empty() && boost::algorithm::icontains(name, pr.native_name)))
+            return pr.id;
+    }
+    return std::nullopt;
+}
+
+void Plater::set_helio_processing_disabled(bool status)
+{
+    p->helio_processing_disabled = status;
+}
+
+bool Plater::get_helio_processing_disabled()
+{
+    return p->helio_processing_disabled;
+}
+
 void Plater::reslice()
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%: enter, process_completed_with_error=%2%")%__LINE__ %p->process_completed_with_error;
@@ -16539,12 +16972,14 @@ bool Plater::is_single_full_object_selection() const
 
 GLCanvas3D* Plater::canvas3D()
 {
+    if (!p) return nullptr;
     // BBS modify view3D->get_canvas3d() to current canvas
     return p->get_current_canvas3D();
 }
 
 const GLCanvas3D* Plater::canvas3D() const
 {
+    if (!p) return nullptr;
     // BBS modify view3D->get_canvas3d() to current canvas
     return p->get_current_canvas3D();
 }

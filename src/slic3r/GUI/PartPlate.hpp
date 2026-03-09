@@ -2,6 +2,7 @@
 #define __part_plate_hpp_
 
 #include <vector>
+#include <memory>
 #include <set>
 #include <array>
 #include <thread>
@@ -65,6 +66,7 @@ class ModelObject;
 class ModelInstance;
 class Print;
 class SLAPrint;
+struct HelioPlateResult;
 
 namespace GUI {
 class Plater;
@@ -104,6 +106,8 @@ private:
     bool m_ready_for_slice;
     bool m_slice_result_valid;
     bool m_apply_invalid {false};
+    bool m_helio_apply_invalid {false};
+    std::unique_ptr<HelioPlateResult> m_helio_result;
     float m_slice_percent;
 
     Print *m_print; //Print reference, not own it, no need to serialize
@@ -487,6 +491,9 @@ public:
     Print* fff_print() { return m_print; }
     //return the slice result
     GCodeProcessorResult* get_slice_result() { return m_gcode_result; }
+    // Helio result per-plate storage
+    const HelioPlateResult* get_helio_result() const;
+    void set_helio_result(const HelioPlateResult& result);
 
     std::string           get_tmp_gcode_path();
     std::string           get_temp_config_3mf_path();

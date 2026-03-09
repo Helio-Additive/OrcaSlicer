@@ -637,6 +637,27 @@ void PrintConfigDef::init_common_params()
     def->enum_values.push_back("SLA");
     def->set_default_value(new ConfigOptionEnum<PrinterTechnology>(ptFFF));
 
+    def = this->add("helio_printer_id", coString);
+    def->label = L("Helio Printer ID");
+    def->tooltip = L("UUID of the printer provided by Helio");
+    def->mode = comSimple;
+    def->gui_type = ConfigOptionDef::GUIType::one_string;
+    def->set_default_value(new ConfigOptionString(""));
+
+    def = this->add("helio_initial_room_air_temp", coFloat);
+    def->label = L("Initial room airtemp");
+    def->tooltip = L("Specifies the starting ambient air temperature within the room or environment where the printing process begins.");
+    def->mode = comSimple;
+    def->sidetext = L("°C");
+    def->set_default_value(new ConfigOptionFloat(25));
+
+    def = this->add("helio_layer_threshold", coFloat);
+    def->label = L("Layer Threshold");
+    def->tooltip = L("LFAM print height, denotes the threshold height at which the ambient temperature stabilizes.");
+    def->mode = comSimple;
+    def->sidetext = L("mm");
+    def->set_default_value(new ConfigOptionFloat(20));
+
     def = this->add("printable_area", coPoints);
     def->label = L("Printable area");
     //BBS

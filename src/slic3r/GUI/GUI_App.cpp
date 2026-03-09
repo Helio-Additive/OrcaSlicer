@@ -1,6 +1,7 @@
 #include "libslic3r/Technologies.hpp"
 #include "GUI_App.hpp"
 #include "GUI_Init.hpp"
+#include "../Utils/HelioDragon.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GUI_Factories.hpp"
 #include "slic3r/GUI/UserManager.hpp"
@@ -3090,6 +3091,14 @@ bool GUI_App::on_init_inner()
 
 //     update_mode(); // !!! do that later
     SetTopWindow(mainframe);
+
+    // Helio startup initialization
+    bool enable_helio_processing = app_config->get_bool("enable_helio_processing");
+    if (enable_helio_processing) {
+        if (!Slic3r::HelioQuery::get_helio_api_url().empty() && !Slic3r::HelioQuery::get_helio_pat().empty()) {
+            request_helio_supported_data();
+        }
+    }
 
     plater_->init_notification_manager();
 
@@ -7380,6 +7389,23 @@ void GUI_App::remove_ping_bind_dialog()
     }
 }
 
+
+// Helio cloud processing
+void GUI_App::request_helio_pat(std::function<void(std::string)> func)
+{
+    Slic3r::HelioQuery::request_pat_token(func);
+}
+
+void GUI_App::request_helio_supported_data()
+{
+    std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
+    std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+
+    if (!HelioQuery::global_printers_fully_loaded || !HelioQuery::global_materials_fully_loaded) {
+        Slic3r::HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
+        Slic3r::HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
+    }
+}
 
 void GUI_App::remove_mall_system_dialog()
 {

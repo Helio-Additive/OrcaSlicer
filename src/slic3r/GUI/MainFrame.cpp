@@ -37,6 +37,8 @@
 #include "I18N.hpp"
 #include "GLCanvas3D.hpp"
 #include "Plater.hpp"
+#include "Widgets/SwitchButton.hpp"
+#include "HelioReleaseNote.hpp"
 #include "WebViewDialog.hpp"
 #include "../Utils/Process.hpp"
 #include "format.hpp"
@@ -1771,6 +1773,31 @@ wxBoxSizer* MainFrame::create_side_tools()
     int em = em_unit();
     wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
 
+    /*helio*/
+    expand_program_holder = new ExpandButtonHolder(this);
+    expand_program_holder->addExpandButton(expand_helio_id, "helio_icon");
+    expand_program_holder->addExpandButton(expand_program_id, "expand_program");
+    expand_program_holder->Bind(wxEXPAND_LEFT_DOWN, [=](const wxCommandEvent& e) {
+        if (e.GetInt() == expand_helio_id) {
+            BOOST_LOG_TRIVIAL(info) << "Helio button clicked";
+            Plater* plater = wxGetApp().plater();
+            wxCommandEvent evt(EVT_HELIO_INPUT_DLG);
+            evt.SetEventObject(plater);
+            wxPostEvent(plater, evt);
+        }
+
+        if (e.GetInt() == expand_program_id) {
+            ExpandCenterDialog dlg;
+            dlg.ShowModal();
+        }
+    });
+
+    if (wxGetApp().app_config->get_bool("enable_helio_processing")) {
+        expand_program_holder->ShowExpandButton(expand_helio_id, true);
+    } else {
+        expand_program_holder->ShowExpandButton(expand_helio_id, false);
+    }
+
     m_slice_select = eSlicePlate;
     m_print_select = ePrintPlate;
 
@@ -1795,6 +1822,8 @@ wxBoxSizer* MainFrame::create_side_tools()
     update_side_button_style();
     m_slice_option_btn->Enable();
     m_print_option_btn->Enable();
+    sizer->Add(0, 0, 1, wxEXPAND, 0);
+    sizer->Add(expand_program_holder, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(4));
     sizer->Add(FromDIP(15), 0, 0, 0, 0);
     sizer->Add(slice_panel);
     sizer->Add(FromDIP(15), 0, 0, 0, 0);
@@ -1933,6 +1962,23 @@ wxBoxSizer* MainFrame::create_side_tools()
                 });
             m_slice_option_pop_up->append_button(slice_all_btn);
             m_slice_option_pop_up->append_button(slice_plate_btn);
+
+            // Helio cloud slicing option — only shown when enabled
+            if (wxGetApp().app_config->get_bool("enable_helio_processing")) {
+                SideButton* helio_btn = new SideButton(m_slice_option_pop_up, _L("Slice with Helio"), "");
+                helio_btn->SetCornerRadius(0);
+                helio_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+                    BOOST_LOG_TRIVIAL(info) << "Helio button clicked";
+                    Plater* plater = wxGetApp().plater();
+                    wxCommandEvent evt(EVT_HELIO_INPUT_DLG);
+                    evt.SetEventObject(plater);
+                    wxPostEvent(plater, evt);
+                    if (m_slice_option_pop_up)
+                        m_slice_option_pop_up->Dismiss();
+                });
+                m_slice_option_pop_up->append_button(helio_btn);
+            }
+
             m_slice_option_pop_up->Popup(m_slice_btn);
         }
     );
@@ -2329,8 +2375,16 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
     m_slice_enable = enable_slice;
     m_print_enable = enable_print;
 
-    if (!old_slice_status && enable_slice)
+    /*for helio*/
+    if (expand_program_holder) {
+        expand_program_holder->updateExpandButtonBitmap(expand_helio_id, m_print_enable ? "helio_icon" : "helio_icon_disable");
+        expand_program_holder->EnableExpandButton(expand_helio_id, m_print_enable);
+    }
+
+    if (!old_slice_status && enable_slice) {
         m_plater->reset_check_status();
+        m_plater->stop_helio_process();
+    }
 
     if (wxGetApp().mainframe)
         wxGetApp().plater()->update_title_dirty_status();

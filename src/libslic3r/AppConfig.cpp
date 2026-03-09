@@ -441,6 +441,25 @@ void AppConfig::set_defaults()
         set("mouse_wheel", "0");
     }
 
+    // Helio cloud processing options
+    if (get("helio_api_url").empty()) {
+        set("helio_api_url", "https://api.helioadditive.com");
+    }
+    if (get("enable_helio_processing").empty()) {
+        // Migrate from old key if present
+        if (!get("helio_enable").empty()) {
+            set_bool("enable_helio_processing", get_bool("helio_enable"));
+        } else {
+            set_bool("enable_helio_processing", true);
+        }
+    }
+    if (get("helio_api_china").empty()) {
+        set("helio_api_china", "https://api.helioam.cn/graphql");
+    }
+    if (get("helio_api_other").empty()) {
+        set("helio_api_other", "https://api.helioadditive.com/graphql");
+    }
+
     if (get(SETTING_PROJECT_LOAD_BEHAVIOUR).empty()) {
         set(SETTING_PROJECT_LOAD_BEHAVIOUR, OPTION_PROJECT_LOAD_BEHAVIOUR_ASK_WHEN_RELEVANT);
     }

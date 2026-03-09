@@ -186,6 +186,8 @@ class Print;
             float temperature{ 0.0f }; // Celsius degrees
 // ORCA: Add Pressure Advance visualization support
             float pressure_advance{ 0.0f };
+// Helio: Thermal index from simulation
+            float thermal_index_mean{ 0.0f };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
             unsigned int layer_id{ 0 };
@@ -781,6 +783,8 @@ class Print;
         float m_z_offset; // mm
 // ORCA: Add Pressure Advance visualization support
         float m_pressure_advance;
+// Helio: Thermal index from simulation
+        float m_thermal_index_mean{ 0.0f };
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
         std::vector<unsigned char> m_last_filament_id;

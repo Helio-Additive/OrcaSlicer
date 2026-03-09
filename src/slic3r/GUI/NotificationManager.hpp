@@ -76,6 +76,8 @@ enum class NotificationType
 	// Slicing error produced by BackgroundSlicingProcess::validate() or by the BackgroundSlicingProcess background
 	// thread thowing a SlicingError exception.
 	SlicingError,
+	// Helio cloud processing error
+	HelioSlicingError,
 	//Gcode conflict generates slicing severe warning
     SlicingSeriousWarning,
 	// Slicing warnings, issued by the slicing process.
@@ -221,6 +223,8 @@ public:
     void close_slicing_serious_warning_notification(const std::string &text);
 	// Creates Slicing Error notification with a custom text and no fade out.
     void push_slicing_error_notification(const std::string &text, std::vector<ModelObject const *> objs);
+    // Creates Helio Error notification with a custom text and no fade out.
+    void push_helio_error_notification(const std::string &text);
 	// Creates Slicing Warning notification with a custom text and no fade out.
     void push_slicing_warning_notification(const std::string &text, bool gray, ModelObject const *obj, ObjectID oid, int warning_step, int warning_msg_id, NotificationLevel level = NotificationLevel::WarningNotificationLevel);
 	// marks slicing errors as gray

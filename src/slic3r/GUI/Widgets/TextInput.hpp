@@ -1,8 +1,12 @@
 #ifndef slic3r_GUI_TextInput_hpp_
 #define slic3r_GUI_TextInput_hpp_
 
+#include <memory>
+#include <vector>
 #include <wx/textctrl.h>
 #include "StaticBox.hpp"
+
+class TextInputValChecker;
 
 class TextInput : public wxNavigationEnabled<StaticBox>
 {
@@ -13,6 +17,7 @@ class TextInput : public wxNavigationEnabled<StaticBox>
     StateColor     label_color;
     StateColor     text_color;
     wxTextCtrl * text_ctrl;
+    std::vector<std::shared_ptr<TextInputValChecker>> m_checkers;
 
     wxString  static_tips;
     wxSize    static_tips_size;
@@ -66,6 +71,9 @@ public:
 
     wxTextCtrl const *GetTextCtrl() const { return text_ctrl; }
 
+    void SetValCheckers(const std::vector<std::shared_ptr<TextInputValChecker>>& checkers) { m_checkers = checkers; }
+    bool CheckValid(bool pop_dlg = true) const;
+
 protected:
     virtual void OnEdit() {}
 
@@ -82,6 +90,61 @@ private:
     void messureSize();
 
     DECLARE_EVENT_TABLE()
+};
+
+// Validation checkers for TextInput fields (used by Helio dialogs)
+class TextInputValChecker
+{
+protected:
+    TextInputValChecker() = default;
+public:
+    virtual ~TextInputValChecker() = default;
+    virtual wxString CheckValid(const wxString& value) const { return wxEmptyString; }
+
+    static std::shared_ptr<TextInputValChecker> CreateIntMinChecker(int val);
+    static std::shared_ptr<TextInputValChecker> CreateIntRangeChecker(int min, int max);
+    static std::shared_ptr<TextInputValChecker> CreateDoubleMinChecker(double min);
+    static std::shared_ptr<TextInputValChecker> CreateDoubleRangeChecker(double min, double max, bool enable);
+};
+
+class TextInputValIntMinChecker : public TextInputValChecker
+{
+public:
+    TextInputValIntMinChecker(int min_value) : m_min_value(min_value) {}
+    virtual wxString CheckValid(const wxString& value) const override;
+protected:
+    int m_min_value{0};
+};
+
+class TextInputValIntRangeChecker : public TextInputValChecker
+{
+public:
+    TextInputValIntRangeChecker(int min_val, int max_val) : m_min_value(min_val), m_max_value(max_val) {}
+    virtual wxString CheckValid(const wxString& value) const override;
+protected:
+    int m_min_value{0};
+    int m_max_value{0};
+};
+
+class TextInputValDoubleMinChecker : public TextInputValChecker
+{
+public:
+    TextInputValDoubleMinChecker(double min_val) : m_min_value(min_val) {}
+    virtual wxString CheckValid(const wxString& value) const override;
+protected:
+    double m_min_value{0.0};
+};
+
+class TextInputValDoubleRangeChecker : public TextInputValChecker
+{
+public:
+    TextInputValDoubleRangeChecker(double min_val, double max_val, bool enable_empty = false) : m_min_value(min_val), m_max_value(max_val) { EnableEmpty(enable_empty); }
+    virtual wxString CheckValid(const wxString& value) const override;
+    void EnableEmpty(bool enable_empty) { m_enable_empty = enable_empty; }
+protected:
+    bool m_enable_empty = false;
+    double m_min_value{0.0};
+    double m_max_value{0.0};
 };
 
 #endif // !slic3r_GUI_TextInput_hpp_

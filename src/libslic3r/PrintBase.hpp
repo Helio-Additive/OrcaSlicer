@@ -469,6 +469,7 @@ public:
 
         PrintStateBase::SlicingNotificationType  message_type {PrintStateBase::SlicingDefaultNotification};
         PrintStateBase::WarningLevel  warning_level {PrintStateBase::WarningLevel::NON_CRITICAL};
+        bool            is_helio { false };
     };
     typedef std::function<void(const SlicingStatus&)>  status_callback_type;
     // Default status console print out in the form of percent => message.

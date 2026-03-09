@@ -94,6 +94,8 @@ enum class EViewType : uint8_t
     Temperature,
 // ORCA: Add Pressure Advance visualization support
     PressureAdvance,
+// Helio: Thermal index visualization
+    ThermalIndexMean,
     Tool,
     COUNT
 };

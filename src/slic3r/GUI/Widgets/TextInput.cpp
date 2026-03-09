@@ -2,6 +2,8 @@
 #include "Label.hpp"
 #include "TextCtrl.h"
 #include "slic3r/GUI/Widgets/Label.hpp"
+#include "slic3r/GUI/I18N.hpp"
+#include "slic3r/GUI/MsgDialog.hpp"
 
 #include <wx/dcclient.h>
 #include <wx/dcgraph.h>
@@ -338,4 +340,70 @@ void TextInput::messureSize()
     minSize.x = GetMinWidth();
     SetMinSize(minSize);
     SetSize(size);
+}
+
+// TextInputValChecker implementations
+std::shared_ptr<TextInputValChecker> TextInputValChecker::CreateIntMinChecker(int val) {
+    return std::make_shared<TextInputValIntMinChecker>(val);
+}
+
+std::shared_ptr<TextInputValChecker> TextInputValChecker::CreateIntRangeChecker(int min, int max) {
+    return std::make_shared<TextInputValIntRangeChecker>(min, max);
+}
+
+std::shared_ptr<TextInputValChecker> TextInputValChecker::CreateDoubleMinChecker(double min) {
+    return std::make_shared<TextInputValDoubleMinChecker>(min);
+}
+
+std::shared_ptr<TextInputValChecker> TextInputValChecker::CreateDoubleRangeChecker(double min, double max, bool enable) {
+    return std::make_shared<TextInputValDoubleRangeChecker>(min, max, enable);
+}
+
+bool TextInput::CheckValid(bool pop_dlg) const
+{
+    for (auto checker : m_checkers)
+    {
+        wxString error_msg = checker->CheckValid(text_ctrl->GetValue());
+        if (!error_msg.IsEmpty())
+        {
+            text_ctrl->SetBackgroundColour(wxColour(255, 220, 220));
+            text_ctrl->SetToolTip(error_msg);
+            text_ctrl->Refresh();
+            if (pop_dlg)
+            {
+                Slic3r::GUI::MessageDialog dlg(nullptr, error_msg, _L("Error"), wxOK | wxICON_WARNING);
+                dlg.ShowModal();
+            }
+            return false;
+        }
+    }
+    text_ctrl->SetBackgroundColour(*wxWHITE);
+    text_ctrl->SetToolTip(wxEmptyString);
+    text_ctrl->Refresh();
+    return true;
+}
+
+wxString TextInputValIntMinChecker::CheckValid(const wxString& value) const {
+    long num;
+    if (value.ToLong(&num) && num >= m_min_value) { return wxEmptyString; }
+    return wxString::Format(_L("Please input a number greater than or equal to %d"), m_min_value);
+}
+
+wxString TextInputValIntRangeChecker::CheckValid(const wxString& value) const {
+    long num;
+    if (value.ToLong(&num) && num >= m_min_value && num <= m_max_value) { return wxEmptyString; }
+    return wxString::Format(_L("Please enter a number between %d and %d."), m_min_value, m_max_value);
+}
+
+wxString TextInputValDoubleMinChecker::CheckValid(const wxString& value) const {
+    double num;
+    if (value.ToDouble(&num) && num >= m_min_value) { return wxEmptyString; }
+    return wxString::Format(_L("Please enter a float greater than or equal to %f."), m_min_value);
+}
+
+wxString TextInputValDoubleRangeChecker::CheckValid(const wxString& value) const {
+    if (m_enable_empty && value.empty()) { return wxEmptyString; }
+    double num;
+    if (value.ToDouble(&num) && num >= m_min_value && num <= m_max_value) { return wxEmptyString; }
+    return wxString::Format(_L("Please enter a float between %f and %f."), m_min_value, m_max_value);
 }

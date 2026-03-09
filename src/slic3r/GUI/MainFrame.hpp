@@ -25,6 +25,7 @@
 #include "UnsavedChangesDialog.hpp"
 #include "Widgets/SideButton.hpp"
 #include "Widgets/SideMenuPopup.hpp"
+#include "Widgets/SwitchButton.hpp"
 #include "FilamentGroupPopup.hpp"
 
 
@@ -397,6 +398,11 @@ public:
     mutable int m_print_select{ ePrintAll };
     mutable int m_slice_select{ eSliceAll };
     // Button* m_publish_btn{ nullptr };
+    wxWindowID expand_program_id = wxNewId();
+    wxWindowID expand_helio_id = wxNewId();
+    wxStaticBitmap* split_line_icon{nullptr};
+    ExpandButtonHolder* expand_program_holder{nullptr};
+
     SideButton* m_slice_btn{ nullptr };
     SideButton* m_slice_option_btn{ nullptr };
     SideButton* m_print_btn{ nullptr };

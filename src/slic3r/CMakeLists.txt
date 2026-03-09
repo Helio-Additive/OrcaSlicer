@@ -218,6 +218,10 @@ set(SLIC3R_GUI_SOURCES
     GUI/GUI_Preview.hpp
     GUI/GUI_Utils.cpp
     GUI/GUI_Utils.hpp
+    GUI/HelioHistoryDialog.cpp
+    GUI/HelioHistoryDialog.hpp
+    GUI/HelioReleaseNote.cpp
+    GUI/HelioReleaseNote.hpp
     GUI/HintNotification.cpp
     GUI/HintNotification.hpp
     GUI/ThermalPreconditioningDialog.cpp
@@ -498,6 +502,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/FanControl.hpp
     GUI/Widgets/HyperLink.cpp
     GUI/Widgets/HyperLink.hpp
+    GUI/Widgets/LinkLabel.cpp
+    GUI/Widgets/LinkLabel.hpp
     GUI/Widgets/ImageSwitchButton.cpp
     GUI/Widgets/ImageSwitchButton.hpp
     GUI/Widgets/Label.cpp
@@ -624,6 +630,8 @@ set(SLIC3R_GUI_SOURCES
     Utils/OctoPrint.hpp
     Utils/PresetUpdater.cpp
     Utils/PresetUpdater.hpp
+    Utils/HelioDragon.cpp
+    Utils/HelioDragon.hpp
     Utils/PrintHost.cpp
     Utils/PrintHost.hpp
     Utils/Process.cpp
