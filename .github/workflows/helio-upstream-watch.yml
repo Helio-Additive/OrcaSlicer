@@ -171,13 +171,13 @@ jobs:
           ISSUE_NUMBER=$(gh issue list --label "upstream-watch" --state open --limit 1 --json number --jq '.[0].number // empty')
 
           if [ -z "$ISSUE_NUMBER" ]; then
-            # Create new issue
-            ISSUE_NUMBER=$(gh issue create \
+            # Create new issue — gh issue create returns a URL, extract the number
+            ISSUE_URL=$(gh issue create \
               --title "Upstream Activity Watch" \
               --label "upstream-watch" \
               --assignee "HelioPri" \
-              --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow." \
-              --json number --jq '.number')
+              --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow.")
+            ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
             echo "Created new watch issue #$ISSUE_NUMBER"
           fi
 
