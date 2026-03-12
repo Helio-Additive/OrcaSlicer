@@ -49,11 +49,18 @@ public:
 
 	// return true if HintData filled;
 	HintData* get_hint(HintDataNavigation nav);
+	HintData* get_hint(HintDataNavigation nav, bool is_helio);
 	size_t	  get_index() { return m_hint_id; }
+	size_t	  get_index(bool is_helio) { return is_helio ? m_helio_hint_id : m_hint_id; }
 	size_t    get_count() {
 		if (!m_initialized)
 			return 0;
 		return m_loaded_hints.size();
+	}
+	size_t    get_count(bool is_helio) {
+		if (!m_initialized)
+			return 0;
+		return is_helio ? m_loaded_helio_hints.size() : m_loaded_hints.size();
 	}
 	// resets m_initiailized to false and writes used if was initialized
 	// used when reloading in runtime - like change language
@@ -76,6 +83,9 @@ private:
 	bool						m_sorted_hints{ false };
 	std::vector<std::string>    m_used_ids;
 	bool                        m_used_ids_loaded{ false };
+	// Helio-specific hints
+	std::vector<HintData>       m_loaded_helio_hints;
+	size_t                      m_helio_hint_id{ 0 };
 };
 // Notification class - shows current Hint ("Did you know") 
 class NotificationManager::HintNotification : public NotificationManager::PopNotification

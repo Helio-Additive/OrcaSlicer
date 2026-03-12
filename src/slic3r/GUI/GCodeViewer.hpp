@@ -9,6 +9,7 @@
 #include "I18N.hpp"
 
 #include <boost/iostreams/device/mapped_file.hpp>
+#include <unordered_map>
 
 #include "LibVGCode/LibVGCodeWrapper.hpp"
 // needed for tech VGCODE_ENABLE_COG_AND_TOOL_MARKERS
@@ -124,6 +125,9 @@ public:
             std::vector<size_t> m_lines_ends;
             // current visible lines
             std::vector<Line> m_lines;
+            // Helio: gcode_id → vertex index lookup for TI columns
+            mutable std::unordered_map<uint32_t, size_t> m_gcode_id_to_vertex;
+            mutable bool m_ti_map_valid{ false };
 
         public:
             float m_scale = 1.0f;
@@ -138,11 +142,14 @@ public:
                 m_lines.shrink_to_fit();
                 m_filename.clear();
                 m_filename.shrink_to_fit();
+                m_gcode_id_to_vertex.clear();
+                m_ti_map_valid = false;
             }
 
             //BBS: GUI refactor: add canvas size
-            //void render(float top, float bottom, uint64_t curr_line_id) const;
-            void render(float top, float bottom, float right, uint64_t curr_line_id) const;
+            void render(float top, float bottom, float right, uint64_t curr_line_id,
+                        const libvgcode::Viewer* viewer = nullptr,
+                        const libvgcode::EViewType& view_type = libvgcode::EViewType::FeatureType) const;
             void on_change_color_mode(bool is_dark) { m_is_dark = is_dark; }
 
             void stop_mapping_file();
@@ -239,6 +246,7 @@ mutable bool m_no_render_path { false };
 
     libvgcode::Viewer m_viewer;
     bool m_loaded_as_preview{ false };
+    bool m_has_thermal_index_data{ false };
 
 public:
     GCodeViewer();

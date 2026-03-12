@@ -96,6 +96,8 @@ enum class EViewType : uint8_t
     PressureAdvance,
 // Helio: Thermal index visualization
     ThermalIndexMean,
+    ThermalIndexMin,
+    ThermalIndexMax,
     Tool,
     COUNT
 };

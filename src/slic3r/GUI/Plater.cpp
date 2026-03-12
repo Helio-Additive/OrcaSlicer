@@ -7896,6 +7896,18 @@ bool Plater::priv::restart_background_process(unsigned int state)
            (state & UPDATE_BACKGROUND_PROCESS_FORCE_EXPORT) != 0 ||
            (state & UPDATE_BACKGROUND_PROCESS_RESTART) != 0 ) ) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%: print is valid, try to start it now")%__LINE__;
+        // Helio: auto-stop running helio when reslicing (FIX-4)
+        if (helio_background_process.is_running()) {
+            helio_background_process.stop_current_helio_action();
+            helio_background_process.stop();
+            helio_background_process.reset();
+            helio_processing_disabled = false;
+        }
+        // Helio: clear previous helio result on reslice so View Summary disappears
+        {
+            PartPlate* plate = background_process.get_current_plate();
+            if (plate) plate->clear_helio_result();
+        }
         // The print is valid and it can be started.
         if (this->background_process.start()) {
             if (!show_warning_dialog)
@@ -7907,6 +7919,15 @@ bool Plater::priv::restart_background_process(unsigned int state)
     else if (this->background_process.empty()) {
         PartPlate* cur_plate = background_process.get_current_plate();
         if (cur_plate->is_slice_result_valid() && ((state & UPDATE_BACKGROUND_PROCESS_FORCE_RESTART) != 0)) {
+            // Helio: auto-stop running helio when reslicing (FIX-4)
+            if (helio_background_process.is_running()) {
+                helio_background_process.stop_current_helio_action();
+                helio_background_process.stop();
+                helio_background_process.reset();
+                helio_processing_disabled = false;
+            }
+            // Helio: clear previous helio result on reslice (FIX-1)
+            if (cur_plate) cur_plate->clear_helio_result();
             if (this->background_process.start()) {
                 if (!show_warning_dialog)
                     on_slicing_began();
@@ -12267,10 +12288,22 @@ void Plater::priv::init_notification_manager()
     notification_manager->init();
 
     auto cancel_callback = [this]() {
-        if (this->background_process.idle())
-            return false;
-        this->background_process.stop();
-        return true;
+        bool res1 = false;
+        bool res2 = false;
+
+        if (this->helio_background_process.is_running()) {
+            this->helio_background_process.stop_current_helio_action();
+            this->helio_background_process.stop();
+            res1 = true;
+            notification_manager->set_slicing_progress_hidden();
+        }
+
+        if (!this->background_process.idle()) {
+            this->background_process.stop();
+            res2 = true;
+        }
+
+        return res1 || res2;
     };
     notification_manager->init_slicing_progress_notification(cancel_callback);
     notification_manager->set_fff(printer_technology == ptFFF);
@@ -17258,8 +17291,14 @@ void Plater::feedback_helio_process(float rating, std::string commend)
 
 void Plater::stop_helio_process()
 {
-    p->helio_background_process.stop();
-    p->helio_background_process.clear_helio_file_cache();
+    if (p->helio_background_process.is_running()) {
+        p->helio_background_process.clear_helio_file_cache();
+        PartPlate* plate = p->background_process.get_current_plate();
+        if (plate) plate->clear_helio_result();
+        p->helio_background_process.reset();
+        p->helio_background_process.stop_current_helio_action();
+        p->helio_background_process.stop();
+    }
     p->helio_processing_disabled = false;
 }
 
@@ -17471,6 +17510,9 @@ void Plater::reslice()
 
     if (result) {
         p->m_is_slicing = true;
+
+        // Helio: clear cached helio files on reslice (per-plate results already cleared in restart_background_process)
+        p->helio_background_process.clear_helio_file_cache();
     }
 
     bool clean_gcode_toolpaths = true;

@@ -1799,6 +1799,9 @@ wxBoxSizer* MainFrame::create_side_tools()
         expand_program_holder->ShowExpandButton(expand_helio_id, false);
     }
 
+    // Helio tooltip
+    expand_program_holder->SetExpandButtonRichTooltip(expand_helio_id, "monitor_speed", _L("Unlock faster, more reliable, warp-free prints with Helio Additive."));
+
     m_slice_select = eSlicePlate;
     m_print_select = ePrintPlate;
 
@@ -2378,8 +2381,17 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
 
     /*for helio*/
     if (expand_program_holder) {
-        expand_program_holder->updateExpandButtonBitmap(expand_helio_id, m_print_enable ? "helio_icon" : "helio_icon_disable");
-        expand_program_holder->EnableExpandButton(expand_helio_id, m_print_enable);
+        bool helio_enable = m_print_enable;
+        if (!helio_enable) {
+            // For non-BBL printers, the print button may be disabled due to
+            // missing print_host config, but Helio only needs valid slice results
+            if (wxGetApp().preset_bundle && !wxGetApp().preset_bundle->is_bbl_vendor()) {
+                PartPlate *curr_plate = m_plater->get_partplate_list().get_curr_plate();
+                helio_enable = curr_plate && curr_plate->is_slice_result_valid();
+            }
+        }
+        expand_program_holder->updateExpandButtonBitmap(expand_helio_id, helio_enable ? "helio_icon" : "helio_icon_disable");
+        expand_program_holder->EnableExpandButton(expand_helio_id, helio_enable);
     }
 
     if (!old_slice_status && enable_slice) {

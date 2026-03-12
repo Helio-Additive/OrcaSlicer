@@ -2425,6 +2425,7 @@ void NotificationManager::set_slicing_progress_began(bool is_helio)
 	for (std::unique_ptr<PopNotification> & notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* spn = dynamic_cast<SlicingProgressNotification*>(notification.get());
+			spn->get_dailytips_panel()->set_is_helio(is_helio);
 			spn->set_progress_state(SlicingProgressNotification::SlicingProgressState::SP_BEGAN);
 			return;
 		}
@@ -2437,6 +2438,7 @@ void NotificationManager::set_slicing_progress_percentage(const std::string& tex
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* spn = dynamic_cast<SlicingProgressNotification*>(notification.get());
+			spn->get_dailytips_panel()->set_is_helio(is_helio);
 			if(spn->set_progress_state(percentage)) {
 				spn->set_status_text(text);
 				wxGetApp().plater()->get_current_canvas3D()->schedule_extra_frame(0);
@@ -2466,6 +2468,7 @@ void NotificationManager::set_slicing_progress_hidden()
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* notif = dynamic_cast<SlicingProgressNotification*>(notification.get());
+			notif->get_dailytips_panel()->set_is_helio(false);
 			notif->set_progress_state(SlicingProgressNotification::SlicingProgressState::SP_NO_SLICING);
 			wxGetApp().plater()->get_current_canvas3D()->schedule_extra_frame(0);
 			return;

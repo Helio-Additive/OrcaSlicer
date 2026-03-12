@@ -153,6 +153,7 @@ class Print;
         GCodeCheckResult  gcode_check_result;
         FilamentPrintableResult filament_printable_reuslt;
         float initial_layer_time;
+        bool is_helio_gcode{false};
 
         struct SettingsIds
         {
@@ -187,7 +188,9 @@ class Print;
 // ORCA: Add Pressure Advance visualization support
             float pressure_advance{ 0.0f };
 // Helio: Thermal index from simulation
-            float thermal_index_mean{ 0.0f };
+            float thermal_index_mean{ -200.0f };
+            float thermal_index_min{ -200.0f };
+            float thermal_index_max{ -200.0f };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
             unsigned int layer_id{ 0 };
@@ -288,6 +291,7 @@ class Print;
             layer_filaments = other.layer_filaments;
             filament_change_count_map = other.filament_change_count_map;
             initial_layer_time = other.initial_layer_time;
+            is_helio_gcode = other.is_helio_gcode;
 #if ENABLE_GCODE_VIEWER_STATISTICS
             time = other.time;
 #endif
@@ -784,7 +788,10 @@ class Print;
 // ORCA: Add Pressure Advance visualization support
         float m_pressure_advance;
 // Helio: Thermal index from simulation
-        float m_thermal_index_mean{ 0.0f };
+        float m_thermal_index_mean{ -200.0f };
+        float m_thermal_index_min{ -200.0f };
+        float m_thermal_index_max{ -200.0f };
+        bool m_is_helio_gcode{false};
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
         std::vector<unsigned char> m_last_filament_id;

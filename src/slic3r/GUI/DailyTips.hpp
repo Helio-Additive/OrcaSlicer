@@ -51,8 +51,13 @@ private:
     int m_uid;
     bool m_first_enter{ false };
     bool m_is_dark{ false };
+    bool m_is_helio{ false };
     DailyTipsLayout m_layout{ DailyTipsLayout::Vertical };
     float m_fade_opacity{ 1.0f };
+
+public:
+    void set_is_helio(bool is_helio) { m_is_helio = is_helio; }
+    bool get_is_helio() const { return m_is_helio; }
 };
 
 class DailyTipsWindow {

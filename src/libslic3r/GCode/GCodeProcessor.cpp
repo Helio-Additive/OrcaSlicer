@@ -1584,6 +1584,7 @@ void GCodeProcessorResult::reset() {
     layer_filaments.clear();
     filament_change_count_map.clear();
     warnings.clear();
+    is_helio_gcode = false;
 
     //BBS: add mutex for protection of gcode result
     unlock();
@@ -2424,6 +2425,7 @@ void GCodeProcessor::reset()
     m_travel_dist = 0.0f;
     m_fan_speed = 0.0f;
     m_z_offset = 0.0f;
+    m_is_helio_gcode = false;
 
     m_extrusion_role = erNone;
 
@@ -2612,6 +2614,7 @@ void GCodeProcessor::finalize(bool post_process)
     update_estimated_times_stats();
 
     m_result.initial_layer_time = get_first_layer_time(PrintEstimatedStatistics::ETimeMode::Normal);
+    m_result.is_helio_gcode = m_is_helio_gcode;
 
     if (post_process){
         run_post_process();
@@ -3716,6 +3719,10 @@ void GCodeProcessor::process_G0(const GCodeReader::GCodeLine& line)
 void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::optional<unsigned int>& remaining_internal_g1_lines)
 {
     // Extract thermal index from helioadditive comment BEFORE storing the move vertex
+    // Reset to null sentinel each G1 so non-helioadditive lines render grey
+    m_thermal_index_mean = -200.0f;
+    m_thermal_index_min = -200.0f;
+    m_thermal_index_max = -200.0f;
     {
         const std::string& raw = line.raw();
         auto pos = raw.find(";helioadditive=");
@@ -3724,7 +3731,10 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
             std::smatch match;
             std::string comment_str = raw.substr(pos);
             if (std::regex_search(comment_str, match, thermal_re)) {
+                m_thermal_index_max = static_cast<float>(std::atof(match[1].str().c_str())) * 100.0f;
+                m_thermal_index_min = static_cast<float>(std::atof(match[2].str().c_str())) * 100.0f;
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
+                m_is_helio_gcode = true;
             }
         }
     }
@@ -4463,6 +4473,27 @@ void GCodeProcessor::process_VG1(const GCodeReader::GCodeLine& line)
 
 void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool clockwise)
 {
+    // Helio: parse thermal index from helioadditive comment on G2/G3 lines
+    // (same logic as in process_G1 line-based overload)
+    m_thermal_index_mean = -200.0f;
+    m_thermal_index_min = -200.0f;
+    m_thermal_index_max = -200.0f;
+    {
+        const std::string& raw = line.raw();
+        auto pos = raw.find(";helioadditive=");
+        if (pos != std::string::npos) {
+            static const std::regex thermal_re("ti\\.max=(-?[0-9]*\\.?[0-9]+),ti\\.min=(-?[0-9]*\\.?[0-9]+),ti\\.mean=(-?[0-9]*\\.?[0-9]+)");
+            std::smatch match;
+            std::string comment_str = raw.substr(pos);
+            if (std::regex_search(comment_str, match, thermal_re)) {
+                m_thermal_index_max = static_cast<float>(std::atof(match[1].str().c_str())) * 100.0f;
+                m_thermal_index_min = static_cast<float>(std::atof(match[2].str().c_str())) * 100.0f;
+                m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
+                m_is_helio_gcode = true;
+            }
+        }
+    }
+
     enum class EFitting { None, IJ, R };
     std::string_view axis_pos_I;
     std::string_view axis_pos_J;
@@ -5513,6 +5544,8 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_pressure_advance,
 // Helio: Thermal index from simulation
         m_thermal_index_mean,
+        m_thermal_index_min,
+        m_thermal_index_max,
         { 0.0f, 0.0f }, // time
         static_cast<float>(m_layer_id), //layer_duration: set later
         std::max<unsigned int>(1, m_layer_id) - 1,

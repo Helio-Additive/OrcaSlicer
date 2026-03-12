@@ -626,6 +626,7 @@ public:
     void            remove_ping_bind_dialog();
 
     // Helio cloud processing
+    bool            is_helio_enable();
     static void     request_helio_pat(std::function<void(std::string)> func);
     static void     request_helio_supported_data();
 

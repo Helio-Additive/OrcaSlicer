@@ -1502,9 +1502,20 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     case EViewType::ThermalIndexMean:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        // "null" thermal index (< -100) renders as grey
         if (v.thermal_index_mean < -100.0f) return DUMMY_COLOR;
         return m_thermal_index_mean_range.get_color_at(v.thermal_index_mean);
+    }
+    case EViewType::ThermalIndexMin:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        if (v.thermal_index_min < -100.0f) return DUMMY_COLOR;
+        return m_thermal_index_min_range.get_color_at(v.thermal_index_min);
+    }
+    case EViewType::ThermalIndexMax:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        if (v.thermal_index_max < -100.0f) return DUMMY_COLOR;
+        return m_thermal_index_max_range.get_color_at(v.thermal_index_max);
     }
     case EViewType::VolumetricFlowRate:
     {
@@ -1598,6 +1609,8 @@ const ColorRange& ViewerImpl::get_color_range(EViewType type) const
 // ORCA: Add Pressure Advance visualization support
     case EViewType::PressureAdvance:          { return m_pressure_advance_range; }
     case EViewType::ThermalIndexMean:         { return m_thermal_index_mean_range; }
+    case EViewType::ThermalIndexMin:          { return m_thermal_index_min_range; }
+    case EViewType::ThermalIndexMax:          { return m_thermal_index_max_range; }
     case EViewType::VolumetricFlowRate:       { return m_volumetric_rate_range; }
     case EViewType::ActualVolumetricFlowRate: { return m_actual_volumetric_rate_range; }
     case EViewType::LayerTimeLinear:          { return m_layer_time_range[0]; }
@@ -1619,6 +1632,8 @@ void ViewerImpl::set_color_range_palette(EViewType type, const Palette& palette)
 // ORCA: Add Pressure Advance visualization support
     case EViewType::PressureAdvance:          { m_pressure_advance_range.set_palette(palette); break; }
     case EViewType::ThermalIndexMean:         { m_thermal_index_mean_range.set_palette(palette); break; }
+    case EViewType::ThermalIndexMin:          { m_thermal_index_min_range.set_palette(palette); break; }
+    case EViewType::ThermalIndexMax:          { m_thermal_index_max_range.set_palette(palette); break; }
     case EViewType::VolumetricFlowRate:       { m_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::ActualVolumetricFlowRate: { m_actual_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::LayerTimeLinear:          { m_layer_time_range[0].set_palette(palette);   break; }
@@ -1659,6 +1674,8 @@ size_t ViewerImpl::get_used_cpu_memory() const
     // ORCA: Add Pressure Advance visualization support
     ret += m_pressure_advance_range.size_in_bytes_cpu();
     ret += m_thermal_index_mean_range.size_in_bytes_cpu();
+    ret += m_thermal_index_min_range.size_in_bytes_cpu();
+    ret += m_thermal_index_max_range.size_in_bytes_cpu();
     ret += m_volumetric_rate_range.size_in_bytes_cpu();
     ret += m_actual_volumetric_rate_range.size_in_bytes_cpu();
     for (size_t i = 0; i < COLOR_RANGE_TYPES_COUNT; ++i) {
@@ -1812,6 +1829,8 @@ void ViewerImpl::update_color_ranges()
     // ORCA: Add Pressure Advance visualization support
     m_pressure_advance_range.reset();
     m_thermal_index_mean_range.reset();
+    m_thermal_index_min_range.reset();
+    m_thermal_index_max_range.reset();
     // Helio: Use custom TI palette (blue→green→red) matching BambuStudio
     static const Palette TI_PALETTE{ {
         {  11,  44, 122 },  // #0b2c7a  -100 (blue)
@@ -1827,9 +1846,15 @@ void ViewerImpl::update_color_ranges()
         { 146,  38,  22 },  // #922616 +100 (red)
     } };
     m_thermal_index_mean_range.set_palette(TI_PALETTE);
+    m_thermal_index_min_range.set_palette(TI_PALETTE);
+    m_thermal_index_max_range.set_palette(TI_PALETTE);
     // Anchor to fixed [-100, +100] so colors always match the legend
     m_thermal_index_mean_range.update(-100.0f);
     m_thermal_index_mean_range.update(100.0f);
+    m_thermal_index_min_range.update(-100.0f);
+    m_thermal_index_min_range.update(100.0f);
+    m_thermal_index_max_range.update(-100.0f);
+    m_thermal_index_max_range.update(100.0f);
     m_volumetric_rate_range.reset();
     m_actual_volumetric_rate_range.reset();
     m_layer_time_range[0].reset(); // ColorRange::EType::Linear
@@ -1852,6 +1877,10 @@ void ViewerImpl::update_color_ranges()
             // Helio: Thermal index
             if (v.thermal_index_mean > -100.0f)
                 m_thermal_index_mean_range.update(v.thermal_index_mean);
+            if (v.thermal_index_min > -100.0f)
+                m_thermal_index_min_range.update(v.thermal_index_min);
+            if (v.thermal_index_max > -100.0f)
+                m_thermal_index_max_range.update(v.thermal_index_max);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
             (v.is_wipe() && m_settings.options_visibility[size_t(EOptionType::Wipes)]) ||

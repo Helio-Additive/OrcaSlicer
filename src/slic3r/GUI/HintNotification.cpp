@@ -299,6 +299,8 @@ void HintDatabase::uninit()
 	}
 	m_initialized = false;
 	m_loaded_hints.clear();
+	m_loaded_helio_hints.clear();
+	m_helio_hint_id = 0;
 	m_sorted_hints = false;
 	m_used_ids.clear();
 	m_used_ids_loaded = false;
@@ -312,6 +314,22 @@ void HintDatabase::reinit()
 void HintDatabase::init()
 {
 	load_hints_from_file(std::move(boost::filesystem::path(resources_dir()) / "data" / "hints.ini"));
+	// Load helio-specific hints
+	{
+		boost::filesystem::path helio_path = boost::filesystem::path(resources_dir()) / "data" / "helio_hints.ini";
+		if (boost::filesystem::exists(helio_path)) {
+			// Temporarily swap m_loaded_hints so load_hints_from_file populates helio vector
+			std::vector<HintData> tmp;
+			std::swap(m_loaded_hints, tmp);
+			load_hints_from_file(helio_path);
+			std::swap(m_loaded_hints, m_loaded_helio_hints);
+			std::swap(m_loaded_hints, tmp);
+			if (!m_loaded_helio_hints.empty()) {
+				srand(time(NULL));
+				m_helio_hint_id = rand() % m_loaded_helio_hints.size();
+			}
+		}
+	}
 	m_initialized = true;
 	init_random_hint_id();
 }
@@ -508,6 +526,35 @@ HintData* HintDatabase::get_hint(HintDataNavigation nav)
 	}
 
 	return &m_loaded_hints[m_hint_id];
+}
+
+HintData* HintDatabase::get_hint(HintDataNavigation nav, bool is_helio)
+{
+	if (!is_helio)
+		return get_hint(nav);
+
+	if (!m_initialized) {
+		init();
+		nav = HintDataNavigation::Random;
+	}
+	if (m_loaded_helio_hints.empty()) {
+		BOOST_LOG_TRIVIAL(error) << "There were no hints loaded from helio_hints.ini file.";
+		return nullptr;
+	}
+
+	try {
+		if (nav == HintDataNavigation::Next)
+			m_helio_hint_id = m_helio_hint_id < m_loaded_helio_hints.size() - 1 ? m_helio_hint_id + 1 : 0;
+		if (nav == HintDataNavigation::Prev)
+			m_helio_hint_id = m_helio_hint_id > 0 ? m_helio_hint_id - 1 : m_loaded_helio_hints.size() - 1;
+		if (nav == HintDataNavigation::Random)
+			m_helio_hint_id = rand() % m_loaded_helio_hints.size();
+	}
+	catch (const std::exception&) {
+		return nullptr;
+	}
+
+	return &m_loaded_helio_hints[m_helio_hint_id];
 }
 
 size_t HintDatabase::get_next_hint_id()

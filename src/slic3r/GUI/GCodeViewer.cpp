@@ -97,6 +97,10 @@ else if (view_type == libvgcode::EViewType::LayerTimeLogarithmic)
 // Helio: Thermal index visualization
     else if (view_type == libvgcode::EViewType::ThermalIndexMean)
         return _u8L("Thermal Index (mean)");
+    else if (view_type == libvgcode::EViewType::ThermalIndexMin)
+        return _u8L("Thermal Index (min)");
+    else if (view_type == libvgcode::EViewType::ThermalIndexMax)
+        return _u8L("Thermal Index (max)");
     return "";
 }
 
@@ -408,6 +412,24 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                     sprintf(buff, "%.4f", vertex.pressure_advance);
                     ImGuiWrapper::text(std::string(buff));
                 });
+// Helio: Show TI values in tooltip when in a TI view
+                if (view_type == libvgcode::EViewType::ThermalIndexMean ||
+                    view_type == libvgcode::EViewType::ThermalIndexMin ||
+                    view_type == libvgcode::EViewType::ThermalIndexMax) {
+                    auto ti_str = [](float val) -> std::string {
+                        if (val < -100.0f) return "null";
+                        char b[32]; sprintf(b, "%.1f", val); return b;
+                    };
+                    append_table_row(_u8L("TI Min"), [&vertex, &ti_str]() {
+                        ImGuiWrapper::text(ti_str(vertex.thermal_index_min));
+                    });
+                    append_table_row(_u8L("TI Mean"), [&vertex, &ti_str]() {
+                        ImGuiWrapper::text(ti_str(vertex.thermal_index_mean));
+                    });
+                    append_table_row(_u8L("TI Max"), [&vertex, &ti_str]() {
+                        ImGuiWrapper::text(ti_str(vertex.thermal_index_max));
+                    });
+                }
                 append_table_row(_u8L("Time"), [viewer, &vertex, &buff, vertex_id]() {
                     const float estimated_time = viewer->get_estimated_time_at(vertex_id);
                     sprintf(buff, "%s (%.3fs)", get_time_dhms(estimated_time).c_str(), vertex.times[static_cast<size_t>(viewer->get_time_mode())]);
@@ -625,10 +647,24 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                 }
 // Helio: Thermal index visualization
                 case libvgcode::EViewType::ThermalIndexMean: {
-                    if (is_extrusion && vertex.thermal_index_mean > -101.0f)
+                    if (is_extrusion && vertex.thermal_index_mean > -100.0f)
                         sprintf(buf, "%s %s%.1f", buf, _u8L("TI Mean: ").c_str(), vertex.thermal_index_mean);
                     else
                         sprintf(buf, "%s %s%s", buf, _u8L("TI Mean: ").c_str(), "null");
+                    break;
+                }
+                case libvgcode::EViewType::ThermalIndexMin: {
+                    if (is_extrusion && vertex.thermal_index_min > -100.0f)
+                        sprintf(buf, "%s %s%.1f", buf, _u8L("TI Min: ").c_str(), vertex.thermal_index_min);
+                    else
+                        sprintf(buf, "%s %s%s", buf, _u8L("TI Min: ").c_str(), "null");
+                    break;
+                }
+                case libvgcode::EViewType::ThermalIndexMax: {
+                    if (is_extrusion && vertex.thermal_index_max > -100.0f)
+                        sprintf(buf, "%s %s%.1f", buf, _u8L("TI Max: ").c_str(), vertex.thermal_index_max);
+                    else
+                        sprintf(buf, "%s %s%s", buf, _u8L("TI Max: ").c_str(), "null");
                     break;
                 }
 
@@ -705,6 +741,9 @@ void GCodeViewer::SequentialView::GCodeWindow::load_gcode(const std::string& fil
 
     m_filename   = filename;
     m_lines_ends = lines_ends;
+    // Helio: invalidate TI vertex lookup on new gcode load
+    m_gcode_id_to_vertex.clear();
+    m_ti_map_valid = false;
 
     m_selected_line_id = 0;
     m_last_lines_size = 0;
@@ -722,7 +761,9 @@ void GCodeViewer::SequentialView::GCodeWindow::load_gcode(const std::string& fil
 }
 
 //BBS: GUI refactor: move to right
-void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, float right, uint64_t curr_line_id) const
+void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, float right, uint64_t curr_line_id,
+                                                       const libvgcode::Viewer* viewer,
+                                                       const libvgcode::EViewType& view_type) const
 {
     // Orca: truncate long lines(>55 characters), add "..." at the end
     auto update_lines = [this](uint64_t start_id, uint64_t end_id) {
@@ -767,6 +808,23 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
     static const ImVec4 COMMAND_COLOR        = {0.8f, 0.8f, 0.0f, 1.0f};
     static const ImVec4 PARAMETERS_COLOR     = { 1.0f, 1.0f, 1.0f, 1.0f };
     static const ImVec4 COMMENT_COLOR        = { 0.7f, 0.7f, 0.7f, 1.0f };
+
+    // Helio: determine if TI columns should be shown
+    const bool show_ti_columns = viewer != nullptr &&
+        (view_type == libvgcode::EViewType::ThermalIndexMean ||
+         view_type == libvgcode::EViewType::ThermalIndexMin ||
+         view_type == libvgcode::EViewType::ThermalIndexMax);
+
+    // Lazily build gcode_id → vertex index map
+    if (show_ti_columns && !m_ti_map_valid) {
+        m_gcode_id_to_vertex.clear();
+        const size_t vcount = viewer->get_vertices_count();
+        for (size_t i = 0; i < vcount; ++i) {
+            const auto& v = viewer->get_vertex_at(i);
+            m_gcode_id_to_vertex[v.gcode_id] = i;
+        }
+        m_ti_map_valid = true;
+    }
 
     if (!wxGetApp().show_gcode_window() || m_filename.empty() || m_lines_ends.empty() || curr_line_id == 0)
         return;
@@ -832,6 +890,11 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
         }
 
         required_width = id_width + max_text_width;
+        // Helio: add space for TI columns (3 × value width + spacing)
+        if (show_ti_columns) {
+            const float ti_col_width = ImGui::CalcTextSize("-99.00").x + ImGui::GetStyle().ItemSpacing.x;
+            required_width += 3 * ti_col_width;
+        }
     }
 
     ImGuiWrapper& imgui = *wxGetApp().imgui();
@@ -874,6 +937,39 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
         ImGui::PushStyleColor(ImGuiCol_Text, LINE_NUMBER_COLOR);
         imgui.text(id_str);
         ImGui::PopStyleColor();
+
+        // Helio: render TI columns inline
+        if (show_ti_columns) {
+            ImGui::SameLine();
+            auto render_ti_val = [&](float val) {
+                char tb[16];
+                if (val < -100.0f) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, COMMENT_COLOR);
+                    imgui.text(std::string("  -"));
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, PARAMETERS_COLOR);
+                    sprintf(tb, "%5.1f", val);
+                    imgui.text(std::string(tb));
+                    ImGui::PopStyleColor();
+                }
+            };
+            auto it = m_gcode_id_to_vertex.find(static_cast<uint32_t>(id));
+            if (it != m_gcode_id_to_vertex.end()) {
+                const auto& v = viewer->get_vertex_at(it->second);
+                render_ti_val(v.thermal_index_min);
+                ImGui::SameLine();
+                render_ti_val(v.thermal_index_mean);
+                ImGui::SameLine();
+                render_ti_val(v.thermal_index_max);
+            } else {
+                render_ti_val(-200.0f);
+                ImGui::SameLine();
+                render_ti_val(-200.0f);
+                ImGui::SameLine();
+                render_ti_val(-200.0f);
+            }
+        }
 
         if (!line.command.empty() || !line.comment.empty())
             ImGui::SameLine();
@@ -930,7 +1026,7 @@ void GCodeViewer::SequentialView::render(const bool has_render_path, float legen
         bottom -= wxGetApp().plater()->get_view_toolbar().get_height();
 #endif
     if (has_render_path)
-        gcode_window.render(legend_height + 2, std::max(10.f, (float)canvas_height - 40), (float)canvas_width - (float)right_margin, gcode_id);
+        gcode_window.render(legend_height + 2, std::max(10.f, (float)canvas_height - 40), (float)canvas_width - (float)right_margin, gcode_id, viewer, view_type);
 }
 
 GCodeViewer::GCodeViewer()
@@ -1050,8 +1146,12 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
     view_type_items.push_back(libvgcode::EViewType::Temperature);
 // ORCA: Add Pressure Advance visualization support
     view_type_items.push_back(libvgcode::EViewType::PressureAdvance);
-// Helio: Thermal index visualization
-    view_type_items.push_back(libvgcode::EViewType::ThermalIndexMean);
+// Helio: Thermal index visualization (only show when gcode has TI data)
+    if (m_has_thermal_index_data) {
+        view_type_items.push_back(libvgcode::EViewType::ThermalIndexMean);
+        view_type_items.push_back(libvgcode::EViewType::ThermalIndexMin);
+        view_type_items.push_back(libvgcode::EViewType::ThermalIndexMax);
+    }
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -1231,6 +1331,18 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     // send data to the viewer
     m_viewer.reset_default_extrusion_roles_colors();
     m_viewer.load(std::move(data));
+
+    // Helio: detect whether this gcode has any thermal index data
+    m_has_thermal_index_data = false;
+    {
+        const size_t vcount = m_viewer.get_vertices_count();
+        for (size_t i = 0; i < vcount; ++i) {
+            if (m_viewer.get_vertex_at(i).thermal_index_mean > -100.0f) {
+                m_has_thermal_index_data = true;
+                break;
+            }
+        }
+    }
 
 // #if !VGCODE_ENABLE_COG_AND_TOOL_MARKERS
 //     const size_t vertices_count = m_viewer.get_vertices_count();
@@ -1442,6 +1554,18 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
     m_viewer.set_extrusion_role_color(libvgcode::EGCodeExtrusionRole::SolidInfill,              { 255, 127, 127 });
     m_viewer.set_extrusion_role_color(libvgcode::EGCodeExtrusionRole::WipeTower,                { 127, 255, 127 });
     m_viewer.load(std::move(data));
+
+    // Helio: detect whether this gcode has any thermal index data
+    m_has_thermal_index_data = false;
+    {
+        const size_t vcount = m_viewer.get_vertices_count();
+        for (size_t i = 0; i < vcount; ++i) {
+            if (m_viewer.get_vertex_at(i).thermal_index_mean > -100.0f) {
+                m_has_thermal_index_data = true;
+                break;
+            }
+        }
+    }
 
     const libvgcode::AABox bbox = m_viewer.get_extrusion_bounding_box();
     const BoundingBoxf3 paths_bounding_box(libvgcode::convert(bbox[0]).cast<double>(), libvgcode::convert(bbox[1]).cast<double>());
@@ -3540,6 +3664,10 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         { imgui.title(_u8L("Layer Time (log)")); break; }
     case libvgcode::EViewType::ThermalIndexMean:
         { imgui.title(_u8L("Thermal Index (mean)")); break; }
+    case libvgcode::EViewType::ThermalIndexMin:
+        { imgui.title(_u8L("Thermal Index (min)")); break; }
+    case libvgcode::EViewType::ThermalIndexMax:
+        { imgui.title(_u8L("Thermal Index (max)")); break; }
 
     case libvgcode::EViewType::Tool:
     {
@@ -3719,6 +3847,36 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         const auto& palette = range.get_palette();
         const int n = static_cast<int>(palette.size());
         // Fixed scale: +100 to -100, evenly spaced across palette entries
+        for (int i = n - 1; i >= 0; --i) {
+            float value = 100.0f - 200.0f * static_cast<float>(n - 1 - i) / static_cast<float>(n - 1);
+            char buf[64];
+            ::sprintf(buf, "%.0f", value);
+            append_item(EItemType::Rect, libvgcode::convert(palette[i]), { { buf, 0 } });
+        }
+
+        // "View Summary" link to re-open Helio results dialog
+        if (wxGetApp().plater() && wxGetApp().plater()->has_helio_simulation_result()) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImVec4 link_color(0.2f, 0.8f, 0.3f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, link_color);
+            if (ImGui::Selectable(_u8L("View Summary").c_str(), false, ImGuiSelectableFlags_None)) {
+                wxGetApp().plater()->show_helio_simulation_summary();
+            }
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+        }
+
+        break;
+    }
+    case libvgcode::EViewType::ThermalIndexMin:
+    case libvgcode::EViewType::ThermalIndexMax: {
+        const auto& range = m_viewer.get_color_range(view_type);
+        const auto& palette = range.get_palette();
+        const int n = static_cast<int>(palette.size());
         for (int i = n - 1; i >= 0; --i) {
             float value = 100.0f - 200.0f * static_cast<float>(n - 1 - i) / static_cast<float>(n - 1);
             char buf[64];
