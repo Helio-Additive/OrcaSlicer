@@ -1343,6 +1343,9 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             }
         }
     }
+    if (m_has_thermal_index_data) {
+        update_by_mode(wxGetApp().get_mode());
+    }
 
 // #if !VGCODE_ENABLE_COG_AND_TOOL_MARKERS
 //     const size_t vertices_count = m_viewer.get_vertices_count();
@@ -1565,6 +1568,9 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
                 break;
             }
         }
+    }
+    if (m_has_thermal_index_data) {
+        update_by_mode(wxGetApp().get_mode());
     }
 
     const libvgcode::AABox bbox = m_viewer.get_extrusion_bounding_box();
