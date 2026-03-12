@@ -3874,7 +3874,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     }
     case libvgcode::EViewType::ThermalIndexMin:
     case libvgcode::EViewType::ThermalIndexMax: {
-        const auto& range = m_viewer.get_color_range(view_type);
+        const auto& range = m_viewer.get_color_range(m_viewer.get_view_type());
         const auto& palette = range.get_palette();
         const int n = static_cast<int>(palette.size());
         for (int i = n - 1; i >= 0; --i) {
