@@ -176,7 +176,6 @@ jobs:
               --title "Upstream Activity Watch" \
               --label "upstream-watch" \
               --assignee "HelioPri" \
-              --project "main" \
               --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow." \
               --json number --jq '.number')
             echo "Created new watch issue #$ISSUE_NUMBER"
