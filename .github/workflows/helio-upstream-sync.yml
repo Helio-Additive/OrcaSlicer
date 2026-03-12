@@ -256,7 +256,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Trigger the build_all workflow on the sync branch for Linux only
+            // Trigger full build_all workflow (all platforms) on the sync branch
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
