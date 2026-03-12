@@ -3347,6 +3347,18 @@ void PartPlate::set_helio_result(const HelioPlateResult& result)
     *m_helio_result = result;
 }
 
+void PartPlate::clear_helio_result()
+{
+    if (m_helio_result) {
+        m_helio_result->clear();
+    }
+}
+
+bool PartPlate::has_helio_result() const
+{
+    return m_helio_result && m_helio_result->has_result();
+}
+
 // BBS: delay calc gcode path in backup dir
 std::string PartPlate::get_tmp_gcode_path()
 {

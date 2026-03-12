@@ -33,7 +33,11 @@ bool HelioQuery::global_materials_fully_loaded = false;
 std::map<std::string, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::global_print_priority_cache;
 
 std::string HelioQuery::last_simulation_trace_id;
-std::string HelioQuery::last_optimization_trace_id;  
+std::string HelioQuery::last_optimization_trace_id;
+
+static std::string helio_client_version() {
+    return std::string("OrcaSlicer/") + SLIC3R_VERSION;
+}
 
 std::string extract_trace_id(const std::string& headers) {
     // Validate input to prevent crashes
@@ -129,7 +133,7 @@ void HelioQuery::request_remaining_optimizations(const std::string & helio_api_u
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -222,7 +226,7 @@ void HelioQuery::request_support_machine(const std::string helio_api_url, const 
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -310,7 +314,7 @@ void HelioQuery::request_support_material(const std::string helio_api_url, const
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -409,7 +413,7 @@ void HelioQuery::request_print_priority_options(
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION));
+        .header("HelioAdditive-Client-Version", helio_client_version());
 
     if (is_china) {
         http.header("Accept-Language", "zh-CN");
@@ -607,7 +611,7 @@ void HelioQuery::optimization_feedback(const std::string helio_api_url, const st
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -639,7 +643,7 @@ HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::strin
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -685,7 +689,7 @@ HelioQuery::UploadFileResult HelioQuery::upload_file_to_presigned_url(const std:
     Http http = Http::put(upload_url);
     http.header("Content-Type", "application/octet-stream")
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION));
+        .header("HelioAdditive-Client-Version", helio_client_version());
 
     boost::filesystem::path file_path(file_path_string);
 
@@ -874,7 +878,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -1052,7 +1056,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -1347,7 +1351,7 @@ std::string HelioQuery::create_optimization_default_get(const std::string helio_
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     std::string response_headers;
@@ -1400,7 +1404,7 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -1457,7 +1461,7 @@ void HelioQuery::stop_simulation(const std::string helio_api_url, const std::str
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -1500,7 +1504,7 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -1675,7 +1679,7 @@ Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(con
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -1732,7 +1736,7 @@ void HelioQuery::stop_optimization(const std::string helio_api_url, const std::s
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     http.timeout_connect(20)
@@ -1775,7 +1779,7 @@ Slic3r::HelioQuery::CheckOptimizationResult HelioQuery::check_optimization_progr
     http.header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     if (GUI::wxGetApp().app_config->get("language") == "zh_CN") {
@@ -2422,7 +2426,7 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", std::string(SLIC3R_VERSION))
+        .header("HelioAdditive-Client-Version", helio_client_version())
         .set_post_body(query_body);
 
     // Create temporary vectors to avoid issues with reference capture and reallocation

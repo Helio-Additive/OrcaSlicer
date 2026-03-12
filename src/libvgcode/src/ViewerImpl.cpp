@@ -1501,7 +1501,10 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
 // Helio: Thermal index visualization
     case EViewType::ThermalIndexMean:
     {
-        return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_thermal_index_mean_range.get_color_at(v.thermal_index_mean);
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        // "null" thermal index (< -100) renders as grey
+        if (v.thermal_index_mean < -100.0f) return DUMMY_COLOR;
+        return m_thermal_index_mean_range.get_color_at(v.thermal_index_mean);
     }
     case EViewType::VolumetricFlowRate:
     {
@@ -1809,6 +1812,24 @@ void ViewerImpl::update_color_ranges()
     // ORCA: Add Pressure Advance visualization support
     m_pressure_advance_range.reset();
     m_thermal_index_mean_range.reset();
+    // Helio: Use custom TI palette (blue→green→red) matching BambuStudio
+    static const Palette TI_PALETTE{ {
+        {  11,  44, 122 },  // #0b2c7a  -100 (blue)
+        {   0,  84, 120 },  // #005478  -80
+        {   0, 111, 134 },  // #006f86  -60
+        {   0, 142, 143 },  // #008e8f  -40
+        {   0, 178, 124 },  // #00b27c  -20
+        {   4, 215,  15 },  // #04d70f    0 (green)
+        { 117, 180,   0 },  // #75b400  +20
+        { 148, 145,   0 },  // #949100  +40
+        { 161, 108,   0 },  // #a16c00  +60
+        { 160,  72,   0 },  // #a04800  +80
+        { 146,  38,  22 },  // #922616 +100 (red)
+    } };
+    m_thermal_index_mean_range.set_palette(TI_PALETTE);
+    // Anchor to fixed [-100, +100] so colors always match the legend
+    m_thermal_index_mean_range.update(-100.0f);
+    m_thermal_index_mean_range.update(100.0f);
     m_volumetric_rate_range.reset();
     m_actual_volumetric_rate_range.reset();
     m_layer_time_range[0].reset(); // ColorRange::EType::Linear
@@ -1829,7 +1850,7 @@ void ViewerImpl::update_color_ranges()
             if (v.pressure_advance >= 0.0f)
                 m_pressure_advance_range.update(v.pressure_advance);
             // Helio: Thermal index
-            if (v.thermal_index_mean != 0.0f)
+            if (v.thermal_index_mean > -100.0f)
                 m_thermal_index_mean_range.update(v.thermal_index_mean);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||

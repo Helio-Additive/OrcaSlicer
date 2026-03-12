@@ -1846,7 +1846,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     }
     btn_buy_border = StateColor(std::pair<wxColour, int>(wxColour(175, 124, 255), StateColor::Normal));
     
-    buy_now_button = new Button(card_account_status, _L("Plans / Upgrades"), wxGetApp().dark_mode() ? "topbar_store" : "topbar_store_dark", 0, 16);
+    buy_now_button = new Button(card_account_status, _L("Plans / Upgrades"), "topbar_store", 0, 16);
     buy_now_button->SetBackgroundColor(btn_buy_bg_outlined);
     buy_now_button->SetBorderColor(btn_buy_border);
     buy_now_button->SetTextColor(btn_buy_text);

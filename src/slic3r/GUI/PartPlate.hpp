@@ -494,6 +494,18 @@ public:
     // Helio result per-plate storage
     const HelioPlateResult* get_helio_result() const;
     void set_helio_result(const HelioPlateResult& result);
+    void clear_helio_result();
+    bool has_helio_result() const;
+
+    bool can_helio_slice() const {
+        return m_ready_for_slice && !m_apply_invalid && !m_helio_apply_invalid;
+    }
+    bool is_helio_apply_result_invalid() const {
+        return m_helio_apply_invalid;
+    }
+    void update_helio_apply_result_invalid(bool invalid) {
+        m_helio_apply_invalid = invalid;
+    }
 
     std::string           get_tmp_gcode_path();
     std::string           get_temp_config_3mf_path();

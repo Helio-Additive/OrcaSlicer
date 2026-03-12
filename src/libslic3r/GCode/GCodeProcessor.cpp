@@ -3044,16 +3044,7 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
         return;
     }
 
-    // Helio thermal index: ;helioadditive=...ti.max=X,ti.min=Y,ti.mean=Z
-    if (boost::starts_with(comment, "helioadditive=")) {
-        static const std::regex thermal_re("ti\\.max=(-?[0-9]*\\.?[0-9]+),ti\\.min=(-?[0-9]*\\.?[0-9]+),ti\\.mean=(-?[0-9]*\\.?[0-9]+)");
-        std::smatch match;
-        std::string comment_str(comment);
-        if (std::regex_search(comment_str, match, thermal_re)) {
-            m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
-        }
-        return;
-    }
+    // Helio thermal index: handled in process_G1() to ensure parsing occurs before vertex storage
 
     // wipe start tag
     if (boost::starts_with(comment, reserved_tag(ETags::Wipe_Start))) {
@@ -3724,6 +3715,20 @@ void GCodeProcessor::process_G0(const GCodeReader::GCodeLine& line)
 
 void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::optional<unsigned int>& remaining_internal_g1_lines)
 {
+    // Extract thermal index from helioadditive comment BEFORE storing the move vertex
+    {
+        const std::string& raw = line.raw();
+        auto pos = raw.find(";helioadditive=");
+        if (pos != std::string::npos) {
+            static const std::regex thermal_re("ti\\.max=(-?[0-9]*\\.?[0-9]+),ti\\.min=(-?[0-9]*\\.?[0-9]+),ti\\.mean=(-?[0-9]*\\.?[0-9]+)");
+            std::smatch match;
+            std::string comment_str = raw.substr(pos);
+            if (std::regex_search(comment_str, match, thermal_re)) {
+                m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
+            }
+        }
+    }
+
     std::array<std::optional<double>, 4> g1_axes = { std::nullopt, std::nullopt, std::nullopt, std::nullopt };
     if (line.has_x()) g1_axes[X] = (double)line.x();
     if (line.has_y()) g1_axes[Y] = (double)line.y();

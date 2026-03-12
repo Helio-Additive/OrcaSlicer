@@ -18,6 +18,7 @@
 #include <boost/nowide/convert.hpp>
 
 #include <iostream>
+#include <sstream>
 
 #include <wx/glcanvas.h>
 
@@ -1904,7 +1905,54 @@ void NotificationManager::push_slicing_error_notification(const std::string &tex
 void NotificationManager::push_helio_error_notification(const std::string &text)
 {
     set_all_slicing_errors_gray(false);
-    push_notification_data({ NotificationType::HelioSlicingError, NotificationLevel::ErrorNotificationLevel, 0, _u8L("Helio Error:") + "\n" + text }, 0);
+
+    // Rich error formatting: extract individual error lines, create numbered list,
+    // and make URLs clickable via hypertext callback
+    std::string formatted_text;
+    std::string learn_more_url;
+
+    // Split text by newlines to create numbered items
+    std::vector<std::string> lines;
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            // Check for URLs in the line
+            size_t url_pos = line.find("http");
+            if (url_pos != std::string::npos) {
+                size_t url_end = line.find_first_of(" \t\n\r", url_pos);
+                learn_more_url = (url_end != std::string::npos)
+                    ? line.substr(url_pos, url_end - url_pos)
+                    : line.substr(url_pos);
+                // Remove URL from the line text
+                line = line.substr(0, url_pos);
+                boost::trim(line);
+            }
+            if (!line.empty())
+                lines.push_back(line);
+        }
+    }
+
+    if (lines.size() > 1) {
+        formatted_text = _u8L("Helio Error:") + "\n";
+        for (size_t i = 0; i < lines.size(); ++i) {
+            formatted_text += std::to_string(i + 1) + ". " + lines[i] + "\n";
+        }
+    } else {
+        formatted_text = _u8L("Helio Error:") + "\n" + text;
+    }
+
+    if (!learn_more_url.empty()) {
+        std::string url_copy = learn_more_url;
+        std::function<bool(wxEvtHandler*)> callback = [url_copy](wxEvtHandler*) {
+            wxLaunchDefaultBrowser(url_copy);
+            return false;
+        };
+        push_notification_data({ NotificationType::HelioSlicingError, NotificationLevel::ErrorNotificationLevel, 0,
+            formatted_text, _u8L("Learn more"), callback }, 0);
+    } else {
+        push_notification_data({ NotificationType::HelioSlicingError, NotificationLevel::ErrorNotificationLevel, 0, formatted_text }, 0);
+    }
     set_slicing_progress_hidden();
 }
 void NotificationManager::push_slicing_warning_notification(const std::string& text, bool gray, ModelObject const * obj, ObjectID oid, int warning_step, int warning_msg_id, NotificationLevel level/* = NotificationLevel::WarningNotificationLevel*/)
@@ -2372,7 +2420,7 @@ void NotificationManager::update_slicing_notif_dailytips(bool need_change)
 	// Slicing progress notification was not found - init it thru plater so correct cancel callback function is appended
 	wxGetApp().plater()->init_notification_manager();
 }
-void NotificationManager::set_slicing_progress_began()
+void NotificationManager::set_slicing_progress_began(bool is_helio)
 {
 	for (std::unique_ptr<PopNotification> & notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
@@ -2384,7 +2432,7 @@ void NotificationManager::set_slicing_progress_began()
 	// Slicing progress notification was not found - init it thru plater so correct cancel callback function is appended
 	wxGetApp().plater()->init_notification_manager();
 }
-void NotificationManager::set_slicing_progress_percentage(const std::string& text, float percentage)
+void NotificationManager::set_slicing_progress_percentage(const std::string& text, float percentage, bool is_helio)
 {
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {

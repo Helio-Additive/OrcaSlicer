@@ -459,6 +459,12 @@ void AppConfig::set_defaults()
     if (get("helio_api_other").empty()) {
         set("helio_api_other", "https://api.helioadditive.com/graphql");
     }
+    if (get("helio_multimaterial_enabled").empty()) {
+        set("helio_multimaterial_enabled", "false");
+    }
+    if (get("helio_first_time_tutorial").empty()) {
+        set("helio_first_time_tutorial", "active");
+    }
 
     if (get(SETTING_PROJECT_LOAD_BEHAVIOUR).empty()) {
         set(SETTING_PROJECT_LOAD_BEHAVIOUR, OPTION_PROJECT_LOAD_BEHAVIOUR_ASK_WHEN_RELEVANT);

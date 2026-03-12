@@ -94,7 +94,7 @@ struct PathVertex
     //
     // Helio: Thermal index mean value (-100 to 100)
     //
-    float thermal_index_mean{ 0.0f };
+    float thermal_index_mean{ -200.0f };
 
     //
     // Return true if the segment is an extrusion move

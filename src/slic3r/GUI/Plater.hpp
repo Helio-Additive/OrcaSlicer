@@ -978,6 +978,10 @@ public:
     std::optional<std::string> get_printer_id_from_name(std::string name);
     void                       set_helio_processing_disabled(bool status);
     bool                       get_helio_processing_disabled();
+
+    // Helio "View Summary" support — re-open results dialog from TI legend
+    bool has_helio_simulation_result() const;
+    void show_helio_simulation_summary();
 };
 
 class SuppressBackgroundProcessingUpdate

@@ -96,7 +96,7 @@ else if (view_type == libvgcode::EViewType::LayerTimeLogarithmic)
         return _u8L("Pressure Advance");
 // Helio: Thermal index visualization
     else if (view_type == libvgcode::EViewType::ThermalIndexMean)
-        return _u8L("Thermal Index");
+        return _u8L("Thermal Index (mean)");
     return "";
 }
 
@@ -621,6 +621,14 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
 // ORCA: Add Pressure Advance visualization support
                 case libvgcode::EViewType::PressureAdvance: {
                     sprintf(buf, "%s %s%.4f", buf, _u8L("PA: ").c_str(), vertex.pressure_advance);
+                    break;
+                }
+// Helio: Thermal index visualization
+                case libvgcode::EViewType::ThermalIndexMean: {
+                    if (is_extrusion && vertex.thermal_index_mean > -101.0f)
+                        sprintf(buf, "%s %s%.1f", buf, _u8L("TI Mean: ").c_str(), vertex.thermal_index_mean);
+                    else
+                        sprintf(buf, "%s %s%s", buf, _u8L("TI Mean: ").c_str(), "null");
                     break;
                 }
 
@@ -3530,6 +3538,8 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         { imgui.title(_u8L("Layer Time")); break; }
     case libvgcode::EViewType::LayerTimeLogarithmic:
         { imgui.title(_u8L("Layer Time (log)")); break; }
+    case libvgcode::EViewType::ThermalIndexMean:
+        { imgui.title(_u8L("Thermal Index (mean)")); break; }
 
     case libvgcode::EViewType::Tool:
     {
@@ -3704,6 +3714,36 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     case libvgcode::EViewType::LayerTimeLogarithmic:     { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLogarithmic), true); break; }
     case libvgcode::EViewType::VolumetricFlowRate:       { append_range(m_viewer.get_color_range(libvgcode::EViewType::VolumetricFlowRate), 2); break; }
     case libvgcode::EViewType::ActualVolumetricFlowRate: { append_range(m_viewer.get_color_range(libvgcode::EViewType::ActualVolumetricFlowRate), 2); break; }
+    case libvgcode::EViewType::ThermalIndexMean: {
+        const auto& range = m_viewer.get_color_range(libvgcode::EViewType::ThermalIndexMean);
+        const auto& palette = range.get_palette();
+        const int n = static_cast<int>(palette.size());
+        // Fixed scale: +100 to -100, evenly spaced across palette entries
+        for (int i = n - 1; i >= 0; --i) {
+            float value = 100.0f - 200.0f * static_cast<float>(n - 1 - i) / static_cast<float>(n - 1);
+            char buf[64];
+            ::sprintf(buf, "%.0f", value);
+            append_item(EItemType::Rect, libvgcode::convert(palette[i]), { { buf, 0 } });
+        }
+
+        // "View Summary" link to re-open Helio results dialog
+        if (wxGetApp().plater() && wxGetApp().plater()->has_helio_simulation_result()) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImVec4 link_color(0.2f, 0.8f, 0.3f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, link_color);
+            if (ImGui::Selectable(_u8L("View Summary").c_str(), false, ImGuiSelectableFlags_None)) {
+                wxGetApp().plater()->show_helio_simulation_summary();
+            }
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+        }
+
+        break;
+    }
     case libvgcode::EViewType::Tool:
     {
         // shows only extruders actually used

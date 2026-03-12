@@ -39,6 +39,7 @@
 #include "Plater.hpp"
 #include "Widgets/SwitchButton.hpp"
 #include "HelioReleaseNote.hpp"
+#include "HelioHistoryDialog.hpp"
 #include "WebViewDialog.hpp"
 #include "../Utils/Process.hpp"
 #include "format.hpp"
@@ -2555,6 +2556,16 @@ static wxMenu* generate_help_menu()
         });
 
     // About
+    // Helio History
+    if (wxGetApp().app_config->get_bool("enable_helio_processing")) {
+        helpMenu->AppendSeparator();
+        append_menu_item(helpMenu, wxID_ANY, _L("Helio History"), _L("View Helio simulation and optimization history"),
+            [](wxCommandEvent&) {
+                HelioHistoryDialog dlg(wxGetApp().mainframe);
+                dlg.ShowModal();
+            });
+    }
+
 #ifndef __APPLE__
     wxString about_title = wxString::Format(_L("&About %s"), SLIC3R_APP_FULL_NAME);
     append_menu_item(helpMenu, wxID_ANY, about_title, about_title,

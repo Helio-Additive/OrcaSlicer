@@ -13,6 +13,7 @@
 #include <wx/listimpl.cpp>
 #include <wx/display.h>
 #include "NetworkTestDialog.hpp"
+#include "../Utils/HelioDragon.hpp"
 #include "Widgets/StaticLine.hpp"
 #include "Widgets/RadioGroup.hpp"
 #include "slic3r/Utils/bambu_networking.hpp"
@@ -1704,6 +1705,70 @@ void PreferencesDialog::create_items()
     g_sizer->AddSpacer(FromDIP(10));
     sizer_page->Add(g_sizer, 0, wxEXPAND);
 #endif // _WIN32
+
+    //////////////////////////
+    //// HELIO TAB
+    /////////////////////////////////////
+    m_pref_tabs->AppendItem(_L("Helio"));
+    f_sizers.push_back(new wxFlexGridSizer(1, 1, v_gap, 0));
+    g_sizer = f_sizers.back();
+    g_sizer->AddGrowableCol(0, 1);
+
+    g_sizer->Add(create_item_title(_L("Helio Cloud Slicing")), 1, wxEXPAND);
+
+    auto item_enable_helio = create_item_checkbox(_L("Enable Helio processing"),
+        _L("Enable Helio cloud simulation and optimization features"), "enable_helio_processing");
+    g_sizer->Add(item_enable_helio);
+
+    g_sizer->Add(create_item_title(_L("API Settings")), 1, wxEXPAND);
+
+    // PAT token input
+    {
+        wxBoxSizer *sizer_pat = new wxBoxSizer(wxHORIZONTAL);
+        auto pat_title = new wxStaticText(m_parent, wxID_ANY, _L("Personal Access Token (PAT)"),
+            wxDefaultPosition, DESIGN_TITLE_SIZE, wxST_NO_AUTORESIZE);
+        pat_title->SetForegroundColour(DESIGN_GRAY900_COLOR);
+        pat_title->SetFont(::Label::Body_14);
+        pat_title->SetToolTip(_L("Your Helio API personal access token"));
+        pat_title->Wrap(DESIGN_TITLE_SIZE.x);
+
+        auto pat_input = new ::TextInput(m_parent, wxEmptyString, wxEmptyString, wxEmptyString,
+            wxDefaultPosition, DESIGN_INPUT_SIZE, wxTE_PROCESS_ENTER | wxTE_PASSWORD);
+        StateColor input_bg(std::pair<wxColour, int>(wxColour("#F0F0F1"), StateColor::Disabled),
+                           std::pair<wxColour, int>(*wxWHITE, StateColor::Enabled));
+        pat_input->SetBackgroundColor(input_bg);
+        pat_input->GetTextCtrl()->SetValue(wxString::FromUTF8(app_config->get("helio_access_token")));
+        pat_input->SetToolTip(_L("Enter your Helio personal access token"));
+
+        sizer_pat->AddSpacer(FromDIP(DESIGN_LEFT_MARGIN));
+        sizer_pat->Add(pat_title, 0, wxALIGN_CENTER_VERTICAL);
+        sizer_pat->Add(pat_input, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(5));
+
+        pat_input->GetTextCtrl()->Bind(wxEVT_TEXT_ENTER, [this, pat_input](wxCommandEvent &e) {
+            auto value = pat_input->GetTextCtrl()->GetValue();
+            app_config->set("helio_access_token", std::string(value.mb_str()));
+            app_config->save();
+            Slic3r::HelioQuery::set_helio_pat(std::string(value.mb_str()));
+            e.Skip();
+        });
+        pat_input->GetTextCtrl()->Bind(wxEVT_KILL_FOCUS, [this, pat_input](wxFocusEvent &e) {
+            auto value = pat_input->GetTextCtrl()->GetValue();
+            app_config->set("helio_access_token", std::string(value.mb_str()));
+            app_config->save();
+            Slic3r::HelioQuery::set_helio_pat(std::string(value.mb_str()));
+            e.Skip();
+        });
+
+        g_sizer->Add(sizer_pat);
+    }
+
+    // Multi-material V3 toggle
+    auto item_multimaterial = create_item_checkbox(_L("Enable multi-material (V3) support"),
+        _L("When enabled, Helio uses per-slot material mapping for multi-material plates"), "helio_multimaterial_enabled");
+    g_sizer->Add(item_multimaterial);
+
+    g_sizer->AddSpacer(FromDIP(10));
+    sizer_page->Add(g_sizer, 0, wxEXPAND);
 
     //////////////////////////
     //// DEVELOPER TAB

@@ -9679,8 +9679,8 @@ void GLCanvas3D::_set_warning_notification(EWarning warning, bool state)
         error = ErrorType::SLICING_ERROR;
         break;
     }
-    //BBS: this may happened when exit the app, plater is null
-    if (!wxGetApp().plater())
+    //BBS: this may happened when exit the app, plater or notification_manager is null
+    if (!wxGetApp().plater() || !wxGetApp().plater()->get_notification_manager())
         return;
     auto& notification_manager = *wxGetApp().plater()->get_notification_manager();
 
