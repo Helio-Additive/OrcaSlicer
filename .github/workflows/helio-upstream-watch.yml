@@ -166,23 +166,31 @@ jobs:
 
       - name: Find or create watch issue
         id: issue
-        run: |
-          # Look for existing pinned upstream-watch issue
-          ISSUE_NUMBER=$(gh issue list --label "upstream-watch" --state open --limit 1 --json number --jq '.[0].number // empty')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'upstream-watch',
+              state: 'open',
+              per_page: 1
+            });
 
-          if [ -z "$ISSUE_NUMBER" ]; then
-            # Create new issue — gh issue create returns a URL, extract the number
-            ISSUE_URL=$(gh issue create \
-              --title "Upstream Activity Watch" \
-              --label "upstream-watch" \
-              --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow.")
-            ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
-            echo "Created new watch issue #$ISSUE_NUMBER"
-          fi
-
-          echo "number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            if (issues.length > 0) {
+              core.setOutput('number', issues[0].number);
+              console.log(`Found existing watch issue #${issues[0].number}`);
+            } else {
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Upstream Activity Watch',
+                labels: ['upstream-watch'],
+                body: 'This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow.'
+              });
+              core.setOutput('number', issue.number);
+              console.log(`Created new watch issue #${issue.number}`);
+            }
 
       - name: Post digest as comment
         run: |
