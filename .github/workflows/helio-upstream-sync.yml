@@ -212,7 +212,6 @@ jobs:
           gh issue create \
             --title "Upstream sync failed: $LATEST (merge conflicts)" \
             --label "upstream-sync" \
-            --assignee "HelioPri" \
             --body "$(cat <<ISSUE_EOF
           ## Merge conflicts detected syncing $LATEST
 
@@ -279,7 +278,6 @@ jobs:
             --base "$TARGET" \
             --head "$BRANCH" \
             --title "Upstream sync: $LATEST" \
-            --assignee "HelioPri" \
             --body "$(cat <<PR_EOF
           ## Upstream Sync: $LATEST
 
@@ -328,7 +326,6 @@ jobs:
           gh issue create \
             --title "Upstream sync build failed: $LATEST" \
             --label "upstream-sync" \
-            --assignee "HelioPri" \
             --body "$(cat <<ISSUE_EOF
           ## Build failed after merging $LATEST
 

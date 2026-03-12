@@ -175,7 +175,6 @@ jobs:
             ISSUE_URL=$(gh issue create \
               --title "Upstream Activity Watch" \
               --label "upstream-watch" \
-              --assignee "HelioPri" \
               --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow.")
             ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
             echo "Created new watch issue #$ISSUE_NUMBER"
