@@ -1,0 +1,193 @@
+name: Helio Upstream Watch
+
+on:
+  schedule:
+    - cron: '0 9 * * 4'  # Thursday 9am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
+          git fetch upstream --tags --force
+          git fetch upstream 'refs/heads/release/*:refs/remotes/upstream/release/*' || true
+          git fetch upstream main || true
+
+      - name: Generate digest
+        id: digest
+        run: |
+          RELEASE_BRANCH="${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}"
+
+          # Find last-synced baseline
+          if git rev-parse "helio-last-synced" >/dev/null 2>&1; then
+            BASELINE_COMMIT=$(git rev-parse "helio-last-synced")
+            BASELINE_TAG=$(git tag -l 'v*' --points-at "$BASELINE_COMMIT" | head -1)
+            if [ -z "$BASELINE_TAG" ]; then
+              BASELINE_TAG="helio-last-synced"
+            fi
+          else
+            BASELINE_TAG="v2.3.2-rc2"
+          fi
+
+          # New tags since baseline
+          NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
+            if git merge-base --is-ancestor "$BASELINE_TAG" "$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
+              COMMIT_DATE=$(git log -1 --format='%ci' "$tag" | cut -d' ' -f1)
+              echo "- \`$tag\` ($COMMIT_DATE)"
+            fi
+          done)
+
+          if [ -z "$NEW_TAGS" ]; then
+            NEW_TAGS="None"
+          fi
+
+          # Commits on main since last release
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          MAIN_COMMITS=$(git rev-list --count "$LATEST_TAG"..upstream/main 2>/dev/null || echo "unknown")
+
+          # Active release branches
+          RELEASE_BRANCHES=$(git branch -r --list 'upstream/release/*' | while read branch; do
+            CLEAN_BRANCH=$(echo "$branch" | xargs)
+            COMMITS_AHEAD=$(git rev-list --count "$LATEST_TAG".."$CLEAN_BRANCH" 2>/dev/null || echo "?")
+            echo "- \`$CLEAN_BRANCH\`: $COMMITS_AHEAD commits ahead of \`$LATEST_TAG\`"
+          done)
+
+          if [ -z "$RELEASE_BRANCHES" ]; then
+            RELEASE_BRANCHES="None"
+          fi
+
+          # Helio-relevant file changes on main
+          WATCHED_FILES=(
+            "src/slic3r/GUI/Plater.cpp"
+            "src/slic3r/GUI/Plater.hpp"
+            "src/slic3r/GUI/MainFrame.cpp"
+            "src/slic3r/GUI/MainFrame.hpp"
+            "src/slic3r/GUI/GCodeViewer.cpp"
+            "src/slic3r/GUI/NotificationManager.cpp"
+            "src/slic3r/GUI/NotificationManager.hpp"
+            "src/slic3r/GUI/PartPlate.hpp"
+            "src/slic3r/GUI/PartPlate.cpp"
+            "src/slic3r/GUI/GUI_App.cpp"
+            "src/slic3r/GUI/GUI_App.hpp"
+            "src/slic3r/GUI/Preferences.cpp"
+            "src/slic3r/GUI/BackgroundSlicingProcess.hpp"
+            "src/slic3r/GUI/Widgets/SwitchButton.cpp"
+            "src/slic3r/GUI/Widgets/SwitchButton.hpp"
+            "src/slic3r/GUI/Widgets/TextInput.cpp"
+            "src/slic3r/GUI/Widgets/TextInput.hpp"
+            "src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp"
+            "src/slic3r/CMakeLists.txt"
+            "src/libslic3r/AppConfig.cpp"
+            "src/libslic3r/PrintBase.hpp"
+            "src/libslic3r/GCode/GCodeProcessor.cpp"
+            "src/libslic3r/GCode/GCodeProcessor.hpp"
+            "src/libvgcode/include/PathVertex.hpp"
+            "src/libvgcode/include/Types.hpp"
+            "src/libvgcode/src/ViewerImpl.cpp"
+            "src/libvgcode/src/ViewerImpl.hpp"
+          )
+
+          MAIN_CHANGES=""
+          for f in "${WATCHED_FILES[@]}"; do
+            STAT=$(git diff --stat "$LATEST_TAG"..upstream/main -- "$f" 2>/dev/null | tail -1)
+            if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
+              MAIN_CHANGES="$MAIN_CHANGES- \`$f\`: $STAT\n"
+            fi
+          done
+
+          if [ -z "$MAIN_CHANGES" ]; then
+            MAIN_CHANGES="No Helio-relevant files changed on main since \`$LATEST_TAG\`."
+          fi
+
+          # Check release branches for helio-relevant changes
+          BRANCH_CHANGES=""
+          for branch in $(git branch -r --list 'upstream/release/*' | xargs); do
+            BRANCH_REPORT=""
+            for f in "${WATCHED_FILES[@]}"; do
+              STAT=$(git diff --stat "$LATEST_TAG".."$branch" -- "$f" 2>/dev/null | tail -1)
+              if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
+                BRANCH_REPORT="$BRANCH_REPORT  - \`$f\`: $STAT\n"
+              fi
+            done
+            if [ -n "$BRANCH_REPORT" ]; then
+              BRANCH_CHANGES="$BRANCH_CHANGES\n**$branch:**\n$BRANCH_REPORT"
+            fi
+          done
+
+          if [ -z "$BRANCH_CHANGES" ]; then
+            BRANCH_CHANGES="No Helio-relevant files changed on release branches."
+          fi
+
+          # Build the full digest
+          DIGEST=$(cat <<DIGEST_EOF
+          ## Upstream Activity Digest — $(date '+%Y-%m-%d')
+
+          **Helio release branch:** \`$RELEASE_BRANCH\`
+          **Last synced to:** \`$BASELINE_TAG\`
+          **Latest upstream tag:** \`$LATEST_TAG\`
+
+          ### New Tags Since Last Sync
+          $NEW_TAGS
+
+          ### Main Branch Activity
+          $MAIN_COMMITS commits on \`main\` since \`$LATEST_TAG\`
+
+          ### Active Release Branches
+          $RELEASE_BRANCHES
+
+          ### Helio-Relevant File Changes (main)
+          $(echo -e "$MAIN_CHANGES")
+
+          ### Helio-Relevant File Changes (release branches)
+          $(echo -e "$BRANCH_CHANGES")
+
+          ---
+          *Auto-generated by helio-upstream-watch workflow*
+          DIGEST_EOF
+          )
+
+          echo "digest<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Find or create watch issue
+        id: issue
+        run: |
+          # Look for existing pinned upstream-watch issue
+          ISSUE_NUMBER=$(gh issue list --label "upstream-watch" --state open --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # Create new issue
+            ISSUE_NUMBER=$(gh issue create \
+              --title "Upstream Activity Watch" \
+              --label "upstream-watch" \
+              --assignee "HelioPri" \
+              --body "This issue tracks upstream OrcaSlicer activity relevant to the Helio integration. Updated weekly by the helio-upstream-watch workflow." \
+              --json number --jq '.number')
+            echo "Created new watch issue #$ISSUE_NUMBER"
+          fi
+
+          echo "number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post digest as comment
+        run: |
+          DIGEST="${{ steps.digest.outputs.digest }}"
+          gh issue comment "${{ steps.issue.outputs.number }}" --body "$DIGEST"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
