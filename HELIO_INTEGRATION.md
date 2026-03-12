@@ -1,0 +1,379 @@
+# Helio Integration Map
+
+> Auto-generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2`
+> This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
+
+## Stats
+- **61 files changed**: 29 new, 32 modified, 0 deleted
+- **+13,363 lines added, -195 lines removed**
+
+## Architecture
+
+Event-driven cloud slicing pipeline:
+
+```
+"Slice with Helio" button (MainFrame)
+  → EVT_HELIO_INPUT_DLG
+  → HelioInputDialog (mode selection, material/printer matching)
+  → on_helio_process() (V2 single-material or V3 multi-material dispatch)
+  → HelioBackgroundProcess (GraphQL API polling via HelioDragon)
+  → EVT_HELIO_PROCESSING_COMPLETED
+  → GCode swap (rename original, copy Helio result)
+  → Preview reload with ThermalIndex view
+```
+
+Key data flow:
+- `HelioQuery` (HelioDragon.hpp) — API client, PAT auth, supported printer/material cache
+- `HelioBackgroundProcess` — thread wrapper, polls job status, parses result gcode
+- `HelioPlateResult` — per-plate result storage on `PartPlate`
+- `HelioCompletionEvent` — carries result path + quality metrics to UI thread
+- Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
+
+## Helio-Only Files (29 files — NEVER exist upstream, always preserve)
+
+### Core API Client
+| File | Purpose |
+|-|-|
+| `src/slic3r/Utils/HelioDragon.hpp` | API client declarations: `HelioQuery`, `HelioBackgroundProcess`, `HelioPlateResult`, GraphQL types |
+| `src/slic3r/Utils/HelioDragon.cpp` | Full API implementation: auth, job dispatch, polling, gcode download, supported data cache |
+
+### UI Dialogs
+| File | Purpose |
+|-|-|
+| `src/slic3r/GUI/HelioReleaseNote.hpp` | All Helio dialog declarations: `HelioInputDialog`, `HelioResultDialog`, `HelioStatusNotification` |
+| `src/slic3r/GUI/HelioReleaseNote.cpp` | Dialog implementations (4334 lines): mode selection, progress, results with TI visualization |
+| `src/slic3r/GUI/HelioHistoryDialog.hpp` | History dialog declaration |
+| `src/slic3r/GUI/HelioHistoryDialog.cpp` | History dialog: lists past Helio jobs, re-download results |
+
+### Widgets
+| File | Purpose |
+|-|-|
+| `src/slic3r/GUI/Widgets/LinkLabel.hpp` | Clickable hyperlink label widget declaration |
+| `src/slic3r/GUI/Widgets/LinkLabel.cpp` | LinkLabel implementation |
+
+### Resources
+| File | Purpose |
+|-|-|
+| `resources/images/expand_helio.png` | Helio button icon (toolbar) |
+| `resources/images/expand_program.svg` | Program expand button icon |
+| `resources/images/helio_icon.svg` | Helio brand icon |
+| `resources/images/helio_icon_dark.svg` | Dark theme variant |
+| `resources/images/helio_icon_disable.svg` | Disabled state icon |
+| `resources/images/helio_loading.svg` | Loading spinner |
+| `resources/images/helio_advanced_option0.svg` | Advanced option icon (off) |
+| `resources/images/helio_advanced_option1.svg` | Advanced option icon (on) |
+| `resources/images/helio_copy.svg` | Copy icon |
+| `resources/images/helio_dview.svg` | Detail view icon |
+| `resources/images/helio_eview.svg` | Expanded view icon |
+| `resources/images/helio_feature_check.svg` | Feature check icon |
+| `resources/images/helio_feature_shield_check.svg` | Shield check icon |
+| `resources/images/helio_feature_speed.svg` | Speed feature icon |
+| `resources/images/helio_refesh.svg` | Refresh icon |
+| `resources/images/helio_switch_send_mode_tag_on.svg` | Toggle tag icon |
+| `resources/web/helio/helio_service_cn.html` | Service terms (Chinese) |
+| `resources/web/helio/helio_service_en.html` | Service terms (English) |
+| `resources/web/helio/helio_service_snote_cn.html` | Service notes (Chinese) |
+| `resources/web/helio/helio_service_snote_en.html` | Service notes (English) |
+| `resources/data/helio_hints.ini` | First-time tutorial hint text |
+
+## Modified Files (32 files — conflict risk, detailed per-file guide)
+
+### CRITICAL RISK
+
+#### `src/slic3r/GUI/Plater.cpp` (+2319/-182)
+The heaviest modification. Contains the entire Helio processing pipeline.
+
+**Includes added** (after existing includes):
+- `#include <thread>`, `#include <boost/nowide/cstdio.hpp>`, `#include <wx/choicdlg.h>`
+- `#include "../Utils/HelioDragon.hpp"`, `#include "HelioReleaseNote.hpp"`
+
+**Global/static additions** (after `namespace GUI {`):
+- `g_helio_pre_select_optimization` flag + `get_helio_pre_select_optimization_flag()`
+
+**Event definitions** (after `EVT_PRINT_FROM_SDCARD_VIEW`):
+- `EVT_HELIO_INPUT_DLG`, `EVT_HELIO_PROCESSING_STARTED`, `EVT_HELIO_PROCESSING_COMPLETED`
+
+**Members added to `Plater::priv`** (after `background_process`):
+- `helio_background_process`, `helio_elements_fetched`, `helio_processing_disabled`, `helio_using_reference_material`
+
+**Method declarations added to `Plater::priv`** (after `on_slicing_began()`):
+- `on_helio_processing_complete()`, `on_helio_processing_start()`, `on_helio_input_dlg()`
+- `on_helio_process()`, `on_action_helio_processing()`
+- `update_helio_background_process_v2()`, `update_helio_background_process()`
+
+**Event bindings** (in `priv::priv()` constructor, after `EVT_ADD_CUSTOM_FILAMENT`):
+- `EVT_HELIO_PROCESSING_COMPLETED`, `EVT_HELIO_PROCESSING_STARTED`, `EVT_HELIO_INPUT_DLG`, `EVT_GLTOOLBAR_ACTION_HELIO`
+
+**Interleaved modifications to `restart_background_process()`**:
+- Two insertion points: auto-stop running helio + clear helio result before reslice
+- Located at the two `if (this->background_process.start())` blocks
+
+**Modified call in `on_slicing_update()`**:
+- `set_slicing_progress_percentage()` gains `evt.status.is_helio` third argument
+
+**Large block insertion after `on_slicing_completed()`** (~1970 lines):
+- Replaces/relocates `on_export_began()` and `on_export_finished()`
+- All Helio handler implementations: `on_helio_processing_complete()`, `on_helio_processing_start()`, `on_helio_input_dlg()`, `on_helio_process()`
+- Helper structs: `FilamentSupportInfo`, matching functions, dialog classes
+- V2/V3 dispatch: `update_helio_background_process_v2()`, `update_helio_background_process()`
+
+**Destructor and cleanup** (at end of file):
+- `Plater::~Plater()` — stops helio background thread
+- Clear helio result on gcode load and reslice
+
+#### `src/slic3r/GUI/Plater.hpp` (+30/-1)
+- Added `#include <optional>`, forward declaration `class HelioCompletionEvent`
+- Event declarations: `EVT_HELIO_INPUT_DLG`, `EVT_HELIO_PROCESSING_STARTED`, `EVT_HELIO_PROCESSING_COMPLETED`
+- Changed `~Plater() = default` → `~Plater()`
+- Added public methods: `stop_helio_process()`, `feedback_helio_process()`, `get_helio_process_status()`, material/printer getters/setters, `has_helio_simulation_result()`, `show_helio_simulation_summary()`
+
+### HIGH RISK
+
+#### `src/slic3r/GUI/MainFrame.cpp` (+67/-1)
+- Added includes: `SwitchButton.hpp`, `HelioReleaseNote.hpp`, `HelioHistoryDialog.hpp`
+- **In `create_side_tools()`**: Added `ExpandButtonHolder` with helio button, event binding for `EVT_HELIO_INPUT_DLG`, visibility toggle based on `enable_helio_processing` config, rich tooltip
+- **In slice dropdown**: Added "Slice with Helio" `SideButton` (guarded by `enable_helio_processing`)
+- **In Help menu**: Added "Helio History" menu item
+
+#### `src/slic3r/GUI/MainFrame.hpp` (+6)
+- Added `#include "Widgets/SwitchButton.hpp"`
+- Members: `expand_program_id`, `expand_helio_id`, `split_line_icon`, `expand_program_holder`
+
+#### `src/slic3r/GUI/GCodeViewer.cpp` (+45)
+- **In view type name function**: 3 new `else if` branches for `ThermalIndexMean/Min/Max`
+- **In tooltip render**: TI value display block (3 `append_table_row` calls)
+- **In status bar format**: 3 new `case` branches in switch statement
+
+#### `src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp` (+8/-8)
+- **4 positional initializer lists modified**: appended `curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max` to `PathVertex` aggregate initializations
+- Very fragile — if upstream changes `PathVertex` fields or reorders initializer, these break
+
+### MEDIUM RISK
+
+#### `src/slic3r/GUI/NotificationManager.cpp` (+56/-2)
+- Added `#include <sstream>`
+- New method: `push_helio_error_notification()` — rich error formatting with numbered list and URL extraction
+- Modified: `set_slicing_progress_began()` and `set_slicing_progress_percentage()` — added `bool is_helio` parameter
+
+#### `src/slic3r/GUI/NotificationManager.hpp` (+8/-2)
+- Added `HelioSlicingError` enum value in `NotificationType`
+- Added `push_helio_error_notification()` declaration
+- Modified signatures: `set_slicing_progress_began(bool is_helio = false)`, `set_slicing_progress_percentage(..., bool is_helio = false)`
+
+#### `src/slic3r/GUI/Preferences.cpp` (+65)
+- Added `#include "../Utils/HelioDragon.hpp"`
+- **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material toggle, API URL display
+
+#### `src/slic3r/GUI/GUI_App.cpp` (+26)
+- Added `#include "../Utils/HelioDragon.hpp"`
+- Startup initialization block: fetches supported data if helio enabled
+- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data()`
+
+#### `src/slic3r/GUI/GUI_App.hpp` (+4)
+- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data()`
+
+#### `src/slic3r/GUI/PartPlate.cpp` (+27)
+- Added `#include "../Utils/HelioDragon.hpp"`
+- New methods appended: `get_helio_result()`, `set_helio_result()`, `clear_helio_result()`, `has_helio_result()`
+
+#### `src/slic3r/GUI/PartPlate.hpp` (+19)
+- Added `#include <memory>`, forward declaration `struct HelioPlateResult`
+- New members: `m_helio_apply_invalid`, `m_helio_result` (unique_ptr)
+- New inline methods: `can_helio_slice()`, `is_helio_apply_result_invalid()`, `update_helio_apply_result_invalid()`
+- New declared methods: `get_helio_result()`, `set_helio_result()`, `clear_helio_result()`, `has_helio_result()`
+
+#### `src/slic3r/GUI/BackgroundSlicingProcess.hpp` (+25)
+- New class appended: `HelioCompletionEvent` (wxEvent subclass with path, success, quality metrics)
+
+#### `src/libslic3r/GCode/GCodeProcessor.cpp` (+18)
+- **In `process_G1()`**: Thermal index parsing block — extracts `ti.max/min/mean` from `;helioadditive=` comments using regex
+- Sets `m_is_helio_gcode` flag when helio comments found
+
+#### `src/libslic3r/GCode/GCodeProcessor.hpp` (+4)
+- Added to `GCodeProcessorResult`: `bool is_helio_gcode`
+- Added to `MoveVertex`: `thermal_index_mean/min/max` floats
+- Added member variables: `m_thermal_index_mean/min/max`, `m_is_helio_gcode`
+
+#### `src/libvgcode/src/ViewerImpl.cpp` (+33)
+- **3 switch statements**: Added `ThermalIndexMean/Min/Max` cases in `get_vertex_color()`, `get_range()`, `set_palette()`
+- Added size calculation for 3 new `ColorRange` members
+
+#### `src/libvgcode/src/ViewerImpl.hpp` (+2)
+- 3 new members: `m_thermal_index_mean_range`, `m_thermal_index_min_range`, `m_thermal_index_max_range`
+
+#### `src/slic3r/GUI/Widgets/TextInput.hpp` (+63)
+- Added `#include <memory>`, `#include <vector>`, forward declaration
+- New member: `m_checkers` vector, `SetValCheckers()`, `CheckValid()`
+- New class hierarchy appended: `TextInputValChecker` (base), `TextInputValIntMinChecker`, `TextInputValIntRangeChecker`, `TextInputValDoubleMinChecker`, `TextInputValDoubleRangeChecker`
+
+#### `src/slic3r/GUI/Widgets/TextInput.cpp` (+68)
+- Added includes: `I18N.hpp`, `MsgDialog.hpp`
+- Implementations appended: `TextInputValChecker::Create*()` factory methods, `TextInput::CheckValid()`
+
+### LOW RISK
+
+#### `src/libslic3r/AppConfig.cpp` (+25)
+- **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing`, `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_first_time_tutorial`
+
+#### `src/libslic3r/PrintBase.hpp` (+1)
+- Added `bool is_helio { false }` to `SlicingStatus` struct
+
+#### `src/libslic3r/PrintConfig.cpp` (+21)
+- Appended 3 config definitions: `helio_printer_id` (string), `helio_initial_room_air_temp` (float), `helio_layer_threshold` (float)
+
+#### `src/libvgcode/include/PathVertex.hpp` (+4)
+- Appended 3 floats to `PathVertex` struct: `thermal_index_mean/min/max`
+
+#### `src/libvgcode/include/Types.hpp` (+2)
+- Appended 3 enum values to `EViewType`: `ThermalIndexMean`, `ThermalIndexMin`, `ThermalIndexMax`
+
+#### `src/slic3r/CMakeLists.txt` (+8)
+- Appended 8 source file entries (4 hpp + 4 cpp for Helio files)
+
+#### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
+- Null-guard fix: added `get_notification_manager()` null check in existing condition
+
+#### `src/slic3r/GUI/GLToolbar.cpp` (+1)
+- Added `wxDEFINE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
+
+#### `src/slic3r/GUI/GLToolbar.hpp` (+1)
+- Added `wxDECLARE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
+
+#### `src/slic3r/GUI/Selection.cpp` (+4/-1)
+- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks
+
+#### `src/slic3r/GUI/Widgets/SwitchButton.cpp` (+469)
+- **Appended** entire `CustomToggleButton` class + `ExpandButtonHolder` class (no upstream entanglement)
+
+#### `src/slic3r/GUI/Widgets/SwitchButton.hpp` (+96)
+- **Appended** declarations for `CustomToggleButton`, `ExpandButtonHolder`, `wxEXPAND_LEFT_DOWN` event
+
+## Conflict Resolution Rules
+
+### Rule 1: Helio-Only Files
+Never touched by upstream. If they appear in conflicts, something went very wrong — flag for human review.
+
+### Rule 2: Appended Code (Low Risk)
+Files where Helio code is appended at end: `SwitchButton.cpp/hpp`, `AppConfig.cpp`, `CMakeLists.txt`, `PrintConfig.cpp`, `PartPlate.cpp`, `TextInput.cpp/hpp`, `BackgroundSlicingProcess.hpp`.
+- Usually conflict-free
+- If upstream reformatted the file, just re-append the Helio block
+- If upstream added entries to the same list (e.g., CMakeLists), merge both additions
+
+### Rule 3: Interleaved Code (Critical/High Risk)
+Files where Helio code is inserted within upstream functions: `Plater.cpp`, `MainFrame.cpp`.
+
+**Plater.cpp rules:**
+- Preserve ALL `EVT_HELIO_*` event definitions and bindings
+- Preserve ALL `helio_*` member variables in `Plater::priv`
+- The `restart_background_process()` helio insertions are at two specific locations — find the `background_process.start()` calls and re-insert before them
+- The large handler block goes after `on_slicing_completed()` — find that function and insert after it
+- If upstream renamed `get_slice_result()`, update Helio calls to match
+- If upstream added parameters to functions Helio calls, add defaults
+
+**MainFrame.cpp rules:**
+- `ExpandButtonHolder` creation goes in `create_side_tools()`
+- "Slice with Helio" button goes in the slice dropdown creation
+- "Helio History" menu item goes in Help menu
+- All guarded by `enable_helio_processing` config check
+
+### Rule 4: Switch Statement Cases
+Files: `GCodeViewer.cpp`, `ViewerImpl.cpp`.
+- Add `ThermalIndexMean/Min/Max` cases alongside upstream's existing cases
+- If upstream reordered `EViewType` enum, match new order
+- If upstream added new view types, ensure TI cases don't conflict
+
+### Rule 5: Positional Initializer Lists
+File: `LibVGCodeWrapper.cpp`.
+- 4 `PathVertex` aggregate initializations have `thermal_index_mean/min/max` appended
+- If upstream changes `PathVertex` struct layout, these MUST be reordered to match
+- If upstream switches from aggregate to designated initializers, convert accordingly
+
+### Rule 6: Modified Function Signatures
+Files: `NotificationManager.hpp/cpp`.
+- `set_slicing_progress_began(bool is_helio = false)` — preserve default parameter
+- `set_slicing_progress_percentage(..., bool is_helio = false)` — preserve default parameter
+- If upstream adds its own parameters, add `is_helio` after them with default
+
+### Rule 7: Struct Member Additions
+Files: `GCodeProcessor.hpp`, `PathVertex.hpp`, `Types.hpp`, `PrintBase.hpp`.
+- Members are appended to existing structs — low conflict risk
+- If upstream reorders the struct, append Helio members at the end of the new layout
+
+### Rule 8: Include Ordering
+Helio includes go after the last upstream include in the same category:
+- `#include "../Utils/HelioDragon.hpp"` — after other Utils includes
+- `#include "HelioReleaseNote.hpp"` — after other GUI includes
+- Standard library includes (`<thread>`, `<sstream>`) — with other standard includes
+
+### Rule 9: Never Remove
+Any line containing these identifiers must be preserved:
+`helio`, `Helio`, `HELIO`, `thermal_index`, `ThermalIndex`, `HelioPlateResult`, `HelioQuery`, `HelioBackgroundProcess`, `HelioCompletionEvent`, `helioadditive`, `EVT_HELIO`, `EVT_GLTOOLBAR_ACTION_HELIO`
+
+### Rule 10: API Renames
+If upstream renames functions that Helio calls, update Helio code to use the new name:
+- `get_slice_result()` → used in `on_helio_processing_complete()`
+- `get_partplate_list()` → used throughout Helio handlers
+- `get_notification_manager()` → used for error/progress notifications
+- `restart_background_process()` → contains interleaved Helio code
+- `set_slicing_progress_percentage()` → signature modified by Helio
+
+## Build Verification
+
+### Linux (CI — cheapest, catches 95%+ of issues)
+```bash
+# Deps (cached)
+cmake -S deps -B deps/build -G Ninja -DDEP_WX_GTK3=ON
+cmake --build deps/build
+
+# Slicer
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=$(pwd)/deps/build/destdir/usr/local
+cmake --build build
+```
+
+### macOS (local dev)
+```bash
+cmake --build build/arm64 --config RelWithDebInfo --target all
+```
+
+### Quick Compile Check (header-only changes)
+```bash
+# Just rebuild the slic3r target to catch include errors
+cmake --build build --target OrcaSlicer
+```
+
+## High-Conflict-Risk Files (checked during upstream sync)
+
+These are upstream-owned files with Helio modifications — the sync workflow specifically monitors these for upstream changes:
+
+1. `src/slic3r/GUI/Plater.cpp` — Critical
+2. `src/slic3r/GUI/Plater.hpp` — Critical
+3. `src/slic3r/GUI/MainFrame.cpp` — High
+4. `src/slic3r/GUI/MainFrame.hpp` — High
+5. `src/slic3r/GUI/GCodeViewer.cpp` — High
+6. `src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp` — High
+7. `src/slic3r/GUI/NotificationManager.cpp` — Medium
+8. `src/slic3r/GUI/NotificationManager.hpp` — Medium
+9. `src/slic3r/GUI/PartPlate.hpp` — Medium
+10. `src/slic3r/GUI/PartPlate.cpp` — Medium
+11. `src/slic3r/GUI/GUI_App.cpp` — Medium
+12. `src/slic3r/GUI/GUI_App.hpp` — Medium
+13. `src/slic3r/GUI/Preferences.cpp` — Medium
+14. `src/slic3r/GUI/BackgroundSlicingProcess.hpp` — Medium
+15. `src/slic3r/GUI/Widgets/SwitchButton.cpp` — Low
+16. `src/slic3r/GUI/Widgets/SwitchButton.hpp` — Low
+17. `src/slic3r/GUI/Widgets/TextInput.cpp` — Low
+18. `src/slic3r/GUI/Widgets/TextInput.hpp` — Low
+19. `src/slic3r/CMakeLists.txt` — Low
+20. `src/libslic3r/AppConfig.cpp` — Low
+21. `src/libslic3r/PrintBase.hpp` — Low
+22. `src/libslic3r/PrintConfig.cpp` — Low
+23. `src/libslic3r/GCode/GCodeProcessor.cpp` — Medium
+24. `src/libslic3r/GCode/GCodeProcessor.hpp` — Medium
+25. `src/libvgcode/include/PathVertex.hpp` — Medium
+26. `src/libvgcode/include/Types.hpp` — Low
+27. `src/libvgcode/src/ViewerImpl.cpp` — Medium
+28. `src/libvgcode/src/ViewerImpl.hpp` — Low
+29. `src/slic3r/GUI/GLCanvas3D.cpp` — Low
+30. `src/slic3r/GUI/GLToolbar.cpp` — Low
+31. `src/slic3r/GUI/GLToolbar.hpp` — Low
+32. `src/slic3r/GUI/Selection.cpp` — Low
