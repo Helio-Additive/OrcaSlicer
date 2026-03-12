@@ -1,0 +1,355 @@
+name: Helio Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 9am UTC
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Helio release branch to sync into'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: helio-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine release branch
+        id: branch
+        run: |
+          if [ -n "${{ inputs.release_branch }}" ]; then
+            echo "target=${{ inputs.release_branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.branch.outputs.target }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
+          git fetch upstream --tags --force
+
+      - name: Find latest upstream release tag
+        id: latest
+        run: |
+          # Get the latest v* tag from upstream sorted by version
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No upstream release tags found"
+            exit 1
+          fi
+          echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream tag: $LATEST_TAG"
+
+      - name: Check if already synced
+        id: check
+        run: |
+          LATEST_TAG="${{ steps.latest.outputs.tag }}"
+
+          # Check if helio-last-synced tag exists and points to same commit
+          if git rev-parse "helio-last-synced" >/dev/null 2>&1; then
+            SYNCED_COMMIT=$(git rev-parse "helio-last-synced")
+            TARGET_COMMIT=$(git rev-parse "$LATEST_TAG")
+            if [ "$SYNCED_COMMIT" = "$TARGET_COMMIT" ]; then
+              echo "Already synced to $LATEST_TAG"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Get the tag name that helio-last-synced was created from (stored in annotation)
+            LAST_SYNCED_TAG=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
+            if [ -z "$LAST_SYNCED_TAG" ]; then
+              LAST_SYNCED_TAG="helio-last-synced"
+            fi
+            echo "last_synced=$LAST_SYNCED_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "No previous sync tag found, using v2.3.2-rc2 as baseline"
+            echo "last_synced=v2.3.2-rc2" >> "$GITHUB_OUTPUT"
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Exit if already synced
+        if: steps.check.outputs.skip == 'true'
+        run: echo "Nothing to sync — already at latest upstream release."
+
+      - name: Create sync branch
+        if: steps.check.outputs.skip != 'true'
+        id: sync_branch
+        run: |
+          BRANCH="upstream-sync/${{ steps.latest.outputs.tag }}"
+          git checkout -b "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Attempt merge
+        if: steps.check.outputs.skip != 'true'
+        id: merge
+        run: |
+          LATEST_TAG="${{ steps.latest.outputs.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git merge "$LATEST_TAG" --no-edit; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+
+            # Collect conflict details
+            CONFLICTS=$(git diff --name-only --diff-filter=U)
+            echo "conflicted_files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$CONFLICTS" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Identify Helio-relevant upstream changes
+        if: steps.check.outputs.skip != 'true'
+        id: helio_changes
+        run: |
+          LAST="${{ steps.check.outputs.last_synced }}"
+          LATEST="${{ steps.latest.outputs.tag }}"
+
+          # High-conflict-risk files from HELIO_INTEGRATION.md
+          WATCHED_FILES=(
+            "src/slic3r/GUI/Plater.cpp"
+            "src/slic3r/GUI/Plater.hpp"
+            "src/slic3r/GUI/MainFrame.cpp"
+            "src/slic3r/GUI/MainFrame.hpp"
+            "src/slic3r/GUI/GCodeViewer.cpp"
+            "src/slic3r/GUI/NotificationManager.cpp"
+            "src/slic3r/GUI/NotificationManager.hpp"
+            "src/slic3r/GUI/PartPlate.hpp"
+            "src/slic3r/GUI/PartPlate.cpp"
+            "src/slic3r/GUI/GUI_App.cpp"
+            "src/slic3r/GUI/GUI_App.hpp"
+            "src/slic3r/GUI/Preferences.cpp"
+            "src/slic3r/GUI/BackgroundSlicingProcess.hpp"
+            "src/slic3r/GUI/Widgets/SwitchButton.cpp"
+            "src/slic3r/GUI/Widgets/SwitchButton.hpp"
+            "src/slic3r/GUI/Widgets/TextInput.cpp"
+            "src/slic3r/GUI/Widgets/TextInput.hpp"
+            "src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp"
+            "src/slic3r/CMakeLists.txt"
+            "src/libslic3r/AppConfig.cpp"
+            "src/libslic3r/PrintBase.hpp"
+            "src/libslic3r/PrintConfig.cpp"
+            "src/libslic3r/GCode/GCodeProcessor.cpp"
+            "src/libslic3r/GCode/GCodeProcessor.hpp"
+            "src/libvgcode/include/PathVertex.hpp"
+            "src/libvgcode/include/Types.hpp"
+            "src/libvgcode/src/ViewerImpl.cpp"
+            "src/libvgcode/src/ViewerImpl.hpp"
+            "src/slic3r/GUI/GLCanvas3D.cpp"
+            "src/slic3r/GUI/GLToolbar.cpp"
+            "src/slic3r/GUI/GLToolbar.hpp"
+            "src/slic3r/GUI/Selection.cpp"
+          )
+
+          REPORT=""
+          for f in "${WATCHED_FILES[@]}"; do
+            STAT=$(git diff --stat "$LAST".."$LATEST" -- "$f" 2>/dev/null | tail -1)
+            if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
+              REPORT="$REPORT- \`$f\`: $STAT\n"
+            fi
+          done
+
+          if [ -z "$REPORT" ]; then
+            REPORT="No Helio-relevant files were modified upstream."
+          fi
+
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$REPORT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Get upstream changelog
+        if: steps.check.outputs.skip != 'true'
+        id: changelog
+        run: |
+          LAST="${{ steps.check.outputs.last_synced }}"
+          LATEST="${{ steps.latest.outputs.tag }}"
+
+          LOG=$(git log --oneline "$LAST".."$LATEST" -- | head -50)
+          TOTAL=$(git rev-list --count "$LAST".."$LATEST")
+
+          echo "log<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$LOG" >> "$GITHUB_OUTPUT"
+          if [ "$TOTAL" -gt 50 ]; then
+            echo "... and $((TOTAL - 50)) more commits" >> "$GITHUB_OUTPUT"
+          fi
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      - name: Handle merge conflicts
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
+        run: |
+          BRANCH="${{ steps.sync_branch.outputs.branch }}"
+          LATEST="${{ steps.latest.outputs.tag }}"
+
+          # Abort the merge so we can push the branch cleanly
+          git merge --abort
+
+          # Push the unmerged branch for local resolution
+          git push origin "$BRANCH" --force-with-lease
+
+          # Create issue
+          CONFLICTS="${{ steps.merge.outputs.conflicted_files }}"
+          HELIO_REPORT="${{ steps.helio_changes.outputs.report }}"
+
+          gh issue create \
+            --title "Upstream sync failed: $LATEST (merge conflicts)" \
+            --label "upstream-sync" \
+            --assignee "HelioPri" \
+            --project "main" \
+            --body "$(cat <<ISSUE_EOF
+          ## Merge conflicts detected syncing $LATEST
+
+          The automatic merge of upstream release \`$LATEST\` into \`${{ steps.branch.outputs.target }}\` produced conflicts.
+
+          ### Conflicted files
+          \`\`\`
+          $CONFLICTS
+          \`\`\`
+
+          ### Helio-relevant upstream changes
+          $HELIO_REPORT
+
+          ### Resolution steps
+          1. Pull the sync branch locally:
+             \`\`\`bash
+             git fetch origin && git checkout $BRANCH
+             git merge $LATEST
+             \`\`\`
+          2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):
+             \`\`\`bash
+             claude "Read HELIO_INTEGRATION.md then fix the merge conflicts. Preserve all Helio code."
+             \`\`\`
+          3. Push fixes — the PR will be created on the next workflow run, or create one manually.
+
+          See \`HELIO_INTEGRATION.md\` for detailed conflict resolution rules.
+          ISSUE_EOF
+          )"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push clean merge branch
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        run: |
+          git push origin "${{ steps.sync_branch.outputs.branch }}"
+
+      - name: Trigger build check
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        id: build
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Trigger the build_all workflow on the sync branch for Linux only
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build_all.yml',
+              ref: '${{ steps.sync_branch.outputs.branch }}'
+            });
+
+      - name: Create pull request
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        id: pr
+        run: |
+          LATEST="${{ steps.latest.outputs.tag }}"
+          TARGET="${{ steps.branch.outputs.target }}"
+          BRANCH="${{ steps.sync_branch.outputs.branch }}"
+          HELIO_REPORT="${{ steps.helio_changes.outputs.report }}"
+          CHANGELOG="${{ steps.changelog.outputs.log }}"
+          TOTAL="${{ steps.changelog.outputs.total }}"
+
+          gh pr create \
+            --base "$TARGET" \
+            --head "$BRANCH" \
+            --title "Upstream sync: $LATEST" \
+            --assignee "HelioPri" \
+            --project "main" \
+            --body "$(cat <<'PR_EOF'
+          ## Upstream Sync: $LATEST
+
+          Merges upstream release `$LATEST` into `$TARGET`.
+
+          ### Upstream changelog ($TOTAL commits)
+          ```
+          $CHANGELOG
+          ```
+
+          ### Helio-relevant upstream changes
+          $HELIO_REPORT
+
+          ### Merge status
+          - [x] Clean merge (no conflicts)
+          - [ ] Build check triggered
+
+          ### Review checklist
+          - [ ] Verify Helio features still work (Slice with Helio button, TI visualization)
+          - [ ] Check that all `helio_*` identifiers are preserved
+          - [ ] Run local build on macOS: `cmake --build build/arm64 --config RelWithDebInfo --target all`
+
+          ---
+          *Auto-generated by helio-upstream-sync workflow*
+          PR_EOF
+          )"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update last-synced tag
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        run: |
+          LATEST="${{ steps.latest.outputs.tag }}"
+          LATEST_COMMIT=$(git rev-parse "$LATEST")
+
+          # Move the lightweight tag to the new release
+          git tag -f "helio-last-synced" "$LATEST_COMMIT"
+          git push origin "helio-last-synced" --force
+
+      - name: Handle build failure
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'failure'
+        run: |
+          LATEST="${{ steps.latest.outputs.tag }}"
+          BRANCH="${{ steps.sync_branch.outputs.branch }}"
+
+          gh issue create \
+            --title "Upstream sync build failed: $LATEST" \
+            --label "upstream-sync" \
+            --assignee "HelioPri" \
+            --project "main" \
+            --body "$(cat <<ISSUE_EOF
+          ## Build failed after merging $LATEST
+
+          The merge was clean but the build check failed. PR has been created but needs build fixes.
+
+          ### Resolution steps
+          1. Check the build logs in the Actions tab
+          2. Pull the sync branch locally:
+             \`\`\`bash
+             git fetch origin && git checkout $BRANCH
+             \`\`\`
+          3. Fix build errors:
+             \`\`\`bash
+             claude "Read HELIO_INTEGRATION.md then fix the build errors. Check the Build Verification section."
+             \`\`\`
+          4. Push fixes — the PR will update automatically.
+
+          See \`HELIO_INTEGRATION.md\` for build verification commands.
+          ISSUE_EOF
+          )"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
