@@ -91,7 +91,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: sync_branch
         run: |
-          BRANCH="upstream-sync/${{ steps.latest.outputs.tag }}"
+          BRANCH="helio-release-candidate-${{ steps.latest.outputs.tag }}"
           git checkout -b "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -163,7 +163,7 @@ jobs:
           for f in "${WATCHED_FILES[@]}"; do
             STAT=$(git diff --stat "$LAST".."$LATEST" -- "$f" 2>/dev/null | tail -1)
             if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-              REPORT="$REPORT- \`$f\`: $STAT\n"
+              printf -v REPORT '%s- `%s`: %s\n' "$REPORT" "$f" "$STAT"
             fi
           done
 
@@ -172,7 +172,7 @@ jobs:
           fi
 
           echo "report<<EOF" >> "$GITHUB_OUTPUT"
-          echo -e "$REPORT" >> "$GITHUB_OUTPUT"
+          echo "$REPORT" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Get upstream changelog
@@ -193,55 +193,70 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
           echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
 
-      - name: Handle merge conflicts
+      - name: Push unmerged branch for conflict resolution
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
         run: |
-          BRANCH="${{ steps.sync_branch.outputs.branch }}"
-          LATEST="${{ steps.latest.outputs.tag }}"
-
-          # Abort the merge so we can push the branch cleanly
           git merge --abort
+          git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
 
-          # Push the unmerged branch for local resolution
-          git push origin "$BRANCH" --force-with-lease
-
-          # Create issue
-          CONFLICTS="${{ steps.merge.outputs.conflicted_files }}"
-          HELIO_REPORT="${{ steps.helio_changes.outputs.report }}"
-
-          gh issue create \
-            --title "Upstream sync failed: $LATEST (merge conflicts)" \
-            --label "upstream-sync" \
-            --body "$(cat <<ISSUE_EOF
-          ## Merge conflicts detected syncing $LATEST
-
-          The automatic merge of upstream release \`$LATEST\` into \`${{ steps.branch.outputs.target }}\` produced conflicts.
-
-          ### Conflicted files
-          \`\`\`
-          $CONFLICTS
-          \`\`\`
-
-          ### Helio-relevant upstream changes
-          $HELIO_REPORT
-
-          ### Resolution steps
-          1. Pull the sync branch locally:
-             \`\`\`bash
-             git fetch origin && git checkout $BRANCH
-             git merge $LATEST
-             \`\`\`
-          2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):
-             \`\`\`bash
-             claude "Read HELIO_INTEGRATION.md then fix the merge conflicts. Preserve all Helio code."
-             \`\`\`
-          3. Push fixes — the PR will be created on the next workflow run, or create one manually.
-
-          See \`HELIO_INTEGRATION.md\` for detailed conflict resolution rules.
-          ISSUE_EOF
-          )"
+      - name: Handle merge conflicts
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
+          LATEST_TAG: ${{ steps.latest.outputs.tag }}
+          TARGET_BRANCH: ${{ steps.branch.outputs.target }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicted_files }}
+          HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
+        with:
+          script: |
+            const branch = process.env.SYNC_BRANCH;
+            const latest = process.env.LATEST_TAG;
+            const target = process.env.TARGET_BRANCH;
+            const conflicts = process.env.CONFLICTS;
+            const helioReport = process.env.HELIO_REPORT;
+
+            if (!branch || !latest) {
+              core.setFailed('Missing required env vars: SYNC_BRANCH or LATEST_TAG');
+              return;
+            }
+
+            const body = [
+              `## Merge conflicts detected syncing ${latest}`,
+              '',
+              `The automatic merge of upstream release \`${latest}\` into \`${target}\` produced conflicts.`,
+              '',
+              '### Conflicted files',
+              '```',
+              conflicts,
+              '```',
+              '',
+              '### Helio-relevant upstream changes',
+              helioReport,
+              '',
+              '### Resolution steps',
+              '1. Pull the sync branch locally:',
+              '   ```bash',
+              `   git fetch origin && git checkout ${branch}`,
+              `   git merge ${latest}`,
+              '   ```',
+              '2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
+              '   ```bash',
+              '   claude "Read HELIO_INTEGRATION.md then fix the merge conflicts. Preserve all Helio code."',
+              '   ```',
+              '3. Push fixes — the PR will be created on the next workflow run, or create one manually.',
+              '',
+              'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Upstream sync failed: ${latest} (merge conflicts)`,
+              labels: ['upstream-sync'],
+              body: body
+            });
+            console.log('Created merge conflict issue');
 
       - name: Push clean merge branch
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
@@ -266,46 +281,64 @@ jobs:
       - name: Create pull request
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
         id: pr
-        run: |
-          LATEST="${{ steps.latest.outputs.tag }}"
-          TARGET="${{ steps.branch.outputs.target }}"
-          BRANCH="${{ steps.sync_branch.outputs.branch }}"
-          HELIO_REPORT="${{ steps.helio_changes.outputs.report }}"
-          CHANGELOG="${{ steps.changelog.outputs.log }}"
-          TOTAL="${{ steps.changelog.outputs.total }}"
-
-          gh pr create \
-            --base "$TARGET" \
-            --head "$BRANCH" \
-            --title "Upstream sync: $LATEST" \
-            --body "$(cat <<PR_EOF
-          ## Upstream Sync: $LATEST
-
-          Merges upstream release \`$LATEST\` into \`$TARGET\`.
-
-          ### Upstream changelog ($TOTAL commits)
-          \`\`\`
-          $CHANGELOG
-          \`\`\`
-
-          ### Helio-relevant upstream changes
-          $HELIO_REPORT
-
-          ### Merge status
-          - [x] Clean merge (no conflicts)
-          - [ ] Build check triggered
-
-          ### Review checklist
-          - [ ] Verify Helio features still work (Slice with Helio button, TI visualization)
-          - [ ] Check that all \`helio_*\` identifiers are preserved
-          - [ ] Run local build on macOS: \`cmake --build build/arm64 --config RelWithDebInfo --target all\`
-
-          ---
-          *Auto-generated by helio-upstream-sync workflow*
-          PR_EOF
-          )"
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ steps.latest.outputs.tag }}
+          TARGET_BRANCH: ${{ steps.branch.outputs.target }}
+          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
+          HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
+          CHANGELOG: ${{ steps.changelog.outputs.log }}
+          TOTAL_COMMITS: ${{ steps.changelog.outputs.total }}
+        with:
+          script: |
+            const latest = process.env.LATEST_TAG;
+            const target = process.env.TARGET_BRANCH;
+            const branch = process.env.SYNC_BRANCH;
+            const helioReport = process.env.HELIO_REPORT;
+            const changelog = process.env.CHANGELOG;
+            const total = process.env.TOTAL_COMMITS;
+
+            if (!latest || !target || !branch) {
+              core.setFailed('Missing required env vars: LATEST_TAG, TARGET_BRANCH, or SYNC_BRANCH');
+              return;
+            }
+
+            const body = [
+              `## Upstream Sync: ${latest}`,
+              '',
+              `Merges upstream release \`${latest}\` into \`${target}\`.`,
+              '',
+              `### Upstream changelog (${total} commits)`,
+              '```',
+              changelog,
+              '```',
+              '',
+              '### Helio-relevant upstream changes',
+              helioReport,
+              '',
+              '### Merge status',
+              '- [x] Clean merge (no conflicts)',
+              '- [ ] Build check triggered',
+              '',
+              '### Review checklist',
+              '- [ ] Verify Helio features still work (Slice with Helio button, TI visualization)',
+              '- [ ] Check that all `helio_*` identifiers are preserved',
+              '- [ ] Run local build on macOS: `cmake --build build/arm64 --config RelWithDebInfo --target all`',
+              '',
+              '---',
+              '*Auto-generated by helio-upstream-sync workflow*',
+            ].join('\n');
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: branch,
+              base: target,
+              title: `Upstream sync: ${latest}`,
+              body: body
+            });
+            core.setOutput('url', pr.html_url);
+            console.log(`Created PR: ${pr.html_url}`);
 
       - name: Update last-synced tag
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome != 'failure'
@@ -319,32 +352,45 @@ jobs:
 
       - name: Handle build failure
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'failure'
-        run: |
-          LATEST="${{ steps.latest.outputs.tag }}"
-          BRANCH="${{ steps.sync_branch.outputs.branch }}"
-
-          gh issue create \
-            --title "Upstream sync build failed: $LATEST" \
-            --label "upstream-sync" \
-            --body "$(cat <<ISSUE_EOF
-          ## Build failed after merging $LATEST
-
-          The merge was clean but the build check failed. PR has been created but needs build fixes.
-
-          ### Resolution steps
-          1. Check the build logs in the Actions tab
-          2. Pull the sync branch locally:
-             \`\`\`bash
-             git fetch origin && git checkout $BRANCH
-             \`\`\`
-          3. Fix build errors:
-             \`\`\`bash
-             claude "Read HELIO_INTEGRATION.md then fix the build errors. Check the Build Verification section."
-             \`\`\`
-          4. Push fixes — the PR will update automatically.
-
-          See \`HELIO_INTEGRATION.md\` for build verification commands.
-          ISSUE_EOF
-          )"
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ steps.latest.outputs.tag }}
+          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
+        with:
+          script: |
+            const latest = process.env.LATEST_TAG;
+            const branch = process.env.SYNC_BRANCH;
+
+            if (!latest || !branch) {
+              core.setFailed('Missing required env vars: LATEST_TAG or SYNC_BRANCH');
+              return;
+            }
+
+            const body = [
+              `## Build failed after merging ${latest}`,
+              '',
+              'The merge was clean but the build check failed. PR has been created but needs build fixes.',
+              '',
+              '### Resolution steps',
+              '1. Check the build logs in the Actions tab',
+              '2. Pull the sync branch locally:',
+              '   ```bash',
+              `   git fetch origin && git checkout ${branch}`,
+              '   ```',
+              '3. Fix build errors:',
+              '   ```bash',
+              '   claude "Read HELIO_INTEGRATION.md then fix the build errors. Check the Build Verification section."',
+              '   ```',
+              '4. Push fixes — the PR will update automatically.',
+              '',
+              'See `HELIO_INTEGRATION.md` for build verification commands.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Upstream sync build failed: ${latest}`,
+              labels: ['upstream-sync'],
+              body: body
+            });
+            console.log('Created build failure issue');
