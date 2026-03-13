@@ -163,7 +163,7 @@ jobs:
           for f in "${WATCHED_FILES[@]}"; do
             STAT=$(git diff --stat "$LAST".."$LATEST" -- "$f" 2>/dev/null | tail -1)
             if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-              REPORT="${REPORT}$(printf '- \`%s\`: %s\n' "$f" "$STAT")"
+              printf -v REPORT '%s- `%s`: %s\n' "$REPORT" "$f" "$STAT"
             fi
           done
 
