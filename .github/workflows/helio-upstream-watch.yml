@@ -193,8 +193,17 @@ jobs:
             }
 
       - name: Post digest as comment
-        run: |
-          DIGEST="${{ steps.digest.outputs.digest }}"
-          gh issue comment "${{ steps.issue.outputs.number }}" --body "$DIGEST"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const digest = process.env.DIGEST;
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER, 10);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: digest
+            });
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
