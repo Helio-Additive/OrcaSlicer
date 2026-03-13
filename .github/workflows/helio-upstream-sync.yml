@@ -359,7 +359,24 @@ jobs:
               core.setOutput('url', pr.html_url);
               console.log(`Created PR: ${pr.html_url}`);
             } catch (err) {
-              if (err.status === 422) {
+              const isNoDiff422 =
+                err && err.status === 422 &&
+                (
+                  (typeof err.message === 'string' && err.message.includes('No commits between')) ||
+                  (err.response &&
+                   err.response.data &&
+                   (
+                     (typeof err.response.data.message === 'string' &&
+                      err.response.data.message.includes('No commits between')) ||
+                     (Array.isArray(err.response.data.errors) &&
+                      err.response.data.errors.some(e =>
+                        e && typeof e.message === 'string' &&
+                        e.message.includes('No commits between')
+                      ))
+                   ))
+                );
+
+              if (isNoDiff422) {
                 console.log(`No diff between ${target} and ${branch} — skipping PR creation`);
               } else {
                 throw err;
