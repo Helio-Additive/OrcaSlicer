@@ -105,7 +105,7 @@ jobs:
           for f in "${WATCHED_FILES[@]}"; do
             STAT=$(git diff --stat "$LATEST_TAG"..upstream/main -- "$f" 2>/dev/null | tail -1)
             if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-              MAIN_CHANGES="${MAIN_CHANGES}$(printf '- \`%s\`: %s\n' "$f" "$STAT")"
+              printf -v MAIN_CHANGES '%s- `%s`: %s\n' "$MAIN_CHANGES" "$f" "$STAT"
             fi
           done
 
@@ -120,7 +120,7 @@ jobs:
             for f in "${WATCHED_FILES[@]}"; do
               STAT=$(git diff --stat "$LATEST_TAG".."$branch" -- "$f" 2>/dev/null | tail -1)
               if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-                BRANCH_REPORT="${BRANCH_REPORT}$(printf '  - \`%s\`: %s\n' "$f" "$STAT")"
+                printf -v BRANCH_REPORT '%s  - `%s`: %s\n' "$BRANCH_REPORT" "$f" "$STAT"
               fi
             done
             if [ -n "$BRANCH_REPORT" ]; then
