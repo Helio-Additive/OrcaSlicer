@@ -105,8 +105,7 @@ jobs:
           for f in "${WATCHED_FILES[@]}"; do
             STAT=$(git diff --stat "$LATEST_TAG"..upstream/main -- "$f" 2>/dev/null | tail -1)
             if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-              MAIN_CHANGES="${MAIN_CHANGES}- \`$f\`: $STAT
-"
+              MAIN_CHANGES="${MAIN_CHANGES}$(printf '- \`%s\`: %s\n' "$f" "$STAT")"
             fi
           done
 
@@ -121,14 +120,11 @@ jobs:
             for f in "${WATCHED_FILES[@]}"; do
               STAT=$(git diff --stat "$LATEST_TAG".."$branch" -- "$f" 2>/dev/null | tail -1)
               if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
-                BRANCH_REPORT="${BRANCH_REPORT}  - \`$f\`: $STAT
-"
+                BRANCH_REPORT="${BRANCH_REPORT}$(printf '  - \`%s\`: %s\n' "$f" "$STAT")"
               fi
             done
             if [ -n "$BRANCH_REPORT" ]; then
-              BRANCH_CHANGES="${BRANCH_CHANGES}
-**$branch:**
-$BRANCH_REPORT"
+              BRANCH_CHANGES="${BRANCH_CHANGES}$(printf '\n**%s:**\n%s' "$branch" "$BRANCH_REPORT")"
             fi
           done
 
@@ -198,7 +194,16 @@ $BRANCH_REPORT"
         with:
           script: |
             const digest = process.env.DIGEST;
-            const issueNumber = parseInt(process.env.ISSUE_NUMBER, 10);
+            if (!digest || !digest.trim()) {
+              core.setFailed('DIGEST env var is missing or empty');
+              return;
+            }
+            const issueNumberRaw = process.env.ISSUE_NUMBER;
+            if (!issueNumberRaw || !/^\d+$/.test(issueNumberRaw)) {
+              core.setFailed(`ISSUE_NUMBER is missing or invalid: "${issueNumberRaw ?? ''}"`);
+              return;
+            }
+            const issueNumber = parseInt(issueNumberRaw, 10);
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
