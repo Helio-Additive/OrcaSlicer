@@ -84,7 +84,15 @@ jobs:
           fi
 
           # Skip if baseline and latest point to the same commit (nothing new to sync)
-          if [ "$(git rev-parse "$LAST_SYNCED" 2>/dev/null)" = "$(git rev-parse "$LATEST_TAG" 2>/dev/null)" ]; then
+          BASELINE_COMMIT=$(git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
+          LATEST_COMMIT=$(git rev-parse "$LATEST_TAG^{commit}" 2>/dev/null || true)
+
+          if [ -z "$BASELINE_COMMIT" ] || [ -z "$LATEST_COMMIT" ]; then
+            echo "Error: Unable to resolve baseline ($LAST_SYNCED) or latest ($LATEST_TAG) to a commit."
+            exit 1
+          fi
+
+          if [ "$BASELINE_COMMIT" = "$LATEST_COMMIT" ]; then
             echo "Baseline $LAST_SYNCED and latest $LATEST_TAG point to the same commit — nothing to sync"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
