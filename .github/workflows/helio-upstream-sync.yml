@@ -412,6 +412,30 @@ jobs:
               return;
             }
 
+            // Ensure claude-work label exists before trying to apply it
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'claude-work'
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: 'claude-work',
+                    color: 'e4e669',
+                    description: 'Work item for Claude / Copilot'
+                  });
+                  console.log('Created missing label: claude-work');
+                } catch (createErr) {
+                  console.warn('Warning: could not create claude-work label:', createErr.message);
+                }
+              }
+            }
+
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
