@@ -1,0 +1,181 @@
+name: Helio Release
+
+# Uses pull_request (not pull_request_target) because all PRs originate from
+# branches within the same repo, so secrets and write permissions are available.
+# This also ensures reusable workflows check out the correct merge commit.
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - orca-latest-parity-bambu
+
+concurrency:
+  group: helio-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  # Gate: only run when a labeled, same-repo PR is actually merged
+  check:
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract version from version.inc
+        id: ver
+        run: |
+          set -euo pipefail
+          ver_line=$(grep 'set(SoftFever_VERSION' version.inc || true)
+          if [ -z "$ver_line" ]; then
+            echo "Error: Could not find SoftFever_VERSION in version.inc" >&2
+            exit 1
+          fi
+          ver=$(printf '%s\n' "$ver_line" | cut -d '"' -f2)
+          if [ -z "$ver" ]; then
+            echo "Error: Extracted empty version from version.inc" >&2
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Determine release tag
+        id: tag
+        run: |
+          tag="helio-v${{ steps.ver.outputs.version }}"
+          # If tag already exists, append short SHA of merge commit to avoid collision
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "refs/tags/$tag$"; then
+            tag="${tag}-$(echo ${{ github.event.pull_request.merge_commit_sha }} | cut -c1-7)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build_linux:
+    needs: check
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: ubuntu-24.04
+    secrets: inherit
+
+  build_windows:
+    needs: check
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+    secrets: inherit
+
+  build_macos_arch:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: macos-14
+      arch: ${{ matrix.arch }}
+    secrets: inherit
+
+  build_macos_universal:
+    needs: [check, build_macos_arch]
+    uses: ./.github/workflows/build_orca.yml
+    with:
+      os: macos-14
+      arch: universal
+      macos-combine-only: true
+    secrets: inherit
+
+  release:
+    needs: [check, build_linux, build_windows, build_macos_universal]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -50
+
+      - name: Prepare release body
+        id: body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          {
+            echo "content<<HELIO_EOF"
+            echo "## OrcaSlicer with Helio Additive — v${{ needs.check.outputs.version }}"
+            echo ""
+            echo "Released from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}"
+            echo ""
+            echo "$PR_BODY"
+            echo "HELIO_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          missing=""
+
+          # macOS universal DMG
+          dmg=$(find artifacts -name 'OrcaSlicer_Mac_universal_*.dmg' -print -quit)
+          if [ -n "$dmg" ]; then
+            cp "$dmg" "release/OrcaSlicer_Helio_Mac_universal_${{ needs.check.outputs.version }}.dmg"
+          else
+            missing="$missing macOS-DMG"
+          fi
+
+          # Windows installer
+          installer=$(find artifacts -name 'OrcaSlicer_Windows_Installer_*.exe' -print -quit)
+          if [ -n "$installer" ]; then
+            cp "$installer" "release/OrcaSlicer_Helio_Windows_Installer_${{ needs.check.outputs.version }}.exe"
+          else
+            missing="$missing Windows-Installer"
+          fi
+
+          # Windows portable — the artifact is a directory, re-zip it
+          portable_dir=$(find artifacts -maxdepth 1 -type d -name 'OrcaSlicer_Windows_*_portable' -print -quit)
+          if [ -n "$portable_dir" ]; then
+            (cd "$portable_dir" && zip -r "$GITHUB_WORKSPACE/release/OrcaSlicer_Helio_Windows_${{ needs.check.outputs.version }}_portable.zip" .)
+          else
+            missing="$missing Windows-Portable"
+          fi
+
+          # Linux AppImage
+          appimage=$(find artifacts -name 'OrcaSlicer_Linux_AppImage*.AppImage' -print -quit)
+          if [ -n "$appimage" ]; then
+            cp "$appimage" "release/OrcaSlicer_Helio_Linux_${{ needs.check.outputs.version }}.AppImage"
+          else
+            missing="$missing Linux-AppImage"
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "Error: Missing release assets:$missing"
+            exit 1
+          fi
+
+          echo "Release assets:"
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: "Helio v${{ needs.check.outputs.version }}"
+          target_commitish: ${{ github.event.pull_request.merge_commit_sha }}
+          body: ${{ steps.body.outputs.content }}
+          files: release/*
+          draft: false
+          prerelease: >-
+            ${{
+              contains(needs.check.outputs.version, 'rc') ||
+              contains(needs.check.outputs.version, 'RC') ||
+              contains(needs.check.outputs.version, 'beta') ||
+              contains(needs.check.outputs.version, 'Beta')
+            }}
+          generate_release_notes: false
