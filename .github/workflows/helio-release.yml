@@ -71,7 +71,7 @@ jobs:
             tag="helio-v${{ steps.ver.outputs.version }}"
           fi
           # If tag already exists, append short SHA to avoid collision
-          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "refs/tags/$tag$"; then
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -qF "refs/tags/$tag$"; then
             sha="${{ github.event.pull_request.merge_commit_sha || github.sha }}"
             tag="${tag}-$(echo $sha | cut -c1-7)"
           fi
