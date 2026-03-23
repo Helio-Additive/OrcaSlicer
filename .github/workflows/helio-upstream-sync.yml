@@ -270,7 +270,7 @@ jobs:
         env:
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
-          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           CONFLICTS: ${{ steps.merge.outputs.conflicted_files }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
@@ -278,7 +278,7 @@ jobs:
           script: |
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
-            const syncRef = process.env.SYNC_REF;
+            const syncSha = process.env.SYNC_SHA;
             const target = process.env.TARGET_BRANCH;
             const conflicts = process.env.CONFLICTS;
             const helioReport = process.env.HELIO_REPORT;
@@ -302,10 +302,10 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Pull the sync branch locally:',
+              '1. Pull the sync branch locally and merge the upstream commit:',
               '   ```bash',
               `   git fetch origin && git checkout ${branch}`,
-              `   git merge ${syncRef}`,
+              `   git merge ${syncSha}`,
               '   ```',
               '2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
               '   ```bash',
@@ -435,13 +435,13 @@ jobs:
             }
 
       - name: Update tracking tag
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'success'
         run: |
           SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
           TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
 
-          # Move the tracking tag to the synced commit
+          # Move the tracking tag to the upstream target commit that was synced.
           # Note: build_all is fire-and-forget (dispatch only), so we track the
-          # merge itself. Build failures will show up on the PR via status checks.
+          # upstream commit. Build failures will show up on the PR via status checks.
           git tag -f "$TRACKING_TAG" "$SYNC_SHA"
           git push origin "$TRACKING_TAG" --force
