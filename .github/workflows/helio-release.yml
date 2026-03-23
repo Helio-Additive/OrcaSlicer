@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   # Gate: for PR triggers, only run when a labeled, same-repo PR is actually merged
-  # For workflow_dispatch, always run
+  # For workflow_dispatch, only run on the release branch
   check:
     if: >-
       (github.event_name == 'workflow_dispatch' &&
@@ -58,11 +58,12 @@ jobs:
         env:
           TAG_OVERRIDE: ${{ inputs.tag_override }}
         run: |
+          set -euo pipefail
           # Use override if provided, otherwise auto-generate
           if [ -n "$TAG_OVERRIDE" ]; then
-            # Validate: reject invalid tag characters (only allow alnum, dot, dash, underscore)
-            if ! printf '%s' "$TAG_OVERRIDE" | grep -qE '^[a-zA-Z0-9._-]+$'; then
-              echo "Error: tag_override contains invalid characters" >&2
+            # Validate using Git's own ref rules
+            if ! git check-ref-format --allow-onelevel "refs/tags/$TAG_OVERRIDE"; then
+              echo "Error: tag_override is not a valid Git tag name" >&2
               exit 1
             fi
             tag="$TAG_OVERRIDE"
@@ -133,8 +134,9 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
         run: |
+          delim="HELIO_EOF_$(openssl rand -hex 8)"
           {
-            echo "content<<HELIO_EOF"
+            echo "content<<$delim"
             echo "## OrcaSlicer with Helio Additive — v${{ needs.check.outputs.version }}"
             echo ""
             if [ -n "$PR_NUMBER" ]; then
@@ -144,7 +146,7 @@ jobs:
             fi
             echo ""
             echo "$PR_BODY"
-            echo "HELIO_EOF"
+            echo "$delim"
           } >> "$GITHUB_OUTPUT"
 
       - name: Collect release assets
