@@ -76,6 +76,13 @@ Key data flow:
 | `resources/web/helio/helio_service_snote_en.html` | Service notes (English) |
 | `resources/data/helio_hints.ini` | First-time tutorial hint text |
 
+### CI/CD Workflows (Helio-only)
+| File | Purpose |
+|-|-|
+| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
+| `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
+| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
+
 ## Modified Files (32 files — conflict risk, detailed per-file guide)
 
 ### CRITICAL RISK
