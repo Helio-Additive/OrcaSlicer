@@ -1,7 +1,10 @@
 name: Helio Release
 
+# Uses pull_request (not pull_request_target) because all PRs originate from
+# branches within the same repo, so secrets and write permissions are available.
+# This also ensures reusable workflows check out the correct merge commit.
 on:
-  pull_request_target:
+  pull_request:
     types: [closed]
     branches:
       - orca-latest-parity-bambu
@@ -22,8 +25,6 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
       - name: Extract version from version.inc
         id: ver
         run: |
@@ -35,7 +36,7 @@ jobs:
           tag="helio-v${{ steps.ver.outputs.version }}"
           # If tag already exists, append short SHA to avoid collision
           if git ls-remote --tags origin "refs/tags/$tag" | grep -q "refs/tags/$tag$"; then
-            tag="${tag}-$(echo ${{ github.event.pull_request.merge_commit_sha }} | cut -c1-7)"
+            tag="${tag}-$(echo ${{ github.sha }} | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -115,6 +116,12 @@ jobs:
           appimage=$(find artifacts -name 'OrcaSlicer_Linux_AppImage*.AppImage' -print -quit)
           if [ -n "$appimage" ]; then
             cp "$appimage" "release/OrcaSlicer_Helio_Linux_${{ needs.check.outputs.version }}.AppImage"
+          fi
+
+          # Fail if no assets were collected
+          if ! ls release/* >/dev/null 2>&1; then
+            echo "Error: No release assets were collected."
+            exit 1
           fi
 
           echo "Release assets:"
