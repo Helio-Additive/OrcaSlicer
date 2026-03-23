@@ -1,0 +1,134 @@
+name: Helio Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - orca-latest-parity-bambu
+
+concurrency:
+  group: helio-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  # Gate: only run when a labeled PR is actually merged
+  check:
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract version from version.inc
+        id: ver
+        run: |
+          ver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Determine release tag
+        id: tag
+        run: |
+          tag="helio-v${{ steps.ver.outputs.version }}"
+          # If tag already exists, append short SHA to avoid collision
+          if git ls-remote --tags origin "$tag" | grep -q "$tag"; then
+            tag="${tag}-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build_linux:
+    needs: check
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: ubuntu-24.04
+    secrets: inherit
+
+  build_windows:
+    needs: check
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+    secrets: inherit
+
+  build_macos_arch:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: macos-14
+      arch: ${{ matrix.arch }}
+    secrets: inherit
+
+  build_macos_universal:
+    needs: [check, build_macos_arch]
+    uses: ./.github/workflows/build_orca.yml
+    with:
+      os: macos-14
+      arch: universal
+      macos-combine-only: true
+    secrets: inherit
+
+  release:
+    needs: [check, build_linux, build_windows, build_macos_universal]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -50
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release
+
+          # macOS universal DMG
+          dmg=$(find artifacts -name 'OrcaSlicer_Mac_universal_*.dmg' -print -quit)
+          if [ -n "$dmg" ]; then
+            cp "$dmg" "release/OrcaSlicer_Helio_Mac_universal_${{ needs.check.outputs.version }}.dmg"
+          fi
+
+          # Windows installer
+          installer=$(find artifacts -name 'OrcaSlicer_Windows_Installer_*.exe' -print -quit)
+          if [ -n "$installer" ]; then
+            cp "$installer" "release/OrcaSlicer_Helio_Windows_Installer_${{ needs.check.outputs.version }}.exe"
+          fi
+
+          # Windows portable — the artifact is a directory, re-zip it
+          portable_dir=$(find artifacts -maxdepth 1 -type d -name 'OrcaSlicer_Windows_*_portable' -print -quit)
+          if [ -n "$portable_dir" ]; then
+            (cd "$portable_dir" && zip -r "$GITHUB_WORKSPACE/release/OrcaSlicer_Helio_Windows_${{ needs.check.outputs.version }}_portable.zip" .)
+          fi
+
+          # Linux AppImage
+          appimage=$(find artifacts -name 'OrcaSlicer_Linux_AppImage*.AppImage' -print -quit)
+          if [ -n "$appimage" ]; then
+            cp "$appimage" "release/OrcaSlicer_Helio_Linux_${{ needs.check.outputs.version }}.AppImage"
+          fi
+
+          echo "Release assets:"
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: "Helio v${{ needs.check.outputs.version }}"
+          body: |
+            ## OrcaSlicer with Helio Additive — v${{ needs.check.outputs.version }}
+
+            Released from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+
+            ${{ github.event.pull_request.body }}
+          files: release/*
+          draft: false
+          prerelease: ${{ contains(needs.check.outputs.version, 'rc') || contains(needs.check.outputs.version, 'beta') }}
+          generate_release_notes: false
