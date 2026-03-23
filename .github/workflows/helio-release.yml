@@ -14,11 +14,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Gate: only run when a labeled PR is actually merged
+  # Gate: only run when a labeled, same-repo PR is actually merged
   check:
     if: >-
       github.event.pull_request.merged == true &&
-      contains(github.event.pull_request.labels.*.name, 'release')
+      contains(github.event.pull_request.labels.*.name, 'release') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -28,15 +29,25 @@ jobs:
       - name: Extract version from version.inc
         id: ver
         run: |
-          ver=$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)
+          set -euo pipefail
+          ver_line=$(grep 'set(SoftFever_VERSION' version.inc || true)
+          if [ -z "$ver_line" ]; then
+            echo "Error: Could not find SoftFever_VERSION in version.inc" >&2
+            exit 1
+          fi
+          ver=$(printf '%s\n' "$ver_line" | cut -d '"' -f2)
+          if [ -z "$ver" ]; then
+            echo "Error: Extracted empty version from version.inc" >&2
+            exit 1
+          fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: Determine release tag
         id: tag
         run: |
           tag="helio-v${{ steps.ver.outputs.version }}"
-          # If tag already exists, append short SHA to avoid collision
+          # If tag already exists, append short SHA of merge commit to avoid collision
           if git ls-remote --tags origin "refs/tags/$tag" | grep -q "refs/tags/$tag$"; then
-            tag="${tag}-$(echo ${{ github.sha }} | cut -c1-7)"
+            tag="${tag}-$(echo ${{ github.event.pull_request.merge_commit_sha }} | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -92,35 +103,44 @@ jobs:
 
       - name: Collect release assets
         run: |
+          set -euo pipefail
           mkdir -p release
+          missing=""
 
           # macOS universal DMG
           dmg=$(find artifacts -name 'OrcaSlicer_Mac_universal_*.dmg' -print -quit)
           if [ -n "$dmg" ]; then
             cp "$dmg" "release/OrcaSlicer_Helio_Mac_universal_${{ needs.check.outputs.version }}.dmg"
+          else
+            missing="$missing macOS-DMG"
           fi
 
           # Windows installer
           installer=$(find artifacts -name 'OrcaSlicer_Windows_Installer_*.exe' -print -quit)
           if [ -n "$installer" ]; then
             cp "$installer" "release/OrcaSlicer_Helio_Windows_Installer_${{ needs.check.outputs.version }}.exe"
+          else
+            missing="$missing Windows-Installer"
           fi
 
           # Windows portable — the artifact is a directory, re-zip it
           portable_dir=$(find artifacts -maxdepth 1 -type d -name 'OrcaSlicer_Windows_*_portable' -print -quit)
           if [ -n "$portable_dir" ]; then
             (cd "$portable_dir" && zip -r "$GITHUB_WORKSPACE/release/OrcaSlicer_Helio_Windows_${{ needs.check.outputs.version }}_portable.zip" .)
+          else
+            missing="$missing Windows-Portable"
           fi
 
           # Linux AppImage
           appimage=$(find artifacts -name 'OrcaSlicer_Linux_AppImage*.AppImage' -print -quit)
           if [ -n "$appimage" ]; then
             cp "$appimage" "release/OrcaSlicer_Helio_Linux_${{ needs.check.outputs.version }}.AppImage"
+          else
+            missing="$missing Linux-AppImage"
           fi
 
-          # Fail if no assets were collected
-          if ! ls release/* >/dev/null 2>&1; then
-            echo "Error: No release assets were collected."
+          if [ -n "$missing" ]; then
+            echo "Error: Missing release assets:$missing"
             exit 1
           fi
 

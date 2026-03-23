@@ -217,7 +217,7 @@ jobs:
           fi
 
       - name: Create DMG without notary
-        if: !((github.repository == 'OrcaSlicer/OrcaSlicer' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))) || (vars.ENABLE_SIGNING == 'true' && github.event_name != 'pull_request')) && runner.os == 'macOS' && inputs.macos-combine-only
+        if: ${{ !((github.repository == 'OrcaSlicer/OrcaSlicer' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))) || (vars.ENABLE_SIGNING == 'true' && github.event_name != 'pull_request')) && runner.os == 'macOS' && inputs.macos-combine-only }}
         working-directory: ${{ github.workspace }}
         run: |
           mkdir -p ${{ github.workspace }}/build/universal/OrcaSlicer_dmg
