@@ -321,7 +321,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Upstream sync failed: ${syncLabel} (merge conflicts)`,
-              labels: ['upstream-sync'],
+              labels: ['upstream-sync', 'claude-work'],
               body: body
             });
             console.log('Created merge conflict issue');
@@ -411,6 +411,14 @@ jobs:
               });
               core.setOutput('url', pr.html_url);
               console.log(`Created PR: ${pr.html_url}`);
+
+              // Add claude-work label for Cowork auto-triage
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: ['claude-work']
+              });
             } catch (err) {
               const errMsg = err.message || '';
               const errData = err.response?.data;
