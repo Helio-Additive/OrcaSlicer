@@ -10338,6 +10338,15 @@ private:
             HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
             HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
 
+            // Wait for async HTTP requests to complete (Http::perform() is async)
+            constexpr int timeout_ms = 60000;
+            int elapsed = 0;
+            while (elapsed < timeout_ms &&
+                   (!HelioQuery::global_materials_fully_loaded || !HelioQuery::global_printers_fully_loaded)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                elapsed += 100;
+            }
+
             // Post result back to GUI thread
             wxTheApp->CallAfter([this]() {
                 on_refresh_complete();

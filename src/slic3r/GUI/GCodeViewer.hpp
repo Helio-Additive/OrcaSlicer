@@ -320,6 +320,13 @@ public:
 
     void set_view_type(libvgcode::EViewType type) {
         m_viewer.set_view_type(type);
+        // Sync dropdown selection index with the new view type
+        for (int i = 0; i < static_cast<int>(view_type_items.size()); ++i) {
+            if (view_type_items[i] == type) {
+                m_view_type_sel = i;
+                break;
+            }
+        }
     }
     void reset_visible(libvgcode::EViewType type) {
         if (type == libvgcode::EViewType::FeatureType) {

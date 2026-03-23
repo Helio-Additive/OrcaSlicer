@@ -942,6 +942,20 @@ wxBoxSizer *PreferencesDialog::create_item_checkbox(wxString title, wxString too
         //     wxGetApp().switch_staff_pick(pbool);
         // }
 
+        if (param == "enable_helio_processing") {
+            bool enabled = checkbox->GetValue();
+            if (enabled) {
+                wxGetApp().CallAfter([] { wxGetApp().request_helio_supported_data(); });
+            }
+            // Show/hide the Helio button immediately
+            if (wxGetApp().mainframe && wxGetApp().mainframe->expand_program_holder) {
+                wxGetApp().mainframe->expand_program_holder->ShowExpandButton(
+                    wxGetApp().mainframe->expand_helio_id, enabled);
+                wxGetApp().mainframe->Layout();
+            }
+            BOOST_LOG_TRIVIAL(info) << "enable_helio_processing toggled: " << (enabled ? "true" : "false");
+        }
+
         if (param == "sync_user_preset") {
             bool sync = app_config->get("sync_user_preset") == "true" ? true : false;
             if (sync) {
