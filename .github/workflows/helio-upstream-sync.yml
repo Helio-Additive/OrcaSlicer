@@ -302,10 +302,11 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Pull the sync branch locally and merge the upstream commit:',
+              '1. Pull the sync branch and fetch upstream:',
               '   ```bash',
               `   git fetch origin && git checkout ${branch}`,
-              `   git merge ${syncSha}`,
+              '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
+              `   git fetch upstream && git merge ${syncSha}`,
               '   ```',
               '2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
               '   ```bash',
@@ -328,7 +329,8 @@ jobs:
       - name: Push clean merge branch
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
         run: |
-          git push origin "${{ steps.sync_branch.outputs.branch }}"
+          # force-with-lease so retries (same branch name) overwrite the previous attempt
+          git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
 
       - name: Trigger build check
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
@@ -427,8 +429,14 @@ jobs:
                    ))
                 );
 
-              if (isNoDiff422) {
+              const errMsg = err.message || '';
+              const errData = err.response?.data;
+              const errMsgs = [errMsg, errData?.message || '', ...(errData?.errors || []).map(e => e?.message || '')].join(' ');
+
+              if (err.status === 422 && errMsgs.includes('No commits between')) {
                 console.log(`No diff between ${target} and ${branch} — skipping PR creation`);
+              } else if (err.status === 422 && errMsgs.includes('already exists')) {
+                console.log(`PR already exists for ${branch} — skipping`);
               } else {
                 throw err;
               }
