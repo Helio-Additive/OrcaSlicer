@@ -84,7 +84,7 @@ jobs:
               exit 1
             fi
             SYNC_REF="$LATEST_TAG"
-            SYNC_SHA=$(git rev-parse "$LATEST_TAG")
+            SYNC_SHA=$(git rev-parse "$LATEST_TAG^{commit}")
             SHORT_SHA=$(echo "$SYNC_SHA" | cut -c1-7)
             SYNC_LABEL="$LATEST_TAG"
             BRANCH_NAME="helio-release-candidate-${LATEST_TAG}"
@@ -291,7 +291,7 @@ jobs:
             const body = [
               `## Merge conflicts detected syncing ${syncLabel}`,
               '',
-              `The automatic merge of upstream \`${syncRef}\` into \`${target}\` produced conflicts.`,
+              `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts.`,
               '',
               '### Conflicted files',
               '```',
