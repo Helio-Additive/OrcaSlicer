@@ -6,6 +6,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, conflict resolution rules during upstream syncs, and the complete file-by-file modification map, see **`HELIO_INTEGRATION.md`**.
 
+## CI/CD Workflows
+
+### Upstream Sync (`helio-upstream-sync.yml`)
+- Scheduled workflow that syncs upstream OrcaSlicer changes into `orca-latest-parity-bambu`
+- Auto-creates merge conflict issues (labeled `upstream-sync`, `claude-work`) when conflicts occur
+- Auto-creates sync PRs with changelog and Helio-relevant change reports
+- Uses `claude-work` label to flag items for automated triage
+
+### Upstream Watch (`helio-upstream-watch.yml`)
+- Monitors upstream for new tags/releases and creates tracking issues
+
+### Release (`helio-release.yml`)
+- Triggers on: merged PR with `release` label on `orca-latest-parity-bambu`, or manual `workflow_dispatch`
+- Builds all platforms (Linux, Windows, macOS universal) via reusable workflows
+- Creates GitHub Release with `Helio`-prefixed assets (DMG, AppImage, installer, portable zip)
+- Tag format: `helio-v{version}` (from `version.inc`)
+- Manual dispatch restricted to `orca-latest-parity-bambu` branch only
+
+### Build Pipeline (reusable workflows)
+- `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`
+- macOS signing/notarization gated by `ENABLE_SIGNING` repo variable
+- Dependency caching per OS/arch with hash of `deps/**`
+
+### Build All (`build_all.yml`)
+- Triggers on push/PR to `main` and `release/*` branches
+- Runs full build matrix + unit tests + Flatpak builds
+
+## Git Workflow
+- **Base branch**: `orca-latest-parity-bambu` (not `main`)
+- **Push remote**: `helio` (never `origin` — that's upstream OrcaSlicer)
+- **PRs target**: `orca-latest-parity-bambu`
+
 ## Overview
 
 OrcaSlicer is an open-source 3D slicer application forked from Bambu Studio, built using C++ with wxWidgets for the GUI and CMake as the build system. The project uses a modular architecture with separate libraries for core slicing functionality, GUI components, and platform-specific code.
@@ -27,30 +59,8 @@ cmake --build build/arm64 --config RelWithDebInfo --target all --
 ### Building on Linux
  **Always use this command to build the project when testing build issues on Linux.**
 ```bash
-cmake --build build/arm64 --config RelWithDebInfo --target all --
-
+cmake --build build/ --config RelWithDebInfo --target all --
 ```
-### Build test:
-
-**Always use this command to build the project when testing build issues on Windows.**
-```bash
-cmake --build . --config %build_type% --target ALL_BUILD -- -m
-```
-
-### Building on macOS
-**Always use this command to build the project when testing build issues on macOS.**
-```bash
-cmake --build build/arm64 --config RelWithDebInfo --target all --
-```
-
-### Building on Linux
- **Always use this command to build the project when testing build issues on Linux.**
-```bash
-cmake --build build --config RelWithDebInfo --target all --
-
-```
-
-
 ### Build System
 - Uses CMake with minimum version 3.13 (maximum 3.31.x on Windows)
 - Primary build directory: `build/`

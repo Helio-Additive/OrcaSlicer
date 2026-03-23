@@ -317,11 +317,49 @@ jobs:
               'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
             ].join('\n');
 
+            // Ensure required labels exist before creating the issue; a missing
+            // label causes a 422 validation error that would suppress the issue.
+            const ensureLabel = async (name, color, description) => {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name
+                });
+              } catch (e) {
+                if (e.status === 404) {
+                  try {
+                    await github.rest.issues.createLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name,
+                      color,
+                      description
+                    });
+                    console.log(`Created missing label: ${name}`);
+                  } catch (createError) {
+                    console.warn(
+                      `Warning: could not create missing label '${name}' (issue will be created without this label): `,
+                      createError.message
+                    );
+                  }
+                } else {
+                  console.warn(
+                    `Warning: could not verify label '${name}' (issue creation may fail): `,
+                    e.message
+                  );
+                }
+              }
+            };
+
+            await ensureLabel('upstream-sync', '0075ca', 'Upstream synchronisation tracking');
+            await ensureLabel('claude-work',   'e4e669', 'Work item for Claude / Copilot');
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Upstream sync failed: ${syncLabel} (merge conflicts)`,
-              labels: ['upstream-sync'],
+              labels: ['upstream-sync', 'claude-work'],
               body: body
             });
             console.log('Created merge conflict issue');
@@ -374,6 +412,30 @@ jobs:
               return;
             }
 
+            // Ensure claude-work label exists before trying to apply it
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'claude-work'
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: 'claude-work',
+                    color: 'e4e669',
+                    description: 'Work item for Claude / Copilot'
+                  });
+                  console.log('Created missing label: claude-work');
+                } catch (createErr) {
+                  console.warn('Warning: could not create claude-work label:', createErr.message);
+                }
+              }
+            }
+
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
@@ -411,6 +473,18 @@ jobs:
               });
               core.setOutput('url', pr.html_url);
               console.log(`Created PR: ${pr.html_url}`);
+
+              // Add claude-work label for Cowork auto-triage
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: ['claude-work']
+                });
+              } catch (labelErr) {
+                console.warn(`Warning: failed to add claude-work label to PR #${pr.number}:`, labelErr);
+              }
             } catch (err) {
               const errMsg = err.message || '';
               const errData = err.response?.data;
@@ -419,7 +493,35 @@ jobs:
               if (err.status === 422 && errMsgs.includes('No commits between')) {
                 console.log(`No diff between ${target} and ${branch} — skipping PR creation`);
               } else if (err.status === 422 && errMsgs.includes('already exists')) {
-                console.log(`PR already exists for ${branch} — skipping`);
+                console.log(`PR already exists for ${branch} — looking up existing PR to apply label`);
+                try {
+                  const { data: prs } = await github.rest.pulls.list({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    head: `${context.repo.owner}:${branch}`,
+                    base: target,
+                    state: 'open'
+                  });
+                  if (prs.length > 0) {
+                    const existingPr = prs[0];
+                    core.setOutput('url', existingPr.html_url);
+                    console.log(`Found existing PR #${existingPr.number}: ${existingPr.html_url}`);
+                    try {
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: existingPr.number,
+                        labels: ['claude-work']
+                      });
+                    } catch (labelErr) {
+                      console.warn(`Warning: failed to add claude-work label to existing PR #${existingPr.number}:`, labelErr);
+                    }
+                  } else {
+                    console.log(`Could not find existing open PR for ${branch} → ${target}`);
+                  }
+                } catch (listErr) {
+                  console.warn(`Warning: failed to list PRs for ${branch}:`, listErr);
+                }
               } else {
                 throw err;
               }

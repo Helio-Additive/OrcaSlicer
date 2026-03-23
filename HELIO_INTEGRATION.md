@@ -4,7 +4,7 @@
 > This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
 
 ## Stats
-- **61 files changed**: 29 new, 32 modified, 0 deleted
+- **64 files changed**: 32 new, 32 modified, 0 deleted
 - **+13,363 lines added, -195 lines removed**
 
 ## Architecture
@@ -29,7 +29,7 @@ Key data flow:
 - `HelioCompletionEvent` — carries result path + quality metrics to UI thread
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
 
-## Helio-Only Files (29 files — NEVER exist upstream, always preserve)
+## Helio-Only Files (32 files — NEVER exist upstream, always preserve)
 
 ### Core API Client
 | File | Purpose |
@@ -41,7 +41,7 @@ Key data flow:
 | File | Purpose |
 |-|-|
 | `src/slic3r/GUI/HelioReleaseNote.hpp` | All Helio dialog declarations: `HelioInputDialog`, `HelioResultDialog`, `HelioStatusNotification` |
-| `src/slic3r/GUI/HelioReleaseNote.cpp` | Dialog implementations (4334 lines): mode selection, progress, results with TI visualization |
+| `src/slic3r/GUI/HelioReleaseNote.cpp` | Dialog implementations (4334 lines): mode selection, progress, results with TI visualization. `on_confirm()` calls `ShowExpandButton()` to show Helio button immediately after install (mirrors `on_uninstall()` hide logic) |
 | `src/slic3r/GUI/HelioHistoryDialog.hpp` | History dialog declaration |
 | `src/slic3r/GUI/HelioHistoryDialog.cpp` | History dialog: lists past Helio jobs, re-download results |
 
@@ -75,6 +75,13 @@ Key data flow:
 | `resources/web/helio/helio_service_snote_cn.html` | Service notes (Chinese) |
 | `resources/web/helio/helio_service_snote_en.html` | Service notes (English) |
 | `resources/data/helio_hints.ini` | First-time tutorial hint text |
+
+### CI/CD Workflows (Helio-only)
+| File | Purpose |
+|-|-|
+| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
+| `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
+| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
 
 ## Modified Files (32 files — conflict risk, detailed per-file guide)
 
@@ -144,6 +151,9 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - **In tooltip render**: TI value display block (3 `append_table_row` calls)
 - **In status bar format**: 3 new `case` branches in switch statement
 
+#### `src/slic3r/GUI/GCodeViewer.hpp` (+7)
+- Syncs dropdown selection index when view type changes programmatically (prevents dropdown/view desync)
+
 #### `src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp` (+8/-8)
 - **4 positional initializer lists modified**: appended `curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max` to `PathVertex` aggregate initializations
 - Very fragile — if upstream changes `PathVertex` fields or reorders initializer, these break
@@ -160,13 +170,14 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - Added `push_helio_error_notification()` declaration
 - Modified signatures: `set_slicing_progress_began(bool is_helio = false)`, `set_slicing_progress_percentage(..., bool is_helio = false)`
 
-#### `src/slic3r/GUI/Preferences.cpp` (+65)
+#### `src/slic3r/GUI/Preferences.cpp` (+79)
 - Added `#include "../Utils/HelioDragon.hpp"`
 - **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material toggle, API URL display
+- **Toggle listener**: `enable_helio_processing` toggle immediately shows/hides the Helio button in MainFrame via `ShowExpandButton()` + `Layout()` (no restart required)
 
-#### `src/slic3r/GUI/GUI_App.cpp` (+26)
+#### `src/slic3r/GUI/GUI_App.cpp` (+28)
 - Added `#include "../Utils/HelioDragon.hpp"`
-- Startup initialization block: fetches supported data if helio enabled
+- Startup initialization block: always requests Helio supported data on startup (no "already loaded" guard)
 - New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data()`
 
 #### `src/slic3r/GUI/GUI_App.hpp` (+4)
@@ -213,7 +224,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 ### LOW RISK
 
 #### `src/libslic3r/AppConfig.cpp` (+25)
-- **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing`, `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_first_time_tutorial`
+- **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing` (defaults to `false`), `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_first_time_tutorial`
 
 #### `src/libslic3r/PrintBase.hpp` (+1)
 - Added `bool is_helio { false }` to `SlicingStatus` struct
