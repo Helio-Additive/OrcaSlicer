@@ -60,6 +60,11 @@ jobs:
         run: |
           # Use override if provided, otherwise auto-generate
           if [ -n "$TAG_OVERRIDE" ]; then
+            # Validate: reject invalid tag characters (only allow alnum, dot, dash, underscore)
+            if ! printf '%s' "$TAG_OVERRIDE" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+              echo "Error: tag_override contains invalid characters" >&2
+              exit 1
+            fi
             tag="$TAG_OVERRIDE"
           else
             tag="helio-v${{ steps.ver.outputs.version }}"
