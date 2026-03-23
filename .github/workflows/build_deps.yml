@@ -22,6 +22,10 @@ on:
       force-build:
         required: false
         type: boolean
+      ref:
+        required: false
+        type: string
+        description: 'Git ref to checkout (defaults to the triggering event ref)'
 
 jobs:
   build_deps:
@@ -37,6 +41,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: 'true'
+          ref: ${{ inputs.ref }}
 
       - name: load cached deps
         uses: actions/cache@v5
@@ -137,4 +142,5 @@ jobs:
       cache-path: ${{ inputs.cache-path }}
       os: ${{ inputs.os }}
       arch: ${{ inputs.arch }}
+      ref: ${{ inputs.ref }}
     secrets: inherit

@@ -26,6 +26,8 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - name: Extract version from version.inc
         id: ver
         run: |
@@ -56,6 +58,7 @@ jobs:
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ubuntu-24.04
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
     secrets: inherit
 
   build_windows:
@@ -63,6 +66,7 @@ jobs:
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: windows-latest
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
     secrets: inherit
 
   build_macos_arch:
@@ -75,6 +79,7 @@ jobs:
     with:
       os: macos-14
       arch: ${{ matrix.arch }}
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
     secrets: inherit
 
   build_macos_universal:
@@ -84,6 +89,7 @@ jobs:
       os: macos-14
       arch: universal
       macos-combine-only: true
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
     secrets: inherit
 
   release:
