@@ -5,6 +5,14 @@ on:
     - cron: '0 9 * * 1'  # Monday 9am UTC
   workflow_dispatch:
     inputs:
+      sync_target:
+        description: 'Sync to latest upstream tag or upstream main'
+        required: false
+        type: choice
+        default: 'latest-tag'
+        options:
+          - latest-tag
+          - main
       release_branch:
         description: 'Helio release branch to sync into'
         required: false
@@ -44,56 +52,95 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
+          git fetch upstream main
 
-      - name: Find latest upstream release tag
-        id: latest
+      - name: Determine sync mode
+        id: mode
         run: |
-          # Get the latest v* tag from upstream sorted by version
-          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No upstream release tags found"
-            exit 1
+          # Scheduled runs always sync to latest tag; manual runs use the input
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "sync_mode=latest-tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "sync_mode=${{ inputs.sync_target || 'latest-tag' }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-          echo "Latest upstream tag: $LATEST_TAG"
+
+      - name: Resolve sync target
+        id: target
+        run: |
+          MODE="${{ steps.mode.outputs.sync_mode }}"
+
+          if [ "$MODE" = "main" ]; then
+            SYNC_REF="upstream/main"
+            SYNC_SHA=$(git rev-parse upstream/main)
+            SHORT_SHA=$(echo "$SYNC_SHA" | cut -c1-7)
+            SYNC_LABEL="main@${SHORT_SHA}"
+            BRANCH_NAME="helio-upstream-main-$(date '+%Y-%m-%d')-${SHORT_SHA}"
+            TRACKING_TAG="helio-last-synced-main"
+          else
+            # Find latest upstream v* tag
+            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+            if [ -z "$LATEST_TAG" ]; then
+              echo "No upstream release tags found"
+              exit 1
+            fi
+            SYNC_REF="$LATEST_TAG"
+            SYNC_SHA=$(git rev-parse "$LATEST_TAG^{commit}")
+            SHORT_SHA=$(echo "$SYNC_SHA" | cut -c1-7)
+            SYNC_LABEL="$LATEST_TAG"
+            BRANCH_NAME="helio-release-candidate-${LATEST_TAG}"
+            TRACKING_TAG="helio-last-synced"
+          fi
+
+          echo "sync_ref=$SYNC_REF" >> "$GITHUB_OUTPUT"
+          echo "sync_sha=$SYNC_SHA" >> "$GITHUB_OUTPUT"
+          echo "sync_label=$SYNC_LABEL" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+          echo "tracking_tag=$TRACKING_TAG" >> "$GITHUB_OUTPUT"
+          echo "Sync target: $SYNC_LABEL ($SYNC_REF -> $SYNC_SHA)"
 
       - name: Check if already synced
         id: check
         run: |
-          LATEST_TAG="${{ steps.latest.outputs.tag }}"
+          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
+          SYNC_LABEL="${{ steps.target.outputs.sync_label }}"
+          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
 
-          # Check if helio-last-synced tag exists and points to same commit
-          # Determine baseline tag
+          # Determine baseline
           LAST_SYNCED=""
-          if git rev-parse "helio-last-synced" >/dev/null 2>&1; then
-            SYNCED_COMMIT=$(git rev-parse "helio-last-synced")
-            TARGET_COMMIT=$(git rev-parse "$LATEST_TAG")
-            if [ "$SYNCED_COMMIT" = "$TARGET_COMMIT" ]; then
-              echo "Already synced to $LATEST_TAG"
+          if git rev-parse "$TRACKING_TAG" >/dev/null 2>&1; then
+            SYNCED_COMMIT=$(git rev-parse "$TRACKING_TAG")
+            if [ "$SYNCED_COMMIT" = "$SYNC_SHA" ]; then
+              echo "Already synced to $SYNC_LABEL"
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            # Get the tag name that helio-last-synced was created from
-            LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
+            # For tag mode, try to find the v* tag at that commit
+            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+              LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
+            fi
             if [ -z "$LAST_SYNCED" ]; then
-              LAST_SYNCED="helio-last-synced"
+              LAST_SYNCED="$TRACKING_TAG"
             fi
           else
-            echo "No previous sync tag found, using v2.3.2-rc2 as baseline"
-            LAST_SYNCED="v2.3.2-rc2"
+            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+              echo "No previous sync tag found, using v2.3.2-rc2 as baseline"
+              LAST_SYNCED="v2.3.2-rc2"
+            else
+              # First main sync — capture current HEAD SHA as baseline (before merge moves it)
+              LAST_SYNCED=$(git rev-parse HEAD)
+              echo "No previous main sync tag found, using HEAD ($LAST_SYNCED) as baseline"
+            fi
           fi
 
-          # Skip if baseline and latest point to the same commit (nothing new to sync)
+          # Skip if baseline and target point to the same commit
           BASELINE_COMMIT=$(git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
-          LATEST_COMMIT=$(git rev-parse "$LATEST_TAG^{commit}" 2>/dev/null || true)
-
-          if [ -z "$BASELINE_COMMIT" ] || [ -z "$LATEST_COMMIT" ]; then
-            echo "Error: Unable to resolve baseline ($LAST_SYNCED) or latest ($LATEST_TAG) to a commit."
+          if [ -z "$BASELINE_COMMIT" ]; then
+            echo "Error: Unable to resolve baseline ($LAST_SYNCED) to a commit."
             exit 1
           fi
 
-          if [ "$BASELINE_COMMIT" = "$LATEST_COMMIT" ]; then
-            echo "Baseline $LAST_SYNCED and latest $LATEST_TAG point to the same commit — nothing to sync"
+          if [ "$BASELINE_COMMIT" = "$SYNC_SHA" ]; then
+            echo "Baseline $LAST_SYNCED and target $SYNC_LABEL point to the same commit — nothing to sync"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -103,13 +150,13 @@ jobs:
 
       - name: Exit if already synced
         if: steps.check.outputs.skip == 'true'
-        run: echo "Nothing to sync — already at latest upstream release."
+        run: echo "Nothing to sync — already at ${{ steps.target.outputs.sync_label }}."
 
       - name: Create sync branch
         if: steps.check.outputs.skip != 'true'
         id: sync_branch
         run: |
-          BRANCH="helio-release-candidate-${{ steps.latest.outputs.tag }}"
+          BRANCH="${{ steps.target.outputs.branch_name }}"
           git checkout -b "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -117,12 +164,12 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: merge
         run: |
-          LATEST_TAG="${{ steps.latest.outputs.tag }}"
+          SYNC_REF="${{ steps.target.outputs.sync_ref }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git merge "$LATEST_TAG" --no-edit; then
+          if git merge "$SYNC_REF" --no-edit; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
             echo "status=conflict" >> "$GITHUB_OUTPUT"
@@ -139,7 +186,7 @@ jobs:
         id: helio_changes
         run: |
           LAST="${{ steps.check.outputs.last_synced }}"
-          LATEST="${{ steps.latest.outputs.tag }}"
+          LATEST="${{ steps.target.outputs.sync_ref }}"
 
           # High-conflict-risk files from HELIO_INTEGRATION.md
           WATCHED_FILES=(
@@ -198,7 +245,7 @@ jobs:
         id: changelog
         run: |
           LAST="${{ steps.check.outputs.last_synced }}"
-          LATEST="${{ steps.latest.outputs.tag }}"
+          LATEST="${{ steps.target.outputs.sync_ref }}"
 
           LOG=$(git log --oneline "$LAST".."$LATEST" -- | head -50)
           TOTAL=$(git rev-list --count "$LAST".."$LATEST")
@@ -222,27 +269,29 @@ jobs:
         uses: actions/github-script@v7
         env:
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
-          LATEST_TAG: ${{ steps.latest.outputs.tag }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           CONFLICTS: ${{ steps.merge.outputs.conflicted_files }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
         with:
           script: |
             const branch = process.env.SYNC_BRANCH;
-            const latest = process.env.LATEST_TAG;
+            const syncLabel = process.env.SYNC_LABEL;
+            const syncSha = process.env.SYNC_SHA;
             const target = process.env.TARGET_BRANCH;
             const conflicts = process.env.CONFLICTS;
             const helioReport = process.env.HELIO_REPORT;
 
-            if (!branch || !latest) {
-              core.setFailed('Missing required env vars: SYNC_BRANCH or LATEST_TAG');
+            if (!branch || !syncLabel) {
+              core.setFailed('Missing required env vars: SYNC_BRANCH or SYNC_LABEL');
               return;
             }
 
             const body = [
-              `## Merge conflicts detected syncing ${latest}`,
+              `## Merge conflicts detected syncing ${syncLabel}`,
               '',
-              `The automatic merge of upstream release \`${latest}\` into \`${target}\` produced conflicts.`,
+              `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts.`,
               '',
               '### Conflicted files',
               '```',
@@ -253,10 +302,11 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Pull the sync branch locally:',
+              '1. Pull the sync branch and fetch upstream:',
               '   ```bash',
               `   git fetch origin && git checkout ${branch}`,
-              `   git merge ${latest}`,
+              '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
+              `   git fetch upstream && git merge ${syncSha}`,
               '   ```',
               '2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
               '   ```bash',
@@ -270,7 +320,7 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Upstream sync failed: ${latest} (merge conflicts)`,
+              title: `Upstream sync failed: ${syncLabel} (merge conflicts)`,
               labels: ['upstream-sync'],
               body: body
             });
@@ -279,7 +329,8 @@ jobs:
       - name: Push clean merge branch
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
         run: |
-          git push origin "${{ steps.sync_branch.outputs.branch }}"
+          # force-with-lease so retries (same branch name) overwrite the previous attempt
+          git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
 
       - name: Trigger build check
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
@@ -301,7 +352,8 @@ jobs:
         id: pr
         uses: actions/github-script@v7
         env:
-          LATEST_TAG: ${{ steps.latest.outputs.tag }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
@@ -309,22 +361,23 @@ jobs:
           TOTAL_COMMITS: ${{ steps.changelog.outputs.total }}
         with:
           script: |
-            const latest = process.env.LATEST_TAG;
+            const syncLabel = process.env.SYNC_LABEL;
+            const syncRef = process.env.SYNC_REF;
             const target = process.env.TARGET_BRANCH;
             const branch = process.env.SYNC_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
             const changelog = process.env.CHANGELOG;
             const total = process.env.TOTAL_COMMITS;
 
-            if (!latest || !target || !branch) {
-              core.setFailed('Missing required env vars: LATEST_TAG, TARGET_BRANCH, or SYNC_BRANCH');
+            if (!syncLabel || !target || !branch) {
+              core.setFailed('Missing required env vars: SYNC_LABEL, TARGET_BRANCH, or SYNC_BRANCH');
               return;
             }
 
             const body = [
-              `## Upstream Sync: ${latest}`,
+              `## Upstream Sync: ${syncLabel}`,
               '',
-              `Merges upstream release \`${latest}\` into \`${target}\`.`,
+              `Merges upstream \`${syncRef}\` into \`${target}\`.`,
               '',
               `### Upstream changelog (${total} commits)`,
               '```',
@@ -353,87 +406,33 @@ jobs:
                 repo: context.repo.repo,
                 head: branch,
                 base: target,
-                title: `Upstream sync: ${latest}`,
+                title: `Upstream sync: ${syncLabel}`,
                 body: body
               });
               core.setOutput('url', pr.html_url);
               console.log(`Created PR: ${pr.html_url}`);
             } catch (err) {
-              const isNoDiff422 =
-                err && err.status === 422 &&
-                (
-                  (typeof err.message === 'string' && err.message.includes('No commits between')) ||
-                  (err.response &&
-                   err.response.data &&
-                   (
-                     (typeof err.response.data.message === 'string' &&
-                      err.response.data.message.includes('No commits between')) ||
-                     (Array.isArray(err.response.data.errors) &&
-                      err.response.data.errors.some(e =>
-                        e && typeof e.message === 'string' &&
-                        e.message.includes('No commits between')
-                      ))
-                   ))
-                );
+              const errMsg = err.message || '';
+              const errData = err.response?.data;
+              const errMsgs = [errMsg, errData?.message || '', ...(errData?.errors || []).map(e => e?.message || '')].join(' ');
 
-              if (isNoDiff422) {
+              if (err.status === 422 && errMsgs.includes('No commits between')) {
                 console.log(`No diff between ${target} and ${branch} — skipping PR creation`);
+              } else if (err.status === 422 && errMsgs.includes('already exists')) {
+                console.log(`PR already exists for ${branch} — skipping`);
               } else {
                 throw err;
               }
             }
 
-      - name: Update last-synced tag
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome != 'failure'
+      - name: Update tracking tag
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'success'
         run: |
-          LATEST="${{ steps.latest.outputs.tag }}"
-          LATEST_COMMIT=$(git rev-parse "$LATEST")
+          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
+          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
 
-          # Move the lightweight tag to the new release (only after successful build dispatch)
-          git tag -f "helio-last-synced" "$LATEST_COMMIT"
-          git push origin "helio-last-synced" --force
-
-      - name: Handle build failure
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'failure'
-        uses: actions/github-script@v7
-        env:
-          LATEST_TAG: ${{ steps.latest.outputs.tag }}
-          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
-        with:
-          script: |
-            const latest = process.env.LATEST_TAG;
-            const branch = process.env.SYNC_BRANCH;
-
-            if (!latest || !branch) {
-              core.setFailed('Missing required env vars: LATEST_TAG or SYNC_BRANCH');
-              return;
-            }
-
-            const body = [
-              `## Build failed after merging ${latest}`,
-              '',
-              'The merge was clean but the build check failed. PR has been created but needs build fixes.',
-              '',
-              '### Resolution steps',
-              '1. Check the build logs in the Actions tab',
-              '2. Pull the sync branch locally:',
-              '   ```bash',
-              `   git fetch origin && git checkout ${branch}`,
-              '   ```',
-              '3. Fix build errors:',
-              '   ```bash',
-              '   claude "Read HELIO_INTEGRATION.md then fix the build errors. Check the Build Verification section."',
-              '   ```',
-              '4. Push fixes — the PR will update automatically.',
-              '',
-              'See `HELIO_INTEGRATION.md` for build verification commands.',
-            ].join('\n');
-
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Upstream sync build failed: ${latest}`,
-              labels: ['upstream-sync'],
-              body: body
-            });
-            console.log('Created build failure issue');
+          # Move the tracking tag to the upstream target commit that was synced.
+          # Note: build_all is fire-and-forget (dispatch only), so we track the
+          # upstream commit. Build failures will show up on the PR via status checks.
+          git tag -f "$TRACKING_TAG" "$SYNC_SHA"
+          git push origin "$TRACKING_TAG" --force
