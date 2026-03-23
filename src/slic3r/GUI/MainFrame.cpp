@@ -108,138 +108,109 @@ enum class ERescaleTarget
 };
 
 #ifdef __WXGTK__
-// Intercepts mouse events globally to provide resize handles for the
-// borderless (CSD) window.  When the cursor is within BORDER_PX of a
-// window edge, a resize cursor is shown and left-click initiates a
-// WM-integrated resize via gtk_window_begin_resize_drag().
-class MainFrame::GtkResizeBorderHandler : public wxEventFilter
+// A thin transparent panel placed at a window edge to handle resize.
+// Works regardless of underlying content (GLCanvas3D, wxWebView, etc.)
+// because these panels are Raise()'d above all siblings, so their GDK
+// windows receive pointer events even over WebKit2GTK or GL surfaces.
+class ResizeEdgePanel : public wxPanel
 {
 public:
-    static constexpr int BORDER_PX = 8;
+    enum Edge { Bottom, Left, Right };
 
-    explicit GtkResizeBorderHandler(MainFrame* frame)
-        : m_frame(frame)
+    static constexpr int BORDER_PX = 5;
+
+    ResizeEdgePanel(MainFrame* frame, Edge edge)
+        : wxPanel(frame, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                  wxBORDER_NONE | wxTRANSPARENT_WINDOW)
+        , m_frame(frame)
+        , m_edge(edge)
     {
-        wxEvtHandler::AddFilter(this);
-    }
-
-    ~GtkResizeBorderHandler() override
-    {
-        wxEvtHandler::RemoveFilter(this);
-    }
-
-    int FilterEvent(wxEvent& event) override
-    {
-        const wxEventType t = event.GetEventType();
-        if (t != wxEVT_MOTION && t != wxEVT_LEFT_DOWN)
-            return Event_Skip;
-
-        if (!m_frame || !m_frame->IsShown() || m_frame->IsMaximized() || m_frame->IsFullScreen())
-            return Event_Skip;
-
-        if (!gtk_widget_get_realized(m_frame->m_widget) || gtk_widget_get_window(m_frame->m_widget) == nullptr)
-            return Event_Skip;
-
-        wxPoint mouse = ::wxGetMousePosition();
-        wxRect  rect  = m_frame->GetScreenRect();
-
-        // Don't steal interactions from the custom top bar area.
-        // Keep corner resizing available by only excluding the pure top edge.
-        if (m_frame->topbar() != nullptr) {
-            const wxRect topbar_rect = m_frame->topbar()->GetScreenRect();
-            if (topbar_rect.Contains(mouse)) {
-                const bool near_left_corner  = mouse.x < rect.x + BORDER_PX;
-                const bool near_right_corner = mouse.x > rect.x + rect.width - BORDER_PX;
-                if (!near_left_corner && !near_right_corner)
-                    return Event_Skip;
-            }
-        }
-
-        GdkWindowEdge edge;
-        if (!hit_test(mouse, rect, edge)) {
-            // Cursor is not near any edge — restore default cursor if we changed it.
-            if (m_cursor_set) {
-                gdk_window_set_cursor(gtk_widget_get_window(m_frame->m_widget), NULL);
-                m_cursor_set = false;
-                m_last_edge_valid = false;
-            }
-            return Event_Skip;
-        }
-
-        // Set the appropriate resize cursor.
-        set_cursor_for_edge(edge);
-
-        if (t == wxEVT_LEFT_DOWN) {
-            gtk_window_begin_resize_drag(
-                GTK_WINDOW(m_frame->m_widget),
-                edge,
-                1,                            // left mouse button
-                mouse.x, mouse.y,
-                gtk_get_current_event_time());
-            return Event_Processed;
-        }
-
-        // For motion, keep app interaction working (menus, hover, etc.).
-        return Event_Skip;
+        SetBackgroundStyle(wxBG_STYLE_TRANSPARENT);
+        Bind(wxEVT_MOTION,       &ResizeEdgePanel::OnCursorUpdate, this);
+        Bind(wxEVT_ENTER_WINDOW, &ResizeEdgePanel::OnCursorUpdate, this);
+        Bind(wxEVT_LEFT_DOWN,    &ResizeEdgePanel::OnLeftDown,     this);
+        Bind(wxEVT_LEAVE_WINDOW, &ResizeEdgePanel::OnLeave,        this);
+        Bind(wxEVT_PAINT,        &ResizeEdgePanel::OnPaint,        this);
     }
 
 private:
-    bool hit_test(const wxPoint& mouse, const wxRect& rect, GdkWindowEdge& edge) const
+    void OnPaint(wxPaintEvent&)
     {
-        bool left   = mouse.x >= rect.x && mouse.x < rect.x + BORDER_PX;
-        bool right  = mouse.x > rect.x + rect.width - BORDER_PX && mouse.x <= rect.x + rect.width;
-        bool top    = mouse.y >= rect.y && mouse.y < rect.y + BORDER_PX;
-        bool bottom = mouse.y > rect.y + rect.height - BORDER_PX && mouse.y <= rect.y + rect.height;
-
-        if (!left && !right && !top && !bottom)
-            return false;
-
-        if (top && left)        edge = GDK_WINDOW_EDGE_NORTH_WEST;
-        else if (top && right)  edge = GDK_WINDOW_EDGE_NORTH_EAST;
-        else if (bottom && left)  edge = GDK_WINDOW_EDGE_SOUTH_WEST;
-        else if (bottom && right) edge = GDK_WINDOW_EDGE_SOUTH_EAST;
-        else if (top)           edge = GDK_WINDOW_EDGE_NORTH;
-        else if (bottom)        edge = GDK_WINDOW_EDGE_SOUTH;
-        else if (left)          edge = GDK_WINDOW_EDGE_WEST;
-        else                    edge = GDK_WINDOW_EDGE_EAST;
-        return true;
+        wxPaintDC dc(this);
+        // Transparent — draw nothing
     }
 
-    void set_cursor_for_edge(GdkWindowEdge edge)
+    GdkWindowEdge get_gdk_edge(const wxPoint& pos) const
     {
-        if (m_last_edge_valid && m_cursor_set && edge == m_last_edge)
-            return;
-
-        const char* cursor_name = nullptr;
-        switch (edge) {
-        case GDK_WINDOW_EDGE_NORTH:       cursor_name = "n-resize";  break;
-        case GDK_WINDOW_EDGE_SOUTH:       cursor_name = "s-resize";  break;
-        case GDK_WINDOW_EDGE_WEST:        cursor_name = "w-resize";  break;
-        case GDK_WINDOW_EDGE_EAST:        cursor_name = "e-resize";  break;
-        case GDK_WINDOW_EDGE_NORTH_WEST:  cursor_name = "nw-resize"; break;
-        case GDK_WINDOW_EDGE_NORTH_EAST:  cursor_name = "ne-resize"; break;
-        case GDK_WINDOW_EDGE_SOUTH_WEST:  cursor_name = "sw-resize"; break;
-        case GDK_WINDOW_EDGE_SOUTH_EAST:  cursor_name = "se-resize"; break;
-        default: return;
+        wxSize size = GetSize();
+        switch (m_edge) {
+        case Bottom:
+            if (pos.x < BORDER_PX)           return GDK_WINDOW_EDGE_SOUTH_WEST;
+            if (pos.x > size.x - BORDER_PX)  return GDK_WINDOW_EDGE_SOUTH_EAST;
+            return GDK_WINDOW_EDGE_SOUTH;
+        case Left:
+            if (pos.y < BORDER_PX)            return GDK_WINDOW_EDGE_NORTH_WEST;
+            if (pos.y > size.y - BORDER_PX)   return GDK_WINDOW_EDGE_SOUTH_WEST;
+            return GDK_WINDOW_EDGE_WEST;
+        case Right:
+            if (pos.y < BORDER_PX)            return GDK_WINDOW_EDGE_NORTH_EAST;
+            if (pos.y > size.y - BORDER_PX)   return GDK_WINDOW_EDGE_SOUTH_EAST;
+            return GDK_WINDOW_EDGE_EAST;
         }
+        return GDK_WINDOW_EDGE_SOUTH;
+    }
 
-        GdkDisplay* display = gtk_widget_get_display(m_frame->m_widget);
-        GdkCursor*  cursor  = gdk_cursor_new_from_name(display, cursor_name);
-        if (!cursor)
+    void OnCursorUpdate(wxMouseEvent& evt)
+    {
+        GdkWindowEdge edge = get_gdk_edge(evt.GetPosition());
+        const char* name;
+        switch (edge) {
+        case GDK_WINDOW_EDGE_NORTH:       name = "n-resize";  break;
+        case GDK_WINDOW_EDGE_SOUTH:       name = "s-resize";  break;
+        case GDK_WINDOW_EDGE_WEST:        name = "w-resize";  break;
+        case GDK_WINDOW_EDGE_EAST:        name = "e-resize";  break;
+        case GDK_WINDOW_EDGE_NORTH_WEST:  name = "nw-resize"; break;
+        case GDK_WINDOW_EDGE_NORTH_EAST:  name = "ne-resize"; break;
+        case GDK_WINDOW_EDGE_SOUTH_WEST:  name = "sw-resize"; break;
+        case GDK_WINDOW_EDGE_SOUTH_EAST:  name = "se-resize"; break;
+        default:                          name = "s-resize";  break;
+        }
+        if (name == m_last_cursor_name) return;
+        m_last_cursor_name = name;
+
+        GdkDisplay* display = gtk_widget_get_display(m_widget);
+        GdkCursor*  cursor  = gdk_cursor_new_from_name(display, name);
+        if (cursor) {
+            gdk_window_set_cursor(gtk_widget_get_window(m_widget), cursor);
+            g_object_unref(cursor);
+        }
+    }
+
+    void OnLeave(wxMouseEvent&)
+    {
+        m_last_cursor_name = nullptr;
+        gdk_window_set_cursor(gtk_widget_get_window(m_widget), nullptr);
+    }
+
+    void OnLeftDown(wxMouseEvent& evt)
+    {
+        if (m_frame->IsMaximized() || m_frame->IsFullScreen())
             return;
 
-        gdk_window_set_cursor(gtk_widget_get_window(m_frame->m_widget), cursor);
-        g_object_unref(cursor);
+        GdkWindowEdge edge = get_gdk_edge(evt.GetPosition());
+        wxPoint mouse = ClientToScreen(evt.GetPosition());
 
-        m_cursor_set      = true;
-        m_last_edge       = edge;
-        m_last_edge_valid = true;
+        gtk_window_begin_resize_drag(
+            GTK_WINDOW(m_frame->m_widget),
+            edge,
+            1,  // left button
+            mouse.x, mouse.y,
+            gtk_get_current_event_time());
     }
 
     MainFrame*    m_frame;
-    bool          m_cursor_set{false};
-    GdkWindowEdge m_last_edge{};
-    bool          m_last_edge_valid{false};
+    Edge          m_edge;
+    const char*   m_last_cursor_name{nullptr};
 };
 #endif // __WXGTK__
 
@@ -335,15 +306,11 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
 #endif
 
 #ifdef __WXGTK__
-    // Zero out the decoration hints that wxGTK computed from the window style.
-    // When GTKHandleRealized() later calls gdk_window_set_decorations(), it
-    // will apply zero decorations (no WM title bar).
     m_gdkDecor = 0;
 
-    // Install app-level resize border handler as a fallback.
-    // This keeps resize behavior for undecorated windows without using GTK CSD,
-    // avoiding CSD repaint/maximize artifacts on some WMs.
-    m_resize_border_handler = new GtkResizeBorderHandler(this);
+    m_edge_bottom = new ResizeEdgePanel(this, ResizeEdgePanel::Bottom);
+    m_edge_left   = new ResizeEdgePanel(this, ResizeEdgePanel::Left);
+    m_edge_right  = new ResizeEdgePanel(this, ResizeEdgePanel::Right);
 #endif
 
     if (!wxGetApp().app_config->has("user_mode")) {
@@ -507,8 +474,13 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
 #endif
         Refresh();
         Layout();
+#ifdef __WXGTK__
+        update_edge_panels();
+#endif
         wxQueueEvent(wxGetApp().plater(), new SimpleEvent(EVT_NOTICE_CHILDE_SIZE_CHANGED));
-        });
+
+        fit_tab_labels(); // ORCA on resize
+    });
 
     //BBS
     Bind(EVT_SELECT_TAB, [this](wxCommandEvent&evt) {
@@ -1088,13 +1060,38 @@ void MainFrame::update_layout()
     Thaw();
 }
 
+#ifdef __WXGTK__
+void MainFrame::update_edge_panels()
+{
+    if (!m_edge_bottom) return;
+
+    bool hide = IsMaximized() || IsFullScreen();
+    m_edge_bottom->Show(!hide);
+    m_edge_left->Show(!hide);
+    m_edge_right->Show(!hide);
+    if (hide) return;
+
+    constexpr int B = ResizeEdgePanel::BORDER_PX;
+    wxSize cs = GetClientSize();
+    m_edge_bottom->SetSize(0, cs.y - B, cs.x, B);
+    m_edge_left->SetSize(0, 0, B, cs.y);
+    m_edge_right->SetSize(cs.x - B, 0, B, cs.y);
+
+    m_edge_bottom->Raise();
+    m_edge_left->Raise();
+    m_edge_right->Raise();
+}
+#endif
+
 // Called when closing the application and when switching the application language.
 void MainFrame::shutdown()
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "MainFrame::shutdown enter";
 #ifdef __WXGTK__
-    delete m_resize_border_handler;
-    m_resize_border_handler = nullptr;
+    // Edge panels are child windows — wxWidgets destroys them automatically.
+    m_edge_bottom = nullptr;
+    m_edge_left   = nullptr;
+    m_edge_right  = nullptr;
 #endif
     // BBS: backup
     Slic3r::set_backup_callback(nullptr);
@@ -1250,6 +1247,7 @@ void MainFrame::init_tabpanel() {
                 wxPostEvent(m_plater, SimpleEvent(EVT_GLVIEWTOOLBAR_PREVIEW));
                 m_param_panel->OnActivate();
             }
+            fit_tab_labels(); // ORCA on switching prepare / preview
         }
         //else if (panel == m_param_panel)
         //    m_param_panel->OnActivate();
@@ -1353,8 +1351,10 @@ void MainFrame::init_tabpanel() {
 void MainFrame::show_device(bool bBBLPrinter) {
     auto idx = -1;
     if (bBBLPrinter) {
-        if (m_tabpanel->FindPage(m_monitor) != wxNOT_FOUND)
+        if (m_tabpanel->FindPage(m_monitor) != wxNOT_FOUND) {
+            fit_tab_labels(); // ORCA on printer change - same button layout
             return;
+        }
         // Remove printer view
         if ((idx = m_tabpanel->FindPage(m_printer_view)) != wxNOT_FOUND) {
             m_printer_view->Show(false);
@@ -1394,9 +1394,10 @@ void MainFrame::show_device(bool bBBLPrinter) {
 #endif // _MSW_DARK_MODE
 
     } else {
-        if (m_tabpanel->FindPage(m_printer_view) != wxNOT_FOUND)
+        if (m_tabpanel->FindPage(m_printer_view) != wxNOT_FOUND) {
+            fit_tab_labels(); // ORCA on printer change - same button layout
             return;
-
+        }
         if ((idx = m_tabpanel->FindPage(m_calibration)) != wxNOT_FOUND) {
             m_calibration->Show(false);
             m_tabpanel->RemovePage(idx);
@@ -1421,6 +1422,33 @@ void MainFrame::show_device(bool bBBLPrinter) {
         m_printer_view->Show(false);
         m_tabpanel->InsertPage(tpMonitor, m_printer_view, _L("Device"), std::string("tab_monitor_active"),
                                std::string("tab_monitor_active"));
+    }
+    fit_tab_labels(); // ORCA on printer change
+}
+
+void MainFrame::fit_tab_labels()
+{
+    if (!m_tabpanel || !m_slice_option_btn) // ignore layout change while slice/print buttons not visible
+        return;
+
+    auto* ctrl  = m_tabpanel->GetBtnsListCtrl();
+    auto* sizer = ctrl->GetBtnsSizer();
+    int   count = sizer->GetItemCount();
+
+    // Restore all
+    for (size_t i = 1; i < count; ++i)
+        ctrl->SetCompact(i, false);
+    m_tabpanel->Refresh();
+    Layout();
+
+    // Compact (last to first)
+    for (size_t i = count - 1; i >= 1; --i) {
+        int right = ScreenToClient(m_slice_option_btn->ClientToScreen({})).x;
+        int left  = sizer->GetSize().GetWidth();
+        if (right - left - FromDIP(15) > 0) return;
+        ctrl->SetCompact(i, true);
+        m_tabpanel->Refresh();
+        Layout();
     }
 }
 
@@ -1885,7 +1913,9 @@ wxBoxSizer* MainFrame::create_side_tools()
 
             auto curr_plate = m_plater->get_partplate_list().get_curr_plate();
             #ifdef __linux__
-                slice = try_pop_up_before_slice(m_slice_select == eSliceAll, m_plater, curr_plate, true);
+                PresetBundle* preset = wxGetApp().preset_bundle;
+                bool force_show_fila_group_dlg        = (preset && preset->is_bbl_vendor() && preset->get_printer_extruder_count() == 2);
+                slice = try_pop_up_before_slice(m_slice_select == eSliceAll, m_plater, curr_plate, force_show_fila_group_dlg);
             #else
                 slice = try_pop_up_before_slice(m_slice_select == eSliceAll, m_plater, curr_plate, false);
             #endif
@@ -1951,6 +1981,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                 m_slice_enable = get_enable_slice_status();
                 m_slice_btn->Enable(m_slice_enable);
                 this->Layout();
+                fit_tab_labels(); // ORCA on label change
                 if(m_slice_option_pop_up)
                     m_slice_option_pop_up->Dismiss();
                 });
@@ -1961,6 +1992,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                 m_slice_enable = get_enable_slice_status();
                 m_slice_btn->Enable(m_slice_enable);
                 this->Layout();
+                fit_tab_labels(); // ORCA on label change
                 if(m_slice_option_pop_up)
                     m_slice_option_pop_up->Dismiss();
                 });
@@ -2002,6 +2034,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2014,6 +2047,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2040,6 +2074,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2051,6 +2086,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2060,6 +2096,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2071,6 +2108,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2080,6 +2118,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2089,6 +2128,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                     });
 
@@ -2127,6 +2167,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                         m_print_enable = get_enable_print_status();
                         m_print_btn->Enable(m_print_enable);
                         this->Layout();
+                        fit_tab_labels(); // ORCA on label change
                         p->Dismiss();
                     });
                     p->append_button(print_multi_machine_btn);
@@ -2141,6 +2182,7 @@ wxBoxSizer* MainFrame::create_side_tools()
                     m_print_enable = get_enable_print_status();
                     m_print_btn->Enable(m_print_enable);
                     this->Layout();
+                    fit_tab_labels(); // ORCA on label change
                     p->Dismiss();
                 });
                 p->append_button(export_gcode_btn);
@@ -2470,6 +2512,8 @@ void MainFrame::on_dpi_changed(const wxRect& suggested_rect)
     this->SetSize(sz);
 
     this->Maximize(is_maximized);
+
+    fit_tab_labels(); // ORCA
 }
 
 void MainFrame::on_sys_color_changed()
@@ -2555,7 +2599,7 @@ static wxMenu* generate_help_menu()
     //        //TODO
     //    });
     // Check New Version
-    append_menu_item(helpMenu, wxID_ANY, _L("Check for Update"), _L("Check for Update"),
+    append_menu_item(helpMenu, wxID_ANY, _L("Check for Updates"), _L("Check for Updates"),
         [](wxCommandEvent&) {
             wxGetApp().check_new_version_sf(true, 1);
         }, "", nullptr, []() {
@@ -3225,15 +3269,7 @@ void MainFrame::init_menubar_as_editor()
     append_menu_item(
         parent_menu, wxID_ANY, _L("Preferences") + "\t" + ctrl + ",", "",
         [this](wxCommandEvent &) {
-            PreferencesDialog dlg(this);
-            dlg.ShowModal();
-            plater()->get_current_canvas3D()->force_set_focus();
-#if ENABLE_GCODE_LINES_ID_IN_H_SLIDER
-            if (dlg.seq_top_layer_only_changed() || dlg.seq_seq_top_gcode_indices_changed())
-#else
-            if (dlg.seq_top_layer_only_changed())
-#endif
-                plater()->reload_print();
+            wxGetApp().open_preferences();
         },
         "", nullptr, []() { return true; }, this, 1);
     //parent_menu->Insert(1, preference_item);
@@ -3254,7 +3290,6 @@ void MainFrame::init_menubar_as_editor()
         [this](wxCommandEvent &) {
             // Orca: Use GUI_App::open_preferences instead of direct call so windows associations are updated on exit
             wxGetApp().open_preferences();
-            plater()->get_current_canvas3D()->force_set_focus();
         },
         "", nullptr, []() { return true; }, this);
     //m_topbar->AddDropDownMenuItem(preference_item);
@@ -3295,20 +3330,20 @@ void MainFrame::init_menubar_as_editor()
     // Flow rate (with submenu)
     auto flowrate_menu = new wxMenu();
     append_menu_item(
-        flowrate_menu, wxID_ANY, _L("Pass 1"), _L("Flow rate test - Pass 1"),
+        flowrate_menu, wxID_ANY, _L("Pass 1"), _L("Flow ratio test - Pass 1"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(false, 1); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 2"), _L("Flow rate test - Pass 2"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 2"), _L("Flow ratio test - Pass 2"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(false, 2); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
     flowrate_menu->AppendSeparator();
-    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (Recommended)"), _L("Orca YOLO flowrate calibration, 0.01 step"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (Recommended)"), _L("Orca YOLO flowratio calibration, 0.01 step"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(true, 1); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (perfectionist version)"), _L("Orca YOLO flowrate calibration, 0.005 step"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (perfectionist version)"), _L("Orca YOLO flowratio calibration, 0.005 step"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(true, 2); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    m_topbar->GetCalibMenu()->AppendSubMenu(flowrate_menu, _L("Flow rate"));
+    m_topbar->GetCalibMenu()->AppendSubMenu(flowrate_menu, _L("Flow ratio"));
 
     // Retraction test
     append_menu_item(m_topbar->GetCalibMenu(), wxID_ANY, _L("Retraction test"), _L("Retraction test"),
@@ -3412,19 +3447,19 @@ void MainFrame::init_menubar_as_editor()
 
     // Flowrate (with submenu)
     auto flowrate_menu = new wxMenu();
-    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 1"), _L("Flow rate test - Pass 1"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 1"), _L("Flow ratio test - Pass 1"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(false, 1); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 2"), _L("Flow rate test - Pass 2"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("Pass 2"), _L("Flow ratio test - Pass 2"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(false, 2); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    append_submenu(calib_menu,flowrate_menu,wxID_ANY,_L("Flow rate"),_L("Flow rate"),"",
+    append_submenu(calib_menu,flowrate_menu,wxID_ANY,_L("Flow ratio"),_L("Flow ratio"),"",
                    [this]() {return m_plater->is_view3D_shown();; });
     flowrate_menu->AppendSeparator();
-    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (Recommended)"), _L("Orca YOLO flowrate calibration, 0.01 step"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (Recommended)"), _L("Orca YOLO flowratio calibration, 0.01 step"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(true, 1); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
-    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (perfectionist version)"), _L("Orca YOLO flowrate calibration, 0.005 step"),
+    append_menu_item(flowrate_menu, wxID_ANY, _L("YOLO (perfectionist version)"), _L("Orca YOLO flowratio calibration, 0.005 step"),
         [this](wxCommandEvent&) { if (m_plater) m_plater->calib_flowrate(true, 2); }, "", nullptr,
         [this]() {return m_plater->is_view3D_shown();; }, this);
 
