@@ -328,16 +328,26 @@ jobs:
                 });
               } catch (e) {
                 if (e.status === 404) {
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name,
-                    color,
-                    description
-                  });
-                  console.log(`Created missing label: ${name}`);
+                  try {
+                    await github.rest.issues.createLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name,
+                      color,
+                      description
+                    });
+                    console.log(`Created missing label: ${name}`);
+                  } catch (createError) {
+                    console.warn(
+                      `Warning: could not create missing label '${name}' (issue will be created without this label): `,
+                      createError.message
+                    );
+                  }
                 } else {
-                  console.warn(`Warning: could not verify label '${name}' (issue creation may fail): `, e.message);
+                  console.warn(
+                    `Warning: could not verify label '${name}' (issue creation may fail): `,
+                    e.message
+                  );
                 }
               }
             };
