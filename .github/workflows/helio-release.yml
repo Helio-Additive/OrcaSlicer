@@ -13,10 +13,12 @@ on:
     inputs:
       tag_override:
         description: 'Optional tag name (default: helio-v{version})'
+        type: string
         required: false
+        default: ''
 
 concurrency:
-  group: helio-release-${{ github.event.pull_request.number || github.run_id }}
+  group: helio-release-${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -24,7 +26,8 @@ jobs:
   # For workflow_dispatch, always run
   check:
     if: >-
-      github.event_name == 'workflow_dispatch' || (
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/orca-latest-parity-bambu') || (
         github.event.pull_request.merged == true &&
         contains(github.event.pull_request.labels.*.name, 'release') &&
         github.event.pull_request.head.repo.full_name == github.repository
@@ -52,10 +55,12 @@ jobs:
           echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: Determine release tag
         id: tag
+        env:
+          TAG_OVERRIDE: ${{ inputs.tag_override }}
         run: |
           # Use override if provided, otherwise auto-generate
-          if [ -n "${{ inputs.tag_override }}" ]; then
-            tag="${{ inputs.tag_override }}"
+          if [ -n "$TAG_OVERRIDE" ]; then
+            tag="$TAG_OVERRIDE"
           else
             tag="helio-v${{ steps.ver.outputs.version }}"
           fi
