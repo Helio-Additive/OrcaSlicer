@@ -459,7 +459,35 @@ jobs:
               if (err.status === 422 && errMsgs.includes('No commits between')) {
                 console.log(`No diff between ${target} and ${branch} — skipping PR creation`);
               } else if (err.status === 422 && errMsgs.includes('already exists')) {
-                console.log(`PR already exists for ${branch} — skipping`);
+                console.log(`PR already exists for ${branch} — looking up existing PR to apply label`);
+                try {
+                  const { data: prs } = await github.rest.pulls.list({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    head: `${context.repo.owner}:${branch}`,
+                    base: target,
+                    state: 'open'
+                  });
+                  if (prs.length > 0) {
+                    const existingPr = prs[0];
+                    core.setOutput('url', existingPr.html_url);
+                    console.log(`Found existing PR #${existingPr.number}: ${existingPr.html_url}`);
+                    try {
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: existingPr.number,
+                        labels: ['claude-work']
+                      });
+                    } catch (labelErr) {
+                      console.warn(`Warning: failed to add claude-work label to existing PR #${existingPr.number}:`, labelErr);
+                    }
+                  } else {
+                    console.log(`Could not find existing open PR for ${branch} → ${target}`);
+                  }
+                } catch (listErr) {
+                  console.warn(`Warning: failed to list PRs for ${branch}:`, listErr);
+                }
               } else {
                 throw err;
               }
