@@ -450,7 +450,7 @@ void AppConfig::set_defaults()
         if (!get("helio_enable").empty()) {
             set_bool("enable_helio_processing", get_bool("helio_enable"));
         } else {
-            set_bool("enable_helio_processing", true);
+            set_bool("enable_helio_processing", false);
         }
     }
     if (get("helio_api_china").empty()) {

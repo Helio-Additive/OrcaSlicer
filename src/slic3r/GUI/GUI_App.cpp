@@ -7419,10 +7419,8 @@ void GUI_App::request_helio_supported_data()
     std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
     std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
 
-    if (!HelioQuery::global_printers_fully_loaded || !HelioQuery::global_materials_fully_loaded) {
-        Slic3r::HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
-        Slic3r::HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
-    }
+    Slic3r::HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
+    Slic3r::HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
 }
 
 void GUI_App::remove_mall_system_dialog()

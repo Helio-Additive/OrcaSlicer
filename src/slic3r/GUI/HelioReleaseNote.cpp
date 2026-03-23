@@ -181,7 +181,11 @@ void HelioStatementDialog::on_confirm(wxMouseEvent& e)
     show_pat_page();
     request_pat();
 
-    // Helio button visibility is handled via the slice dropdown in OrcaSlicer
+    // Show the Helio button in main window immediately (mirrors on_uninstall hide logic)
+    if (wxGetApp().mainframe->expand_program_holder) {
+        wxGetApp().mainframe->expand_program_holder->ShowExpandButton(wxGetApp().mainframe->expand_helio_id, true);
+        wxGetApp().mainframe->Layout();
+    }
 
     Layout();
     Fit();
