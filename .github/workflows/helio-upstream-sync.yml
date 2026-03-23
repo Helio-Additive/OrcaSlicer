@@ -413,12 +413,16 @@ jobs:
               console.log(`Created PR: ${pr.html_url}`);
 
               // Add claude-work label for Cowork auto-triage
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                labels: ['claude-work']
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: ['claude-work']
+                });
+              } catch (labelErr) {
+                console.warn(`Warning: failed to add claude-work label to PR #${pr.number}:`, labelErr);
+              }
             } catch (err) {
               const errMsg = err.message || '';
               const errData = err.response?.data;
