@@ -59,8 +59,7 @@ cmake --build build/arm64 --config RelWithDebInfo --target all --
 ### Building on Linux
  **Always use this command to build the project when testing build issues on Linux.**
 ```bash
-cmake --build build/arm64 --config RelWithDebInfo --target all --
-
+cmake --build build/ --config RelWithDebInfo --target all --
 ```
 ### Build System
 - Uses CMake with minimum version 3.13 (maximum 3.31.x on Windows)
