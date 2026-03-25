@@ -1975,7 +1975,10 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             }
         }
     }
-    wxBoxSizer* layers_to_optimize_item = create_input_optimize_layers(card_optimization_settings, layer_count);
+    // Clamp to at least 2 so the default UI range ("2 to N") is always valid,
+    // even when the plate is unsliced or has only a single layer.
+    int effective_layer_count = std::max(layer_count, 2);
+    wxBoxSizer* layers_to_optimize_item = create_input_optimize_layers(card_optimization_settings, effective_layer_count);
 
     std::map<int, wxString> config_limits;
     config_limits[LIMITS_HELIO_DEFAULT] = _L("Helio default (recommended)");
@@ -2015,13 +2018,14 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
         };
         // FloatOrPercent keys — resolve percentage values using their base speeds.
         // base_key is the config key that the percentage applies to.
-        // For scarf_joint_speed, G-code generation uses the slower of inner/outer
-        // wall speed; we resolve against outer_wall_speed (the slower default).
+        // scarf_joint_speed is resolved against both wall speeds because G-code
+        // generation applies it to inner and outer walls independently.
         struct FopKey { std::string key; std::string base_key; };
         const std::vector<FopKey> speed_keys_fop = {
             {"internal_bridge_speed", "bridge_speed"},
             {"small_perimeter_speed", "outer_wall_speed"},
             {"scarf_joint_speed", "outer_wall_speed"},
+            {"scarf_joint_speed", "inner_wall_speed"},
             // Overhang speeds (conditional on enable_overhang_speed, but included
             // because they can be lower than wall speeds when active)
             {"overhang_1_4_speed", "outer_wall_speed"},
@@ -2065,6 +2069,22 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             if (abs_value > 0.0) {
                 cfg_min = std::min(cfg_min, static_cast<float>(abs_value));
                 cfg_max = std::max(cfg_max, static_cast<float>(abs_value));
+            }
+        }
+        // small_perimeter_speed == 0 means "auto", which G-code generation
+        // treats as outer_wall_speed * 0.5. Include this implicit speed so
+        // min_speed reflects actual printing conditions.
+        {
+            auto* sp_opt = print_config.opt<ConfigOptionFloatOrPercent>("small_perimeter_speed");
+            if (sp_opt && sp_opt->value == 0) {
+                auto* outer_opt = print_config.opt<ConfigOptionFloat>("outer_wall_speed");
+                if (outer_opt && outer_opt->value > 0) {
+                    float auto_speed = static_cast<float>(outer_opt->value * 0.5);
+                    if (auto_speed > 0) {
+                        cfg_min = std::min(cfg_min, auto_speed);
+                        cfg_max = std::max(cfg_max, auto_speed);
+                    }
+                }
             }
         }
         if (cfg_min < std::numeric_limits<float>::max() && cfg_min > 0)
