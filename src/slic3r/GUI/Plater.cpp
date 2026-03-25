@@ -4301,6 +4301,7 @@ struct Plater::priv
     bool                        helio_elements_fetched = false;
     bool                        helio_processing_disabled = false;
     bool                        helio_using_reference_material { false };
+    bool                        helio_using_reference_printer { false };
     bool suppressed_backround_processing_update { false };
 
     // TODO: A mechanism would be useful for blocking the plater interactions:
@@ -10404,6 +10405,7 @@ private:
 int Plater::priv::update_helio_background_process_v2(std::string& printer_id, std::string& material_id)
 {
     helio_using_reference_material = false;
+    helio_using_reference_printer = false;
     notification_manager->close_notification_of_type(NotificationType::HelioSlicingError);
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
@@ -10427,7 +10429,6 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     }
 
     bool helio_support = false;
-    bool helio_using_reference_printer = false;
 
     // Step 1: Try word-boundary matching
     auto [best_match_id, best_match_length] = match_printer_with_boundaries(
@@ -10799,6 +10800,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
                                                    bool& is_multi_color, bool& is_multi_material)
 {
     helio_using_reference_material = false;
+    helio_using_reference_printer = false;
     notification_manager->close_notification_of_type(NotificationType::HelioSlicingError);
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
@@ -10873,6 +10875,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
                 if (selection >= 0 && selection < (int)printer_ids.size()) {
                     printer_id = printer_ids[selection];
                     helio_support = true;
+                    helio_using_reference_printer = true;
                 }
             }
 
@@ -11106,8 +11109,8 @@ void Plater::priv::on_helio_process()
             );
         }
 
-        // If user selected a reference material, force "Slicer default" limits
-        if (helio_using_reference_material) {
+        // If user selected a reference material or reference printer, force "Slicer default" limits
+        if (helio_using_reference_material || helio_using_reference_printer) {
             dlg.set_force_slicer_default(true);
         }
 
