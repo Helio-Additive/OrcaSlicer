@@ -1975,15 +1975,26 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             float speed_max = 0.0f;
             float vol_min = std::numeric_limits<float>::max();
             float vol_max = 0.0f;
+            bool found_extrusion = false;
 
             for (const auto& move : gcode_result->moves) {
-                // Only consider extrusion moves for speed/volumetric ranges
+                // Only consider extrusion moves
                 if (move.type != EMoveType::Extrude || move.extrusion_role == erNone)
                     continue;
 
-                if (move.layer_id > max_layer_id)
-                    max_layer_id = move.layer_id;
+                // Exclude support/wipe-tower moves from layer count — these can
+                // extend past the last object layer and would inflate the range.
+                // Speed/volumetric ranges include all extrusion roles since they
+                // represent actual printing conditions.
+                if (move.extrusion_role != erSupportMaterial &&
+                    move.extrusion_role != erSupportMaterialInterface &&
+                    move.extrusion_role != erSupportTransition &&
+                    move.extrusion_role != erWipeTower) {
+                    if (move.layer_id > max_layer_id)
+                        max_layer_id = move.layer_id;
+                }
 
+                found_extrusion = true;
                 if (move.feedrate > 0.0f) {
                     speed_min = std::min(speed_min, move.feedrate);
                     speed_max = std::max(speed_max, move.feedrate);
@@ -1996,11 +2007,23 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
                 }
             }
 
-            layer_count = static_cast<int>(max_layer_id);
-            if (speed_min < std::numeric_limits<float>::max()) gcode_min_speed = speed_min;
-            if (speed_max > 0.0f) gcode_max_speed = speed_max;
-            if (vol_min < std::numeric_limits<float>::max()) gcode_min_vol_rate = vol_min;
-            if (vol_max > 0.0f) gcode_max_vol_rate = vol_max;
+            if (found_extrusion) {
+                layer_count = static_cast<int>(max_layer_id);
+                if (speed_min < std::numeric_limits<float>::max()) gcode_min_speed = speed_min;
+                if (speed_max > 0.0f) gcode_max_speed = speed_max;
+                if (vol_min < std::numeric_limits<float>::max()) gcode_min_vol_rate = vol_min;
+                if (vol_max > 0.0f) gcode_max_vol_rate = vol_max;
+            }
+        }
+
+        // Fallback: if no G-code result available, try Print objects
+        if (layer_count == 0) {
+            const auto& print = plater->fff_print();
+            for (const auto* obj : print.objects()) {
+                int obj_layers = static_cast<int>(obj->layers().size());
+                if (obj_layers > layer_count)
+                    layer_count = obj_layers;
+            }
         }
     }
 
