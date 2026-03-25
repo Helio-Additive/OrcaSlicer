@@ -1965,10 +1965,11 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             layer_count = (int)canvas->get_gcode_layers_zs().size();
 
         // Fall back to Print objects (works from Prepare tab after slicing)
+        // Use layers().size() (not total_layer_count()) to exclude support layers
         if (layer_count == 0) {
             const auto& print = plater->fff_print();
             for (const auto* obj : print.objects()) {
-                int obj_layers = (int)obj->total_layer_count();
+                int obj_layers = (int)obj->layers().size();
                 if (obj_layers > layer_count)
                     layer_count = obj_layers;
             }
@@ -2002,11 +2003,18 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
 
     if (plater) {
         const auto& print_config = plater->fff_print().full_print_config();
-        // Scan print speed settings to find actual min/max from the G-code config
+        // Scan print speed settings to find actual min/max from the G-code config.
+        // Keep this list in sync with speed settings used by G-code generation.
         const std::vector<std::string> speed_keys = {
             "outer_wall_speed", "inner_wall_speed", "sparse_infill_speed",
             "internal_solid_infill_speed", "top_surface_speed", "bridge_speed",
-            "support_speed", "gap_infill_speed", "initial_layer_speed"
+            "support_speed", "support_interface_speed", "gap_infill_speed",
+            "initial_layer_speed", "initial_layer_infill_speed",
+            "ironing_speed", "skirt_speed"
+        };
+        // FloatOrPercent keys — only used when set as absolute values (not percentage)
+        const std::vector<std::string> speed_keys_fop = {
+            "internal_bridge_speed", "small_perimeter_speed", "scarf_joint_speed"
         };
         float cfg_min = std::numeric_limits<float>::max();
         float cfg_max = 0.0f;
@@ -2017,15 +2025,29 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
                 cfg_max = std::max(cfg_max, (float)opt->value);
             }
         }
+        for (const auto& key : speed_keys_fop) {
+            auto* opt = print_config.opt<ConfigOptionFloatOrPercent>(key);
+            if (opt && !opt->percent && opt->value > 0) {
+                cfg_min = std::min(cfg_min, (float)opt->value);
+                cfg_max = std::max(cfg_max, (float)opt->value);
+            }
+        }
         if (cfg_min < std::numeric_limits<float>::max() && cfg_min > 0)
             min_speed = cfg_min;
         if (cfg_max > 0)
             max_speed = cfg_max;
 
-        // Read filament max volumetric speed
-        auto* vol_opt = print_config.opt<ConfigOptionFloats>("filament_max_volumetric_speed");
-        if (vol_opt && !vol_opt->values.empty() && vol_opt->values[0] > 0)
-            max_volumetric_speed = (float)vol_opt->values[0];
+        // Read filament max volumetric speed — use the minimum positive value
+        // across all filament slots (safest limit for multi-material prints)
+        if (auto* vol_opt = print_config.opt<ConfigOptionFloats>("filament_max_volumetric_speed")) {
+            float cfg_max_vol = std::numeric_limits<float>::max();
+            for (double value : vol_opt->values) {
+                if (value > 0.0)
+                    cfg_max_vol = std::min(cfg_max_vol, static_cast<float>(value));
+            }
+            if (cfg_max_vol < std::numeric_limits<float>::max())
+                max_volumetric_speed = cfg_max_vol;
+        }
     }
 
     // velocity — use slicer config defaults
