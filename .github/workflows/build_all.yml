@@ -17,9 +17,11 @@ on:
      - 'scripts/flatpak/**'
 
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     branches:
      - main
      - release/*
+     - orca-latest-parity-bambu
     paths:
      - 'deps/**'
      - 'deps_src/**'
@@ -52,16 +54,28 @@ jobs:
   build_linux:
     strategy:
       fail-fast: false
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    # Don't run scheduled builds on forks; require 'ready-to-build' label for PRs to orca-latest-parity-bambu:
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer')
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.base.ref != 'orca-latest-parity-bambu'
+          || contains(github.event.pull_request.labels.*.name, 'ready-to-build'))
+      }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
       build-deps-only: ${{ inputs.build-deps-only || false }}
     secrets: inherit
   build_windows:
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    # Don't run scheduled builds on forks; require 'ready-to-build' label for PRs to orca-latest-parity-bambu:
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer')
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.base.ref != 'orca-latest-parity-bambu'
+          || contains(github.event.pull_request.labels.*.name, 'ready-to-build'))
+      }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-win-server' || 'windows-latest' }}
@@ -75,8 +89,14 @@ jobs:
         arch:
           - arm64
           - x86_64
-    # Don't run scheduled builds on forks:
-    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    # Don't run scheduled builds on forks; require 'ready-to-build' label for PRs to orca-latest-parity-bambu:
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer')
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.base.ref != 'orca-latest-parity-bambu'
+          || contains(github.event.pull_request.labels.*.name, 'ready-to-build'))
+      }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}
@@ -159,8 +179,14 @@ jobs:
             runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
-    # Don't run scheduled builds on forks; skip entirely on self-hosted runners
-    if: ${{ !cancelled() && !vars.SELF_HOSTED && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    # Don't run scheduled builds on forks; skip on self-hosted; require 'ready-to-build' for PRs to orca-latest-parity-bambu:
+    if: >-
+      ${{ !cancelled() && !vars.SELF_HOSTED
+      && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer')
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.base.ref != 'orca-latest-parity-bambu'
+          || contains(github.event.pull_request.labels.*.name, 'ready-to-build'))
+      }}
     runs-on: ${{ matrix.variant.runner }}
     env:
       date:
