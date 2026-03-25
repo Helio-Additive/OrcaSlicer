@@ -5,6 +5,8 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Thread.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
+#include "libslic3r/Print.hpp"
+#include "libslic3r/PrintConfig.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "GUI_Preview.hpp"
@@ -33,6 +35,7 @@ namespace GUI {
 #include <miniz.h>
 #include <wx/valnum.h>
 #include <algorithm>
+#include <limits>
 #include <climits>
 #include <cstdlib>
 #include <boost/algorithm/string.hpp>
@@ -1956,9 +1959,21 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     auto plater = Slic3r::GUI::wxGetApp().plater();
     int layer_count = 0;
     if (plater) {
+        // Try GCode viewer first (available on Preview tab)
         auto* canvas = plater->get_current_canvas3D();
         if (canvas)
             layer_count = (int)canvas->get_gcode_layers_zs().size();
+
+        // Fall back to Print objects (works from Prepare tab after slicing)
+        // Use layers().size() (not total_layer_count()) to exclude support layers
+        if (layer_count == 0) {
+            const auto& print = plater->fff_print();
+            for (const auto* obj : print.objects()) {
+                int obj_layers = (int)obj->layers().size();
+                if (obj_layers > layer_count)
+                    layer_count = obj_layers;
+            }
+        }
     }
     wxBoxSizer* layers_to_optimize_item = create_input_optimize_layers(card_optimization_settings, layer_count);
 
@@ -1966,7 +1981,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     config_limits[LIMITS_HELIO_DEFAULT] = _L("Helio default (recommended)");
     config_limits[LIMITS_SLICER_DEFAULT] = _L("Slicer default");
     auto limits = create_combo_item(card_optimization_settings, "limits", _L("Limits"), config_limits, LIMITS_HELIO_DEFAULT, LIMITS_DROPDOWN_WIDTH);
-    
+
     wxString limits_tooltip = _L("Set your own speed and flow rate limits - or rely on Helio's custom limit settings. With unsupported materials you need to supply your own data or rely on the slicer's built in data.");
     if (m_combo_items.find("limits") != m_combo_items.end()) {
         m_combo_items["limits"]->SetToolTip(limits_tooltip);
@@ -1980,9 +1995,80 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // velocity and volumetric speed fields
     auto double_min_checker = TextInputValChecker::CreateDoubleMinChecker(0);
 
-    // velocity — use slicer config defaults
+    // Read speed and volumetric limits from the active slicer config
     float min_speed = 0.0;
     float max_speed = 500.0;
+    float min_volumetric_speed = 0.0;
+    float max_volumetric_speed = 30.0;
+
+    if (plater) {
+        const auto& print_config = plater->fff_print().full_print_config();
+        // Scan print speed settings to find actual min/max from the G-code config.
+        // Keep this list in sync with speed settings used by G-code generation.
+        const std::vector<std::string> speed_keys = {
+            "outer_wall_speed", "inner_wall_speed", "sparse_infill_speed",
+            "internal_solid_infill_speed", "top_surface_speed", "bridge_speed",
+            "support_speed", "support_interface_speed", "gap_infill_speed",
+            "initial_layer_speed", "initial_layer_infill_speed",
+            "ironing_speed", "skirt_speed"
+        };
+        // FloatOrPercent keys — resolve percentage values using their base speeds
+        // when possible, otherwise only use absolute values
+        struct FopKey { std::string key; std::string base_key; };
+        const std::vector<FopKey> speed_keys_fop = {
+            {"internal_bridge_speed", "bridge_speed"},
+            {"small_perimeter_speed", "outer_wall_speed"},
+            {"scarf_joint_speed", ""}  // no clear base speed
+        };
+        float cfg_min = std::numeric_limits<float>::max();
+        float cfg_max = 0.0f;
+        for (const auto& key : speed_keys) {
+            auto* opt = print_config.opt<ConfigOptionFloat>(key);
+            if (opt && opt->value > 0) {
+                cfg_min = std::min(cfg_min, (float)opt->value);
+                cfg_max = std::max(cfg_max, (float)opt->value);
+            }
+        }
+        for (const auto& fop : speed_keys_fop) {
+            auto* opt = print_config.opt<ConfigOptionFloatOrPercent>(fop.key);
+            if (!opt || opt->value <= 0)
+                continue;
+
+            double abs_value = 0.0;
+            if (!opt->percent) {
+                // Absolute value stored directly
+                abs_value = opt->value;
+            } else if (!fop.base_key.empty()) {
+                // Percentage — resolve using the base speed
+                auto* base_opt = print_config.opt<ConfigOptionFloat>(fop.base_key);
+                if (base_opt && base_opt->value > 0)
+                    abs_value = opt->get_abs_value(base_opt->value);
+            }
+
+            if (abs_value > 0.0) {
+                cfg_min = std::min(cfg_min, static_cast<float>(abs_value));
+                cfg_max = std::max(cfg_max, static_cast<float>(abs_value));
+            }
+        }
+        if (cfg_min < std::numeric_limits<float>::max() && cfg_min > 0)
+            min_speed = cfg_min;
+        if (cfg_max > 0)
+            max_speed = cfg_max;
+
+        // Read filament max volumetric speed — use the minimum positive value
+        // across all filament slots (safest limit for multi-material prints)
+        if (auto* vol_opt = print_config.opt<ConfigOptionFloats>("filament_max_volumetric_speed")) {
+            float cfg_max_vol = std::numeric_limits<float>::max();
+            for (double value : vol_opt->values) {
+                if (value > 0.0)
+                    cfg_max_vol = std::min(cfg_max_vol, static_cast<float>(value));
+            }
+            if (cfg_max_vol < std::numeric_limits<float>::max())
+                max_volumetric_speed = cfg_max_vol;
+        }
+    }
+
+    // velocity — use slicer config defaults
     wxBoxSizer* min_velocity_item = create_input_item(panel_velocity_volumetric, "min_velocity", _L("Min Velocity"), wxT("mm/s"), { double_min_checker } );
     m_input_items["min_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(min_speed, 0)));
 
@@ -1990,8 +2076,6 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     m_input_items["max_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(max_speed, 0)));
 
     // volumetric speed — use slicer config defaults
-    float min_volumetric_speed = 0.0;
-    float max_volumetric_speed = 30.0;
     wxBoxSizer* min_volumetric_speed_item = create_input_item(panel_velocity_volumetric, "min_volumetric_speed", _L("Min Volumetric Speed"), wxT("mm\u00B3/s"), { double_min_checker });
     m_input_items["min_volumetric_speed"]->GetTextCtrl()->SetLabel(wxString::Format("%.2f", s_round(min_volumetric_speed, 2)));
 
