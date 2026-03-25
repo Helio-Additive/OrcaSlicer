@@ -1995,7 +1995,8 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // velocity and volumetric speed fields
     auto double_min_checker = TextInputValChecker::CreateDoubleMinChecker(0);
 
-    // Read speed and volumetric limits from the active slicer config
+    // Read speed limits from active slicer config; min_volumetric_speed stays
+    // at 0 because OrcaSlicer has no "minimum volumetric speed" config setting.
     float min_speed = 0.0;
     float max_speed = 500.0;
     float min_volumetric_speed = 0.0;
@@ -2012,13 +2013,21 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             "initial_layer_speed", "initial_layer_infill_speed",
             "ironing_speed", "skirt_speed"
         };
-        // FloatOrPercent keys — resolve percentage values using their base speeds
-        // when possible, otherwise only use absolute values
+        // FloatOrPercent keys — resolve percentage values using their base speeds.
+        // base_key is the config key that the percentage applies to.
+        // For scarf_joint_speed, G-code generation uses the slower of inner/outer
+        // wall speed; we resolve against outer_wall_speed (the slower default).
         struct FopKey { std::string key; std::string base_key; };
         const std::vector<FopKey> speed_keys_fop = {
             {"internal_bridge_speed", "bridge_speed"},
             {"small_perimeter_speed", "outer_wall_speed"},
-            {"scarf_joint_speed", ""}  // no clear base speed
+            {"scarf_joint_speed", "outer_wall_speed"},
+            // Overhang speeds (conditional on enable_overhang_speed, but included
+            // because they can be lower than wall speeds when active)
+            {"overhang_1_4_speed", "outer_wall_speed"},
+            {"overhang_2_4_speed", "outer_wall_speed"},
+            {"overhang_3_4_speed", "outer_wall_speed"},
+            {"overhang_4_4_speed", "outer_wall_speed"}
         };
         float cfg_min = std::numeric_limits<float>::max();
         float cfg_max = 0.0f;
