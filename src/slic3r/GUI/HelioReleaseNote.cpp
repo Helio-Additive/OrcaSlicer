@@ -1957,24 +1957,53 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     auto outerwall = create_print_priority_combo(card_optimization_settings);
 
     auto plater = Slic3r::GUI::wxGetApp().plater();
-    int layer_count = 0;
-    if (plater) {
-        // Try GCode viewer first (available on Preview tab)
-        auto* canvas = plater->get_current_canvas3D();
-        if (canvas)
-            layer_count = (int)canvas->get_gcode_layers_zs().size();
 
-        // Fall back to Print objects (works from Prepare tab after slicing)
-        // Use layers().size() (not total_layer_count()) to exclude support layers
-        if (layer_count == 0) {
-            const auto& print = plater->fff_print();
-            for (const auto* obj : print.objects()) {
-                int obj_layers = (int)obj->layers().size();
-                if (obj_layers > layer_count)
-                    layer_count = obj_layers;
+    // Read layer count, speed range, and volumetric rate range directly from
+    // the parsed G-code result. This works from both Prepare and Preview tabs
+    // and reflects actual G-code conditions (matching BambuStudio behavior).
+    int layer_count = 0;
+    float gcode_min_speed = 0.0f;
+    float gcode_max_speed = 0.0f;
+    float gcode_min_vol_rate = 0.0f;
+    float gcode_max_vol_rate = 0.0f;
+
+    if (plater) {
+        GCodeProcessorResult* gcode_result = plater->get_partplate_list().get_current_slice_result();
+        if (gcode_result && !gcode_result->moves.empty()) {
+            unsigned int max_layer_id = 0;
+            float speed_min = std::numeric_limits<float>::max();
+            float speed_max = 0.0f;
+            float vol_min = std::numeric_limits<float>::max();
+            float vol_max = 0.0f;
+
+            for (const auto& move : gcode_result->moves) {
+                // Only consider extrusion moves for speed/volumetric ranges
+                if (move.type != EMoveType::Extrude || move.extrusion_role == erNone)
+                    continue;
+
+                if (move.layer_id > max_layer_id)
+                    max_layer_id = move.layer_id;
+
+                if (move.feedrate > 0.0f) {
+                    speed_min = std::min(speed_min, move.feedrate);
+                    speed_max = std::max(speed_max, move.feedrate);
+                }
+
+                float vol_rate = move.volumetric_rate();
+                if (vol_rate > 0.0f) {
+                    vol_min = std::min(vol_min, vol_rate);
+                    vol_max = std::max(vol_max, vol_rate);
+                }
             }
+
+            layer_count = static_cast<int>(max_layer_id);
+            if (speed_min < std::numeric_limits<float>::max()) gcode_min_speed = speed_min;
+            if (speed_max > 0.0f) gcode_max_speed = speed_max;
+            if (vol_min < std::numeric_limits<float>::max()) gcode_min_vol_rate = vol_min;
+            if (vol_max > 0.0f) gcode_max_vol_rate = vol_max;
         }
     }
+
     // Clamp to at least 2 so the default UI range ("2 to N") is always valid,
     // even when the plate is unsliced or has only a single layer.
     int effective_layer_count = std::max(layer_count, 2);
@@ -1998,114 +2027,15 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // velocity and volumetric speed fields
     auto double_min_checker = TextInputValChecker::CreateDoubleMinChecker(0);
 
-    // Read speed limits from active slicer config; min_volumetric_speed stays
-    // at 0 because OrcaSlicer has no "minimum volumetric speed" config setting.
-    float min_speed = 0.0;
-    float max_speed = 500.0;
-    float min_volumetric_speed = 0.0;
-    float max_volumetric_speed = 30.0;
+    // Use the min/max speed and volumetric rate read from the parsed G-code
+    // result above. These reflect actual printing conditions from the G-code.
+    float min_speed = gcode_min_speed;
+    float max_speed = gcode_max_speed;
+    float min_volumetric_speed = gcode_min_vol_rate;
+    float max_volumetric_speed = gcode_max_vol_rate;
 
-    if (plater) {
-        const auto& print_config = plater->fff_print().full_print_config();
-        // Scan print speed settings to find actual min/max from the G-code config.
-        // Keep this list in sync with speed settings used by G-code generation.
-        const std::vector<std::string> speed_keys = {
-            "outer_wall_speed", "inner_wall_speed", "sparse_infill_speed",
-            "internal_solid_infill_speed", "top_surface_speed", "bridge_speed",
-            "support_speed", "support_interface_speed", "gap_infill_speed",
-            "initial_layer_speed", "initial_layer_infill_speed",
-            "ironing_speed", "skirt_speed"
-        };
-        // FloatOrPercent keys — resolve percentage values using their base speeds.
-        // base_key is the config key that the percentage applies to.
-        // scarf_joint_speed is resolved against both wall speeds because G-code
-        // generation applies it to inner and outer walls independently.
-        struct FopKey { std::string key; std::string base_key; };
-        const std::vector<FopKey> speed_keys_fop = {
-            {"internal_bridge_speed", "bridge_speed"},
-            {"small_perimeter_speed", "outer_wall_speed"},
-            {"scarf_joint_speed", "outer_wall_speed"},
-            {"scarf_joint_speed", "inner_wall_speed"},
-            // Overhang speeds (conditional on enable_overhang_speed, but included
-            // because they can be lower than wall speeds when active)
-            {"overhang_1_4_speed", "outer_wall_speed"},
-            {"overhang_2_4_speed", "outer_wall_speed"},
-            {"overhang_3_4_speed", "outer_wall_speed"},
-            {"overhang_4_4_speed", "outer_wall_speed"}
-        };
-        bool overhang_speed_enabled = false;
-        if (auto* overhang_opt = print_config.opt<ConfigOptionBool>("enable_overhang_speed"))
-            overhang_speed_enabled = overhang_opt->value;
-
-        float cfg_min = std::numeric_limits<float>::max();
-        float cfg_max = 0.0f;
-        for (const auto& key : speed_keys) {
-            auto* opt = print_config.opt<ConfigOptionFloat>(key);
-            if (opt && opt->value > 0) {
-                cfg_min = std::min(cfg_min, (float)opt->value);
-                cfg_max = std::max(cfg_max, (float)opt->value);
-            }
-        }
-        for (const auto& fop : speed_keys_fop) {
-            // Skip overhang speed keys when overhang speed is disabled
-            if (fop.key.rfind("overhang_", 0) == 0 && !overhang_speed_enabled)
-                continue;
-
-            auto* opt = print_config.opt<ConfigOptionFloatOrPercent>(fop.key);
-            if (!opt || opt->value <= 0)
-                continue;
-
-            double abs_value = 0.0;
-            if (!opt->percent) {
-                // Absolute value stored directly
-                abs_value = opt->value;
-            } else if (!fop.base_key.empty()) {
-                // Percentage — resolve using the base speed
-                auto* base_opt = print_config.opt<ConfigOptionFloat>(fop.base_key);
-                if (base_opt && base_opt->value > 0)
-                    abs_value = opt->get_abs_value(base_opt->value);
-            }
-
-            if (abs_value > 0.0) {
-                cfg_min = std::min(cfg_min, static_cast<float>(abs_value));
-                cfg_max = std::max(cfg_max, static_cast<float>(abs_value));
-            }
-        }
-        // small_perimeter_speed == 0 means "auto", which G-code generation
-        // treats as outer_wall_speed * 0.5. Include this implicit speed so
-        // min_speed reflects actual printing conditions.
-        {
-            auto* sp_opt = print_config.opt<ConfigOptionFloatOrPercent>("small_perimeter_speed");
-            if (sp_opt && sp_opt->value == 0) {
-                auto* outer_opt = print_config.opt<ConfigOptionFloat>("outer_wall_speed");
-                if (outer_opt && outer_opt->value > 0) {
-                    float auto_speed = static_cast<float>(outer_opt->value * 0.5);
-                    if (auto_speed > 0) {
-                        cfg_min = std::min(cfg_min, auto_speed);
-                        cfg_max = std::max(cfg_max, auto_speed);
-                    }
-                }
-            }
-        }
-        if (cfg_min < std::numeric_limits<float>::max() && cfg_min > 0)
-            min_speed = cfg_min;
-        if (cfg_max > 0)
-            max_speed = cfg_max;
-
-        // Read filament max volumetric speed — use the minimum positive value
-        // across all filament slots (safest limit for multi-material prints)
-        if (auto* vol_opt = print_config.opt<ConfigOptionFloats>("filament_max_volumetric_speed")) {
-            float cfg_max_vol = std::numeric_limits<float>::max();
-            for (double value : vol_opt->values) {
-                if (value > 0.0)
-                    cfg_max_vol = std::min(cfg_max_vol, static_cast<float>(value));
-            }
-            if (cfg_max_vol < std::numeric_limits<float>::max())
-                max_volumetric_speed = cfg_max_vol;
-        }
-    }
-
-    // velocity — use slicer config defaults
+    // velocity — populated from parsed G-code; only sent to backend when
+    // "Slicer default" limits mode is selected (see wxEVT_COMBOBOX handler below)
     wxBoxSizer* min_velocity_item = create_input_item(panel_velocity_volumetric, "min_velocity", _L("Min Velocity"), wxT("mm/s"), { double_min_checker } );
     m_input_items["min_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(min_speed, 0)));
 
