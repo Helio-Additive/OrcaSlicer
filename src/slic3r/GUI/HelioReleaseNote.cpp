@@ -2029,6 +2029,10 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             {"overhang_3_4_speed", "outer_wall_speed"},
             {"overhang_4_4_speed", "outer_wall_speed"}
         };
+        bool overhang_speed_enabled = false;
+        if (auto* overhang_opt = print_config.opt<ConfigOptionBool>("enable_overhang_speed"))
+            overhang_speed_enabled = overhang_opt->value;
+
         float cfg_min = std::numeric_limits<float>::max();
         float cfg_max = 0.0f;
         for (const auto& key : speed_keys) {
@@ -2039,6 +2043,10 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             }
         }
         for (const auto& fop : speed_keys_fop) {
+            // Skip overhang speed keys when overhang speed is disabled
+            if (fop.key.rfind("overhang_", 0) == 0 && !overhang_speed_enabled)
+                continue;
+
             auto* opt = print_config.opt<ConfigOptionFloatOrPercent>(fop.key);
             if (!opt || opt->value <= 0)
                 continue;
