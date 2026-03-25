@@ -5,6 +5,7 @@ on:
     branches:
      - main
      - release/*
+     - orca-latest-parity-bambu
     paths:
      - 'deps/**'
      - 'src/**'
@@ -19,6 +20,7 @@ on:
     branches:
      - main
      - release/*
+     - orca-latest-parity-bambu
     paths:
      - 'deps/**'
      - 'deps_src/**'
