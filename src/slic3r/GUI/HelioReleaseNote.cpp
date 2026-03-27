@@ -5,6 +5,8 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Thread.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
+#include "libslic3r/Print.hpp"
+#include "libslic3r/PrintConfig.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "GUI_Preview.hpp"
@@ -33,6 +35,7 @@ namespace GUI {
 #include <miniz.h>
 #include <wx/valnum.h>
 #include <algorithm>
+#include <limits>
 #include <climits>
 #include <cstdlib>
 #include <boost/algorithm/string.hpp>
@@ -1954,19 +1957,86 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     auto outerwall = create_print_priority_combo(card_optimization_settings);
 
     auto plater = Slic3r::GUI::wxGetApp().plater();
+
+    // Read layer count, speed range, and volumetric rate range directly from
+    // the parsed G-code result. This works from both Prepare and Preview tabs
+    // and reflects actual G-code conditions (matching BambuStudio behavior).
     int layer_count = 0;
+    float gcode_min_speed = 0.0f;
+    float gcode_max_speed = 0.0f;
+    float gcode_min_vol_rate = 0.0f;
+    float gcode_max_vol_rate = 0.0f;
+
     if (plater) {
-        auto* canvas = plater->get_current_canvas3D();
-        if (canvas)
-            layer_count = (int)canvas->get_gcode_layers_zs().size();
+        GCodeProcessorResult* gcode_result = plater->get_partplate_list().get_current_slice_result();
+        if (gcode_result && !gcode_result->moves.empty()) {
+            unsigned int max_layer_id = 0;
+            float speed_min = std::numeric_limits<float>::max();
+            float speed_max = 0.0f;
+            float vol_min = std::numeric_limits<float>::max();
+            float vol_max = 0.0f;
+            bool found_extrusion = false;
+
+            for (const auto& move : gcode_result->moves) {
+                // Only consider extrusion moves
+                if (move.type != EMoveType::Extrude || move.extrusion_role == erNone)
+                    continue;
+
+                // Exclude support/wipe-tower moves from layer count — these can
+                // extend past the last object layer and would inflate the range.
+                // Speed/volumetric ranges include all extrusion roles since they
+                // represent actual printing conditions.
+                if (move.extrusion_role != erSupportMaterial &&
+                    move.extrusion_role != erSupportMaterialInterface &&
+                    move.extrusion_role != erSupportTransition &&
+                    move.extrusion_role != erWipeTower) {
+                    if (move.layer_id > max_layer_id)
+                        max_layer_id = move.layer_id;
+                }
+
+                found_extrusion = true;
+                if (move.feedrate > 0.0f) {
+                    speed_min = std::min(speed_min, move.feedrate);
+                    speed_max = std::max(speed_max, move.feedrate);
+                }
+
+                float vol_rate = move.volumetric_rate();
+                if (vol_rate > 0.0f) {
+                    vol_min = std::min(vol_min, vol_rate);
+                    vol_max = std::max(vol_max, vol_rate);
+                }
+            }
+
+            if (found_extrusion) {
+                layer_count = static_cast<int>(max_layer_id);
+                if (speed_min < std::numeric_limits<float>::max()) gcode_min_speed = speed_min;
+                if (speed_max > 0.0f) gcode_max_speed = speed_max;
+                if (vol_min < std::numeric_limits<float>::max()) gcode_min_vol_rate = vol_min;
+                if (vol_max > 0.0f) gcode_max_vol_rate = vol_max;
+            }
+        }
+
+        // Fallback: if no G-code result available, try Print objects
+        if (layer_count == 0) {
+            const auto& print = plater->fff_print();
+            for (const auto* obj : print.objects()) {
+                int obj_layers = static_cast<int>(obj->layers().size());
+                if (obj_layers > layer_count)
+                    layer_count = obj_layers;
+            }
+        }
     }
-    wxBoxSizer* layers_to_optimize_item = create_input_optimize_layers(card_optimization_settings, layer_count);
+
+    // Clamp to at least 2 so the default UI range ("2 to N") is always valid,
+    // even when the plate is unsliced or has only a single layer.
+    int effective_layer_count = std::max(layer_count, 2);
+    wxBoxSizer* layers_to_optimize_item = create_input_optimize_layers(card_optimization_settings, effective_layer_count);
 
     std::map<int, wxString> config_limits;
     config_limits[LIMITS_HELIO_DEFAULT] = _L("Helio default (recommended)");
     config_limits[LIMITS_SLICER_DEFAULT] = _L("Slicer default");
     auto limits = create_combo_item(card_optimization_settings, "limits", _L("Limits"), config_limits, LIMITS_HELIO_DEFAULT, LIMITS_DROPDOWN_WIDTH);
-    
+
     wxString limits_tooltip = _L("Set your own speed and flow rate limits - or rely on Helio's custom limit settings. With unsupported materials you need to supply your own data or rely on the slicer's built in data.");
     if (m_combo_items.find("limits") != m_combo_items.end()) {
         m_combo_items["limits"]->SetToolTip(limits_tooltip);
@@ -1980,9 +2050,15 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // velocity and volumetric speed fields
     auto double_min_checker = TextInputValChecker::CreateDoubleMinChecker(0);
 
-    // velocity — use slicer config defaults
-    float min_speed = 0.0;
-    float max_speed = 500.0;
+    // Use the min/max speed and volumetric rate read from the parsed G-code
+    // result above. These reflect actual printing conditions from the G-code.
+    float min_speed = gcode_min_speed;
+    float max_speed = gcode_max_speed;
+    float min_volumetric_speed = gcode_min_vol_rate;
+    float max_volumetric_speed = gcode_max_vol_rate;
+
+    // velocity — populated from parsed G-code; only sent to backend when
+    // "Slicer default" limits mode is selected (see wxEVT_COMBOBOX handler below)
     wxBoxSizer* min_velocity_item = create_input_item(panel_velocity_volumetric, "min_velocity", _L("Min Velocity"), wxT("mm/s"), { double_min_checker } );
     m_input_items["min_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(min_speed, 0)));
 
@@ -1990,8 +2066,6 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     m_input_items["max_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(max_speed, 0)));
 
     // volumetric speed — use slicer config defaults
-    float min_volumetric_speed = 0.0;
-    float max_volumetric_speed = 30.0;
     wxBoxSizer* min_volumetric_speed_item = create_input_item(panel_velocity_volumetric, "min_volumetric_speed", _L("Min Volumetric Speed"), wxT("mm\u00B3/s"), { double_min_checker });
     m_input_items["min_volumetric_speed"]->GetTextCtrl()->SetLabel(wxString::Format("%.2f", s_round(min_volumetric_speed, 2)));
 
