@@ -16,17 +16,17 @@
 
 # Helio Additive Features
 
-### Thermal Simulation Integration
+## Thermal Simulation Integration
 - Slice as usual or toggle on **"Slice with Helio"** to generate a full thermal simulation of your print.
 - View **layer time-dependent temperature** directly in the **Preview panel**, alongside standard slicer settings.
 - Get insight into thermal consistency, cooling behavior, and critical hotspots in your model.
 
-### Cloud-Based Processing
+## Cloud-Based Processing
 - Simulation is offloaded to the cloud for fast processing — no local compute needed.
 - Requires internet connection and a personal API key for usage.
 - Simulations are offered for free.
 
-### Experimental Features
+## Experimental Features
 - Integrated thermal overlays in the Preview tab.
 - Thermal results viewable layer by layer, road by road, or across the full print.
 
@@ -73,12 +73,6 @@ Download the **Windows Installer exe** for your preferred version from the [rele
         -  [Alternative Download Link Hosted by Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
         -  This file may already be available on your computer if you've installed visual studio.  Check the following location: `%VCINSTALLDIR%Redist\MSVC\v142`
     </details>
-
-Windows Package Manager
-
-```shell
-winget install --id=SoftFever.OrcaSlicer -e
-```
 
 ## Mac
 
