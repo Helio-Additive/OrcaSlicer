@@ -4,13 +4,13 @@
   <img alt="OrcaSlicer logo" src="resources/images/OrcaSlicer.png" width="15%" height="15%">
 </picture>
 
-# Helio Orca Slicer
+<h1>Helio Orca Slicer</h1>
 
-[![Build all](https://github.com/Helio-Additive/OrcaSlicer/actions/workflows/build_all.yml/badge.svg)](https://github.com/Helio-Additive/OrcaSlicer/actions)
+<a href="https://github.com/Helio-Additive/OrcaSlicer/actions"><img src="https://github.com/Helio-Additive/OrcaSlicer/actions/workflows/build_all.yml/badge.svg" alt="Build all"></a>
 
-A customized fork of [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) with **cloud-based thermal simulation** built right in.
+<p>A customized fork of <a href="https://github.com/OrcaSlicer/OrcaSlicer">OrcaSlicer</a> with <b>cloud-based thermal simulation</b> built right in.</p>
 
-This version adds Helio's physics-driven thermal simulation directly into your slicing workflow. Instantly visualize layer-by-layer thermal behavior and optimize for print reliability — no extra software needed.
+<p>This version adds Helio's physics-driven thermal simulation directly into your slicing workflow. Instantly visualize layer-by-layer thermal behavior and optimize for print reliability — no extra software needed.</p>
 
 </div>
 
@@ -52,7 +52,7 @@ For general OrcaSlicer settings, see the [upstream OrcaSlicer wiki](https://www.
 
 ## Stable Release
 
-📥 **[Download the Latest Stable Release](https://github.com/Helio-Additive/OrcaSlicer/releases)**
+📥 **[Download the Latest Stable Release](https://github.com/Helio-Additive/OrcaSlicer/releases/latest)**
 Visit the Helio OrcaSlicer releases page for the latest version with thermal simulation built in.
 
 # How to Install
