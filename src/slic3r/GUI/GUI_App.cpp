@@ -2995,7 +2995,7 @@ bool GUI_App::on_init_inner()
                 wxString tips = wxString::Format(_L("Click to download new version in default browser: %s"), version_str);
                 DownloadDialog dialog(this->mainframe,
                     tips,
-                    _L("Helio OrcaSlicer needs an upgrade"),
+                    _L("Helio Orca Slicer needs an upgrade"),
                     false,
                     wxCENTER | wxICON_INFORMATION);
                 dialog.SetExtendedMessage(description_text);
@@ -5403,6 +5403,10 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
             auto consider_release = [&](const boost::property_tree::ptree& node) {
                 auto tag_opt = node.get_optional<std::string>("tag_name");
                 if (!tag_opt)
+                    return;
+
+                // Skip draft releases (GitHub API returns them but they aren't published)
+                if (node.get_optional<bool>("draft").get_value_or(false))
                     return;
 
                 std::string tag = *tag_opt;
