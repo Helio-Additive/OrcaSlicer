@@ -4,92 +4,62 @@
   <img alt="OrcaSlicer logo" src="resources/images/OrcaSlicer.png" width="15%" height="15%">
 </picture>
 
-<a href="https://trendshift.io/repositories/15552" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15552" alt="OrcaSlicer%2FOrcaSlicer | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+<h1>Helio Orca Slicer</h1>
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/OrcaSlicer/OrcaSlicer)](https://github.com/OrcaSlicer/OrcaSlicer/stargazers) [![Build all](https://github.com/OrcaSlicer/OrcaSlicer/actions/workflows/build_all.yml/badge.svg?branch=main)](https://github.com/OrcaSlicer/OrcaSlicer/actions/workflows/build_all.yml)
+<a href="https://github.com/Helio-Additive/OrcaSlicer/actions"><img src="https://github.com/Helio-Additive/OrcaSlicer/actions/workflows/build_all.yml/badge.svg" alt="Build all"></a>
 
-OrcaSlicer: an open source Next-Gen Slicing Software for Precision 3D Prints.  
-Optimize your prints with ultra-fast slicing, intelligent support generation, and seamless printer compatibility—engineered for perfection.
-<h3>
+<p>A customized fork of <a href="https://github.com/OrcaSlicer/OrcaSlicer">OrcaSlicer</a> with <b>cloud-based thermal simulation</b> built right in.</p>
 
-# Official links and community
-
-#### Official Website:
-<a href="https://www.orcaslicer.com/" style="font-size:2em;">OrcaSlicer.com</a>
-
-#### Github Repository:
-<a href="https://github.com/OrcaSlicer/OrcaSlicer"><img src="https://img.shields.io/badge/OrcaSlicer-181717?style=flat&logo=github&logoColor=white" width="200" alt="GitHub Logo"/> </a>
-
-#### Follow us:
-<a href="https://twitter.com/real_OrcaSlicer"><img src="https://img.shields.io/badge/real__OrcaSlicer-000000?style=flat&logo=x&logoColor=white" width="200" alt="X Logo"/> </a>
-
-#### Join our Discord community:
-<a href="https://discord.gg/P4VE9UY9gJ"><img src="https://img.shields.io/badge/-Discord-5865F2?style=flat&logo=discord&logoColor=fff" width="200" alt="discord logo"/> </a>
-
-<table border="2" style="border-color: #ffa500; background-color:rgb(232, 220, 180); color: #856404;">
-<tr>
-<td>
-<strong>⚠️ CAUTION:</strong><br>
-Several clickbait and malicious websites, such as <b>orca-slicer[.]com</b> and <b>orcaslicer[.]net</b>, are pretending to be the official OrcaSlicer site. These sites may redirect you to dangerous downloads or contain misleading information.<br>
-<b>Our only official website is <a href="https://www.orcaslicer.com/">www.orcaslicer.com</a>.</b><br><br>
-If you come across any of these in search results, please <b>report them</b> as unsafe or phishing to help keep the community secure with:<br>
- - <a href="https://safebrowsing.google.com/safebrowsing/report_phish/">Google Safe Browsing</a><br>
- - <a href="https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site">Microsoft Security Intelligence</a><br>
- - <a href="https://ipthreat.net/tools/reportphishing">IPThreat</a>
-</td>
-</tr>
-</table>
+<p>This version adds Helio's physics-driven thermal simulation directly into your slicing workflow. Instantly visualize layer-by-layer thermal behavior and optimize for print reliability — no extra software needed.</p>
 
 </div>
 
-# Main features
+# Helio Additive Features
 
-- **[Advanced Calibration Tools](https://www.orcaslicer.com/wiki/Calibration)**  
-  Comprehensive suite: temperature towers, flow rate, retraction & more for optimal performance.
-- **[Precise Wall](https://www.orcaslicer.com/wiki/quality_settings_precision#precise-wall) and [Seam Control](https://www.orcaslicer.com/wiki/quality_settings_seam)**  
-  Adjust outer wall spacing and apply scarf seams to enhance print accuracy.
-- **[Sandwich Mode](https://www.orcaslicer.com/wiki/quality_settings_wall_and_surfaces#innerouterinner) and [Polyholes](https://www.orcaslicer.com/wiki/quality_settings_precision#polyholes) Support**  
-  Use varied infill [patterns](https://www.orcaslicer.com/wiki/strength_settings_patterns) and accurate hole shapes for improved clarity.
-- **[Overhang](https://www.orcaslicer.com/wiki/quality_settings_overhangs) and [Support Optimization](https://www.orcaslicer.com/wiki#support-settings)**  
-  Modify geometry for printable overhangs with precise support placement.
-- **[Granular Controls and Customization](https://www.orcaslicer.com/wiki#process-settings)**  
-  Fine-tune print speed, layer height, pressure, and temperature with precision.
-- **Network Printer Support**  
-  Seamless integration with Klipper, PrusaLink, and OctoPrint for remote control.
-- **[Mouse Ear Brims](https://www.orcaslicer.com/wiki/others_settings_brim) & [Adaptive Bed Mesh](https://www.orcaslicer.com/wiki/printer_basic_information_adaptive_bed_mesh)**  
-  Automatic brims and adaptive mesh calibration ensure consistent adhesion.
-- **User-Friendly Interface**  
-  Intuitive drag-and-drop design with pre-made profiles for popular printers.
-- **[Open-Source](https://github.com/OrcaSlicer/OrcaSlicer) & [Community Driven](https://discord.gg/P4VE9UY9gJ)**  
-  Regular updates fueled by continuous community contributions.
-- **Wide Printer Compatibility**  
-  Supports a broad range of printers: Bambu Lab, Prusa, Creality, Voron, and more.
-- Additional features can be found in the [change notes](https://github.com/OrcaSlicer/OrcaSlicer/releases/).
+## Thermal Simulation Integration
+- Slice as usual or toggle on **"Slice with Helio"** to generate a full thermal simulation of your print.
+- View **layer time-dependent temperature** directly in the **Preview panel**, alongside standard slicer settings.
+- Get insight into thermal consistency, cooling behavior, and critical hotspots in your model.
+
+## Cloud-Based Processing
+- Simulation is offloaded to the cloud for fast processing — no local compute needed.
+- Requires internet connection and a personal API key for usage.
+- Simulations are offered for free.
+
+## Experimental Features
+- Integrated thermal overlays in the Preview tab.
+- Thermal results viewable layer by layer, road by road, or across the full print.
+
+# How to Use Helio Simulation
+1. Slice your model as usual.
+2. Enable **"Slice with Helio"** before slicing.
+3. Once slicing and simulation complete, view the thermal results in the Preview panel.
+4. Toggle between regular preview parameters and thermal simulation overlays.
+
+For more information on reading and improving results, refer to the [Helio documentation](https://docs.helioadditive.com/en/slicers/orcaslicer/#how-to-interpret-thermal-index).
+
+# Setup
+
+**[View our guide on setting up supported printer and material profiles](https://docs.helioadditive.com/en/slicers/orcaslicer/#initial-set-up)**
 
 # Wiki
 
-The [wiki](https://www.orcaslicer.com/wiki) aims to provide a detailed explanation of the slicer settings, including how to maximize their use and how to calibrate and set up your printer.
+The [Helio OrcaSlicer wiki](https://wiki.helioadditive.com/en/orcaslicer) provides detailed documentation for this fork, including Helio-specific features and setup.
 
-- **[Access the wiki here](https://www.orcaslicer.com/wiki)**
-- **[Contribute to the wiki](https://www.orcaslicer.com/wiki/How-to-wiki)**
+For general OrcaSlicer settings, see the [upstream OrcaSlicer wiki](https://www.orcaslicer.com/wiki).
 
 # Download
 
 ## Stable Release
 
-📥 **[Download the Latest Stable Release](https://github.com/OrcaSlicer/OrcaSlicer/releases/latest)**  
-Visit our GitHub Releases page for the latest stable version of OrcaSlicer, recommended for most users.
+📥 **[Download the Latest Stable Release](https://github.com/Helio-Additive/OrcaSlicer/releases/latest)**
+Visit the Helio OrcaSlicer releases page for the latest version with thermal simulation built in.
 
-## Nightly Builds
-
-🌙 **[Download the Latest Nightly Build](https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/nightly-builds)**  
-Explore the latest developments in OrcaSlicer with our nightly builds. Feedback on these versions is highly appreciated.
-
-# How to install
+# How to Install
 
 ## Windows
 
-Download the **Windows Installer exe**  for your preferred version from the [releases page](https://github.com/OrcaSlicer/OrcaSlicer/releases).
+Download the **Windows Installer exe** for your preferred version from the [releases page](https://github.com/Helio-Additive/OrcaSlicer/releases).
 
  - *For convenience there is also a portable build available.*
     <details>
@@ -103,12 +73,6 @@ Download the **Windows Installer exe**  for your preferred version from the [rel
         -  [Alternative Download Link Hosted by Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
         -  This file may already be available on your computer if you've installed visual studio.  Check the following location: `%VCINSTALLDIR%Redist\MSVC\v142`
     </details>
-
-Windows Package Manager
-
-```shell
-winget install --id=SoftFever.OrcaSlicer -e
-```
 
 ## Mac
 
@@ -144,9 +108,15 @@ winget install --id=SoftFever.OrcaSlicer -e
 
 # How to Compile
 
-All updated build instructions for Windows, macOS, and Linux are now available on the official [OrcaSlicer Wiki - How to build](https://www.orcaslicer.com/wiki/How-to-build) page.
+For build instructions, see the [upstream OrcaSlicer Wiki - How to build](https://www.orcaslicer.com/wiki/How-to-build) page. The build process for this fork is the same.
 
-Please refer to the wiki to ensure you're following the latest and most accurate steps for your platform.
+# Official OrcaSlicer Community
+
+This fork is built on top of [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer). Stay connected with the upstream project:
+
+- **Website**: [orcaslicer.com](https://www.orcaslicer.com/)
+- **Twitter/X**: [@real_OrcaSlicer](https://twitter.com/real_OrcaSlicer)
+- **Discord**: [OrcaSlicer Discord](https://discord.gg/P4VE9UY9gJ)
 
 # Klipper Note
 
