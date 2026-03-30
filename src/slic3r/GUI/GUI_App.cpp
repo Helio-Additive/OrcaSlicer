@@ -2995,7 +2995,7 @@ bool GUI_App::on_init_inner()
                 wxString tips = wxString::Format(_L("Click to download new version in default browser: %s"), version_str);
                 DownloadDialog dialog(this->mainframe,
                     tips,
-                    _L("The Orca Slicer needs an upgrade"),
+                    _L("Helio Orca Slicer needs an upgrade"),
                     false,
                     wxCENTER | wxICON_INFORMATION);
                 dialog.SetExtendedMessage(description_text);
@@ -5405,8 +5405,17 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
                 if (!tag_opt)
                     return;
 
+                // Skip draft releases (GitHub API returns them but they aren't published)
+                if (node.get_optional<bool>("draft").get_value_or(false))
+                    return;
+
                 std::string tag = *tag_opt;
-                if (!tag.empty() && tag.front() == 'v')
+                // Strip Helio tag prefix (helio-v1.2.3 → 1.2.3)
+                const std::string helio_prefix = "helio-v";
+                if (tag.size() > helio_prefix.size() &&
+                    tag.compare(0, helio_prefix.size(), helio_prefix) == 0)
+                    tag.erase(0, helio_prefix.size());
+                else if (!tag.empty() && tag.front() == 'v')
                     tag.erase(0, 1);
 
                 Semver tag_version = get_version(tag, matcher);
