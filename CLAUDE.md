@@ -14,6 +14,13 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - Auto-creates sync PRs with changelog and Helio-relevant change reports
 - Uses `claude-work` label to flag items for automated triage
 
+### Issue Dedupe (`dedupe-issues.yml`)
+- Triggers on new issue opened or manual `workflow_dispatch` with issue number
+- Uses `anthropics/claude-code-base-action@beta` with `/dedupe` slash command
+- Requires `CLAUDE_CODE_OAUTH_TOKEN` secret configured in repo settings
+- Model: `claude-sonnet-4-6`
+- Logs events to Statsig (optional, skips if `STATSIG_API_KEY` not set)
+
 ### Upstream Watch (`helio-upstream-watch.yml`)
 - Monitors upstream for new tags/releases and creates tracking issues
 
