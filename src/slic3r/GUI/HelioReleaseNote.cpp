@@ -3614,7 +3614,7 @@ HelioSimulationResultsDialog::HelioSimulationResultsDialog(wxWindow *parent,
     bool has_speed_improvement = false;
     if (m_simulation.speedFactor && *m_simulation.speedFactor < 1.0 && m_original_print_time_seconds > 0) {
         // Calculate time for potentially optimizable sections (A)
-        // Sum times for: inner wall (erPerimeter), outer wall (erExternalPerimeter), 
+        // Sum times for: inner wall (erPerimeter), outer wall (erExternalPerimeter),
         // sparse infill (erInternalInfill), and internal solid infill (erSolidInfill)
         float optimizable_time = 0.0f;
         for (const auto& role_time : m_roles_times) {
@@ -3626,17 +3626,21 @@ HelioSimulationResultsDialog::HelioSimulationResultsDialog(wxWindow *parent,
                 optimizable_time += role_time.second;
             }
         }
-        
-        // Calculate time for optimizable sections after optimization (B)
-        // speedFactor < 1 means faster, so multiply to get reduced time
-        float optimized_optimizable_time = optimizable_time * static_cast<float>(*m_simulation.speedFactor);
-        
-        // Calculate final potential speed improved time (C) = original_time - A + B
-        float final_optimized_time = m_original_print_time_seconds - optimizable_time + optimized_optimizable_time;
-        
-        // Calculate improvement = original_time - C = A - B
-        float improvement_seconds = optimizable_time - optimized_optimizable_time;
-        
+
+        float improvement_seconds;
+        float final_optimized_time;
+        if (optimizable_time > 0) {
+            // Per-role calculation: apply speedFactor only to optimizable sections
+            float optimized_optimizable_time = optimizable_time * static_cast<float>(*m_simulation.speedFactor);
+            final_optimized_time = m_original_print_time_seconds - optimizable_time + optimized_optimizable_time;
+            improvement_seconds = optimizable_time - optimized_optimizable_time;
+        } else {
+            // Fallback when per-role times are unavailable (e.g. OrcaSlicer):
+            // apply speedFactor to the total print time
+            final_optimized_time = m_original_print_time_seconds * static_cast<float>(*m_simulation.speedFactor);
+            improvement_seconds = m_original_print_time_seconds - final_optimized_time;
+        }
+
         if (improvement_seconds > 0) {
             has_speed_improvement = true;
             int improvement_sec = static_cast<int>(improvement_seconds);
