@@ -310,6 +310,7 @@ void GCodeProcessor::TimeMachine::reset()
     g1_times_cache = std::vector<G1LinesCacheItem>();
     first_layer_time = 0.0f;
     prepare_time = 0.0f;
+    roles_time.fill(0.0f);
 }
 
 static void planner_forward_pass_kernel(const GCodeProcessor::TimeBlock& prev, GCodeProcessor::TimeBlock& curr)
@@ -427,6 +428,8 @@ void GCodeProcessor::TimeMachine::calculate_time(GCodeProcessorResult& result, P
         //BBS
         if (block.flags.prepare_stage)
             prepare_time += block_time;
+        if (!block.flags.prepare_stage)
+            roles_time[static_cast<size_t>(block.role)] += block_time;
 
         if (block.layer_id == 1)
             first_layer_time += block_time;
@@ -2631,6 +2634,19 @@ float GCodeProcessor::get_time(PrintEstimatedStatistics::ETimeMode mode) const
 float GCodeProcessor::get_prepare_time(PrintEstimatedStatistics::ETimeMode mode) const
 {
     return (mode < PrintEstimatedStatistics::ETimeMode::Count) ? m_time_processor.machines[static_cast<size_t>(mode)].prepare_time : 0.0f;
+}
+
+std::vector<std::pair<ExtrusionRole, float>> GCodeProcessor::get_roles_time(PrintEstimatedStatistics::ETimeMode mode) const
+{
+    std::vector<std::pair<ExtrusionRole, float>> ret;
+    if (mode < PrintEstimatedStatistics::ETimeMode::Count) {
+        for (size_t i = 0; i < m_time_processor.machines[static_cast<size_t>(mode)].roles_time.size(); ++i) {
+            float time = m_time_processor.machines[static_cast<size_t>(mode)].roles_time[i];
+            if (time > 0.0f)
+                ret.push_back({ static_cast<ExtrusionRole>(i), time });
+        }
+    }
+    return ret;
 }
 
 std::string GCodeProcessor::get_time_dhm(PrintEstimatedStatistics::ETimeMode mode) const
@@ -5863,6 +5879,7 @@ void GCodeProcessor::update_estimated_times_stats()
         data.time = get_time(mode);
         data.prepare_time = get_prepare_time(mode);
         data.custom_gcode_times = get_custom_gcode_times(mode, true);
+        data.roles_times = get_roles_time(mode);
     };
 
     update_mode(PrintEstimatedStatistics::ETimeMode::Normal);

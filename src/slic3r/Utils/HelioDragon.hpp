@@ -430,6 +430,7 @@ struct HelioPlateResult {
     // Simulation data
     HelioQuery::SimulationResult simulation_result;
     int original_print_time_seconds{0};
+    std::vector<std::pair<ExtrusionRole, float>> roles_times;
 
     // Optimization data
     int optimized_print_time_seconds{0};
@@ -442,6 +443,7 @@ struct HelioPlateResult {
         action = -1;
         simulation_result = HelioQuery::SimulationResult();
         original_print_time_seconds = 0;
+        roles_times.clear();
         optimized_print_time_seconds = 0;
         quality_mean_improvement.clear();
         quality_std_improvement.clear();
