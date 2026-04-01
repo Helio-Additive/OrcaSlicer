@@ -2636,7 +2636,7 @@ float GCodeProcessor::get_prepare_time(PrintEstimatedStatistics::ETimeMode mode)
     return (mode < PrintEstimatedStatistics::ETimeMode::Count) ? m_time_processor.machines[static_cast<size_t>(mode)].prepare_time : 0.0f;
 }
 
-std::vector<std::pair<ExtrusionRole, float>> GCodeProcessor::get_roles_time(PrintEstimatedStatistics::ETimeMode mode) const
+std::vector<std::pair<ExtrusionRole, float>> GCodeProcessor::get_roles_times(PrintEstimatedStatistics::ETimeMode mode) const
 {
     std::vector<std::pair<ExtrusionRole, float>> ret;
     if (mode < PrintEstimatedStatistics::ETimeMode::Count) {
@@ -5879,7 +5879,7 @@ void GCodeProcessor::update_estimated_times_stats()
         data.time = get_time(mode);
         data.prepare_time = get_prepare_time(mode);
         data.custom_gcode_times = get_custom_gcode_times(mode, true);
-        data.roles_times = get_roles_time(mode);
+        data.roles_times = get_roles_times(mode);
     };
 
     update_mode(PrintEstimatedStatistics::ETimeMode::Normal);

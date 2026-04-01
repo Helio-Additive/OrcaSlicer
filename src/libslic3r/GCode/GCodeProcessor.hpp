@@ -895,7 +895,7 @@ class Print;
         float get_prepare_time(PrintEstimatedStatistics::ETimeMode mode) const;
         std::string get_time_dhm(PrintEstimatedStatistics::ETimeMode mode) const;
         std::vector<std::pair<CustomGCode::Type, std::pair<float, float>>> get_custom_gcode_times(PrintEstimatedStatistics::ETimeMode mode, bool include_remaining) const;
-        std::vector<std::pair<ExtrusionRole, float>> get_roles_time(PrintEstimatedStatistics::ETimeMode mode) const;
+        std::vector<std::pair<ExtrusionRole, float>> get_roles_times(PrintEstimatedStatistics::ETimeMode mode) const;
 
         float get_first_layer_time(PrintEstimatedStatistics::ETimeMode mode) const;
 
