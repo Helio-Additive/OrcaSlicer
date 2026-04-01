@@ -2063,14 +2063,18 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                             std::string filename = m_gcode_result->filename;
                             HelioQuery::SimulationResult sim_result = check_simulation_progress_res.simulationResult;
 
+                            // Capture roles_times for calculating optimizable sections in time savings display
+                            auto roles_times = m_gcode_result->print_statistics.modes[0].roles_times;
+
                             // Store simulation result to current plate for later access (e.g., "View Summary" button)
-                            GUI::wxGetApp().plater()->CallAfter([sim_result, original_time_seconds]() {
+                            GUI::wxGetApp().plater()->CallAfter([sim_result, original_time_seconds, roles_times]() {
                                 auto* plate = GUI::wxGetApp().plater()->get_partplate_list().get_curr_plate();
                                 if (plate) {
                                     HelioPlateResult helio_result;
                                     helio_result.action = 0;  // Simulation
                                     helio_result.simulation_result = sim_result;
                                     helio_result.original_print_time_seconds = original_time_seconds;
+                                    helio_result.roles_times = roles_times;
                                     helio_result.is_valid = true;
                                     plate->set_helio_result(helio_result);
                                 }
@@ -2083,9 +2087,9 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                                                                    simulated_gcode_path, filename,
                                                                    notification_manager, rating_data);
 
-                            // OrcaSlicer doesn't have roles_times in Mode; pass empty
-                            GUI::wxGetApp().plater()->CallAfter([sim_result, original_time_seconds]() {
-                                GUI::HelioSimulationResultsDialog results_dlg(nullptr, sim_result, original_time_seconds);
+                            // Show simulation results dialog with time savings
+                            GUI::wxGetApp().plater()->CallAfter([sim_result, original_time_seconds, roles_times]() {
+                                GUI::HelioSimulationResultsDialog results_dlg(nullptr, sim_result, original_time_seconds, roles_times);
                                 results_dlg.ShowModal();
                             });
                             break;

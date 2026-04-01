@@ -309,6 +309,7 @@ void GCodeProcessor::TimeMachine::reset()
     blocks = std::vector<TimeBlock>();
     g1_times_cache = std::vector<G1LinesCacheItem>();
     first_layer_time = 0.0f;
+    roles_time.fill(0.0f);
     prepare_time = 0.0f;
 }
 
@@ -424,6 +425,7 @@ void GCodeProcessor::TimeMachine::calculate_time(GCodeProcessorResult& result, P
         time += double(block_time);
         result.moves[block.move_id].time[static_cast<size_t>(mode)] = block_time;
         gcode_time.cache += block_time;
+        roles_time[static_cast<size_t>(block.role)] += block_time;
         //BBS
         if (block.flags.prepare_stage)
             prepare_time += block_time;
@@ -2648,6 +2650,19 @@ std::vector<std::pair<CustomGCode::Type, std::pair<float, float>>> GCodeProcesso
             float remaining = include_remaining ? machine.time - total_time : 0.0f;
             ret.push_back({ type, { time, remaining } });
             total_time += time;
+        }
+    }
+    return ret;
+}
+
+std::vector<std::pair<ExtrusionRole, float>> GCodeProcessor::get_roles_time(PrintEstimatedStatistics::ETimeMode mode) const
+{
+    std::vector<std::pair<ExtrusionRole, float>> ret;
+    if (mode < PrintEstimatedStatistics::ETimeMode::Count) {
+        for (size_t i = 0; i < m_time_processor.machines[static_cast<size_t>(mode)].roles_time.size(); ++i) {
+            float time = m_time_processor.machines[static_cast<size_t>(mode)].roles_time[i];
+            if (time > 0.0f)
+                ret.push_back({ static_cast<ExtrusionRole>(i), time });
         }
     }
     return ret;
@@ -5863,6 +5878,7 @@ void GCodeProcessor::update_estimated_times_stats()
         data.time = get_time(mode);
         data.prepare_time = get_prepare_time(mode);
         data.custom_gcode_times = get_custom_gcode_times(mode, true);
+        data.roles_times = get_roles_time(mode);
     };
 
     update_mode(PrintEstimatedStatistics::ETimeMode::Normal);

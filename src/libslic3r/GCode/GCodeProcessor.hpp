@@ -57,12 +57,15 @@ class Print;
             float time;
             float prepare_time;
             std::vector<std::pair<CustomGCode::Type, std::pair<float, float>>> custom_gcode_times;
+            std::vector<std::pair<ExtrusionRole, float>> roles_times;
 
             void reset() {
                 time = 0.0f;
                 prepare_time = 0.0f;
                 custom_gcode_times.clear();
                 custom_gcode_times.shrink_to_fit();
+                roles_times.clear();
+                roles_times.shrink_to_fit();
             }
         };
 
@@ -538,6 +541,7 @@ class Print;
             std::vector<TimeBlock> blocks;
             std::vector<G1LinesCacheItem> g1_times_cache;
             float first_layer_time;
+            std::array<float, static_cast<size_t>(ExtrusionRole::erCount)> roles_time;
             std::vector<ActualSpeedMove> actual_speed_moves;
             //BBS: prepare stage time before print model, including start gcode time and mostly same with start gcode time
             float prepare_time;
@@ -890,6 +894,7 @@ class Print;
         float get_prepare_time(PrintEstimatedStatistics::ETimeMode mode) const;
         std::string get_time_dhm(PrintEstimatedStatistics::ETimeMode mode) const;
         std::vector<std::pair<CustomGCode::Type, std::pair<float, float>>> get_custom_gcode_times(PrintEstimatedStatistics::ETimeMode mode, bool include_remaining) const;
+        std::vector<std::pair<ExtrusionRole, float>> get_roles_time(PrintEstimatedStatistics::ETimeMode mode) const;
 
         float get_first_layer_time(PrintEstimatedStatistics::ETimeMode mode) const;
 
