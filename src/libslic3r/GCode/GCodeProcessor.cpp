@@ -418,7 +418,8 @@ void GCodeProcessor::TimeMachine::calculate_time(GCodeProcessorResult& result, P
     const size_t n_blocks_process = blocks.size() - keep_last_n_blocks;
     for (size_t i = 0; i < n_blocks_process; ++i) {
         const TimeBlock& block = blocks[i];
-        float block_time = block.time();
+        const float motion_time = block.time();
+        float block_time = motion_time;
         if (i == 0)
             block_time += additional_time;
 
@@ -429,7 +430,7 @@ void GCodeProcessor::TimeMachine::calculate_time(GCodeProcessorResult& result, P
         if (block.flags.prepare_stage)
             prepare_time += block_time;
         if (!block.flags.prepare_stage)
-            roles_time[static_cast<size_t>(block.role)] += block_time;
+            roles_time[static_cast<size_t>(block.role)] += motion_time;
 
         if (block.layer_id == 1)
             first_layer_time += block_time;

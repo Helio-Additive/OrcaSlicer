@@ -14,6 +14,7 @@
 #include <boost/thread.hpp>
 #include <wx/event.h>
 #include <chrono>
+#include <utility>
 
 #include "PrintHost.hpp"
 #include "libslic3r/PrintConfig.hpp"
