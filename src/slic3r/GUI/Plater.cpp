@@ -17448,7 +17448,8 @@ void Plater::show_helio_simulation_summary()
         // Simulation — show HelioSimulationResultsDialog
         HelioSimulationResultsDialog dlg(nullptr,
             result->simulation_result,
-            result->original_print_time_seconds);
+            result->original_print_time_seconds,
+            result->roles_times);
         dlg.ShowModal();
     } else if (result->action == 1) {
         // Optimization — show HelioRatingDialog
