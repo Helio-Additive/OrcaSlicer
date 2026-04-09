@@ -10529,9 +10529,13 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     }
 
     bool material_already_selected = false;
+    int unsupported_count = (int)all_filament_infos.size() - supported_count;
 
-    // Case: Multiple different supported materials — show HelioMixedFilamentDialog
-    if (extruders.size() > 1 && unique_supported_material_ids.size() > 1) {
+    // Case: Multiple extruders with mixed material support — show HelioMixedFilamentDialog
+    // Covers: (a) multiple different supported materials, or
+    // (b) a mix of supported and unsupported materials (user picks from supported ones)
+    if (extruders.size() > 1 && supported_count > 0 &&
+        (unique_supported_material_ids.size() > 1 || unsupported_count > 0)) {
         std::set<std::string> unique_display_types;
         for (const auto& info : all_filament_infos) {
             if (info.is_supported && !info.filament_type.empty())
@@ -10552,10 +10556,9 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
         }
     }
 
-    // Case: Some supported, some unsupported (same type)
-    int unsupported_count = (int)all_filament_infos.size() - supported_count;
+    // Fallback: All materials unsupported — show HelioUnsupportedFilamentsDialog for reference selection
     if (!material_already_selected && extruders.size() > 1 &&
-        supported_count > 0 && unsupported_count > 0 && unique_supported_material_ids.size() <= 1) {
+        supported_count == 0 && unsupported_count > 0) {
 
         std::vector<FilamentSupportInfo> unsupported_filaments;
         for (const auto& info : all_filament_infos) {
