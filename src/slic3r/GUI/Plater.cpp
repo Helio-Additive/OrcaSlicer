@@ -9790,8 +9790,7 @@ static std::pair<std::string, std::string> match_printer_tokens(
 class HelioMixedFilamentDialog : public DPIDialog {
 public:
     HelioMixedFilamentDialog(wxWindow* parent,
-                             const std::vector<FilamentSupportInfo>& filaments,
-                             const std::set<std::string>& unique_types)
+                             const std::vector<FilamentSupportInfo>& filaments)
         : DPIDialog(parent, wxID_ANY, _L("Multiple Filament Materials Detected"),
                    wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX)
         , m_filaments(filaments)
@@ -10546,14 +10545,8 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     if (extruders.size() > 1 &&
         (unique_supported_material_ids.size() > 1 ||
          (supported_count > 0 && unsupported_count > 0 && unique_filament_types.size() > 1))) {
-        std::set<std::string> unique_display_types;
-        for (const auto& info : all_filament_infos) {
-            if (!info.filament_type.empty())
-                unique_display_types.insert(info.filament_type);
-        }
-
         HelioMixedFilamentDialog mixed_dialog(static_cast<wxWindow*>(wxGetApp().mainframe),
-                                              all_filament_infos, unique_display_types);
+                                              all_filament_infos);
         mixed_dialog.ShowModal();
 
         int choice = mixed_dialog.get_user_choice();
