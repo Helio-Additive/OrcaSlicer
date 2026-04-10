@@ -10530,11 +10530,25 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
 
     bool material_already_selected = false;
 
-    // Case: Multiple different supported materials — show HelioMixedFilamentDialog
-    if (extruders.size() > 1 && unique_supported_material_ids.size() > 1) {
+    // Collect unique filament types across ALL materials (supported and unsupported)
+    std::set<std::string> unique_filament_types;
+    for (const auto& info : all_filament_infos) {
+        if (!info.filament_type.empty())
+            unique_filament_types.insert(info.filament_type);
+    }
+    int unsupported_count = (int)all_filament_infos.size() - supported_count;
+
+    // Case: Multiple different materials — show HelioMixedFilamentDialog
+    // Triggers when:
+    // 1. Multiple different supported materials (original behavior), OR
+    // 2. Mixed supported/unsupported materials of different types — enforces
+    //    single-material workflow by letting user pick one supported material
+    if (extruders.size() > 1 &&
+        (unique_supported_material_ids.size() > 1 ||
+         (supported_count > 0 && unsupported_count > 0 && unique_filament_types.size() > 1))) {
         std::set<std::string> unique_display_types;
         for (const auto& info : all_filament_infos) {
-            if (info.is_supported && !info.filament_type.empty())
+            if (!info.filament_type.empty())
                 unique_display_types.insert(info.filament_type);
         }
 
@@ -10553,9 +10567,8 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     }
 
     // Case: Some supported, some unsupported (same type)
-    int unsupported_count = (int)all_filament_infos.size() - supported_count;
     if (!material_already_selected && extruders.size() > 1 &&
-        supported_count > 0 && unsupported_count > 0 && unique_supported_material_ids.size() <= 1) {
+        supported_count > 0 && unsupported_count > 0 && unique_filament_types.size() <= 1) {
 
         std::vector<FilamentSupportInfo> unsupported_filaments;
         for (const auto& info : all_filament_infos) {
