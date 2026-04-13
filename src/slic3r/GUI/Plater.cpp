@@ -10512,6 +10512,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     // ===========================================================================
     std::vector<FilamentSupportInfo> all_filament_infos;
     std::set<std::string> unique_supported_material_ids;
+    std::set<std::string> unique_preset_names;
     int supported_count = 0;
 
     for (size_t i = 0; i < extruders.size(); ++i) {
@@ -10519,6 +10520,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
         if (extruder_idx >= 0 && extruder_idx < (int)preset_filaments.size()) {
             FilamentSupportInfo info = check_filament_helio_support(preset_filaments[extruder_idx], extruder_idx);
             all_filament_infos.push_back(info);
+            unique_preset_names.insert(info.preset_name);
             if (info.is_supported) {
                 supported_count++;
                 if (!info.material_id.empty())
@@ -10531,14 +10533,15 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     int unsupported_count = (int)all_filament_infos.size() - supported_count;
 
     // Case: Multiple different materials — show HelioMixedFilamentDialog
-    // Triggers when:
-    // 1. Multiple different supported materials (original behavior), OR
-    // 2. Mixed supported/unsupported materials (any type combination) — enforces
-    //    single-material workflow by letting user pick one supported material
-    //    from the project (not the full database)
-    if (extruders.size() > 1 &&
-        (unique_supported_material_ids.size() > 1 ||
-         (supported_count > 0 && unsupported_count > 0))) {
+    // Triggers when multiple extruders use different filament presets and at
+    // least one is supported.  Covers:
+    // 1. Multiple different supported materials (original behavior)
+    // 2. Mixed supported/unsupported materials (any type combination)
+    // 3. Same-type presets that map to the same material_id but are different
+    //    brands (e.g. "Bambu PLA Basic" + "Generic PLA") — previously slipped
+    //    through because unique_supported_material_ids.size() was 1
+    if (extruders.size() > 1 && unique_preset_names.size() > 1 &&
+        supported_count > 0) {
         HelioMixedFilamentDialog mixed_dialog(static_cast<wxWindow*>(wxGetApp().mainframe),
                                               all_filament_infos);
         mixed_dialog.ShowModal();
