@@ -10002,7 +10002,7 @@ public:
         option2_box->SetSizer(option2_sizer);
         main_sizer->Add(option2_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
 
-        // Option 3: Enable multimaterial optimisation
+        // Option 3: Enable multi-material optimization
         wxColour option3_bg = is_dark_mode ? wxColour(30, 40, 60) : wxColour("#E3F2FD");
         wxColour option3_border = is_dark_mode ? wxColour(66, 165, 245) : wxColour("#42A5F5");
         wxColour option3_text_color = is_dark_mode ? wxColour(240, 240, 240) : text_color;
@@ -10019,13 +10019,15 @@ public:
         option3_sizer->AddSpacer(wxWindowBase::FromDIP(12, this));
 
         Label* option3_title = new Label(option3_box, Label::Head_14,
-            _L("Option 3: Enable Multimaterial optimisation"));
+            _L("Option 3: Enable multi-material optimization"));
         option3_title->SetForegroundColour(option3_text_color);
         option3_sizer->Add(option3_title, 0, wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
         option3_sizer->AddSpacer(wxWindowBase::FromDIP(8, this));
 
-        Label* option3_desc = new Label(option3_box, Label::Body_13,
-            _L("Click third-party icon \u2192 Enable Helio Additive \u2192 Check Enable Multimaterial Support"), LB_AUTO_WRAP);
+        wxString option3_desc_text = _L("Click third-party icon") + wxString(L" \u2192 ")
+                                     + _L("Enable Helio Additive") + wxString(L" \u2192 ")
+                                     + _L("Check \"Experimental: Enable multi-material support\"");
+        Label* option3_desc = new Label(option3_box, Label::Body_13, option3_desc_text, LB_AUTO_WRAP);
         option3_desc->SetForegroundColour(option3_text_color);
         option3_desc->Wrap(wxWindowBase::FromDIP(440, this));
         option3_sizer->Add(option3_desc, 0, wxEXPAND | wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
