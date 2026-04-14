@@ -1,0 +1,105 @@
+name: Apply Issue 56 Patch
+
+on:
+  push:
+    branches: [fix/multimaterial-dialog-update]
+    paths: ['.github/workflows/apply-issue-56.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/multimaterial-dialog-update
+
+      - name: Apply code changes to Plater.cpp
+        run: |
+          python3 << 'PYEOF'
+          with open('src/slic3r/GUI/Plater.cpp', 'r') as f:
+              content = f.read()
+
+          # 1. Remove the "future update" message
+          old_block = """        Label* future_msg = new Label(this, Label::Body_13,
+              _L("True multi-material support will be added in a future update."), LB_AUTO_WRAP);
+          future_msg->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#6B6B6B")));
+          future_msg->Wrap(wxWindowBase::FromDIP(470, this));
+          main_sizer->Add(future_msg, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
+
+          // Option 1: Proceed with single filament"""
+          new_block = """        // Option 1: Proceed with single filament"""
+          content = content.replace(old_block, new_block)
+
+          # 2. Add Option 3 after Option 2
+          option3 = '''        // Option 3: Enable multimaterial optimisation
+          wxColour option3_bg = is_dark_mode ? wxColour(30, 40, 60) : wxColour("#E3F2FD");
+          wxColour option3_border = is_dark_mode ? wxColour(66, 165, 245) : wxColour("#42A5F5");
+          wxColour option3_text_color = is_dark_mode ? wxColour(240, 240, 240) : text_color;
+
+          StaticBox* option3_box = new StaticBox(this, wxID_ANY, wxDefaultPosition,
+                                                 wxSize(wxWindowBase::FromDIP(470, this), -1));
+          option3_box->SetBackgroundColor(StateColor(std::make_pair(option3_bg, (int)StateColor::Normal)));
+          option3_box->SetBackgroundColour(option3_bg);
+          option3_box->SetBorderColor(StateColor(std::make_pair(option3_border, (int)StateColor::Normal)));
+          option3_box->SetBorderWidth(1);
+          option3_box->SetCornerRadius(wxWindowBase::FromDIP(6, this));
+
+          wxBoxSizer* option3_sizer = new wxBoxSizer(wxVERTICAL);
+          option3_sizer->AddSpacer(wxWindowBase::FromDIP(12, this));
+
+          Label* option3_title = new Label(option3_box, Label::Head_14,
+              _L("Option 3: Enable Multimaterial optimisation"));
+          option3_title->SetForegroundColour(option3_text_color);
+          option3_sizer->Add(option3_title, 0, wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
+          option3_sizer->AddSpacer(wxWindowBase::FromDIP(8, this));
+
+          Label* option3_desc = new Label(option3_box, Label::Body_13,
+              _L("Click third-party icon \\u2192 Enable Helio Additive \\u2192 Check Enable Multimaterial Support"), LB_AUTO_WRAP);
+          option3_desc->SetForegroundColour(option3_text_color);
+          option3_desc->Wrap(wxWindowBase::FromDIP(440, this));
+          option3_sizer->Add(option3_desc, 0, wxEXPAND | wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
+          option3_sizer->AddSpacer(wxWindowBase::FromDIP(12, this));
+
+          option3_box->SetSizer(option3_sizer);
+          main_sizer->Add(option3_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
+'''
+
+          anchor = '''        option2_box->SetSizer(option2_sizer);
+          main_sizer->Add(option2_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
+
+          SetSizerAndFit(main_sizer);'''
+          replacement = '''        option2_box->SetSizer(option2_sizer);
+          main_sizer->Add(option2_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
+
+''' + option3 + '''
+          SetSizerAndFit(main_sizer);'''
+          content = content.replace(anchor, replacement)
+
+          with open('src/slic3r/GUI/Plater.cpp', 'w') as f:
+              f.write(content)
+          print('Patch applied successfully')
+          PYEOF
+
+      - name: Verify changes
+        run: git diff --stat
+
+      - name: Commit and push
+        run: |
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git rm .github/workflows/apply-issue-56.yml
+          git add src/slic3r/GUI/Plater.cpp
+          git commit -m "Update multimaterial rerouting dialog: remove outdated text, add Option 3
+
+          - Remove 'True multi-material support will be added in a future update'
+            subtext which is no longer accurate
+          - Add Option 3 card directing users to enable multimaterial optimisation
+            via third-party icon > Enable Helio Additive > Enable Multimaterial Support
+
+          Closes #56
+
+          https://claude.ai/code/session_01UXqPcVQCq1oAXgUGY72jeA"
+          git push
