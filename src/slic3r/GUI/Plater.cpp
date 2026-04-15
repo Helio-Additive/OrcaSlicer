@@ -9790,8 +9790,7 @@ static std::pair<std::string, std::string> match_printer_tokens(
 class HelioMixedFilamentDialog : public DPIDialog {
 public:
     HelioMixedFilamentDialog(wxWindow* parent,
-                             const std::vector<FilamentSupportInfo>& filaments,
-                             const std::set<std::string>& unique_types)
+                             const std::vector<FilamentSupportInfo>& filaments)
         : DPIDialog(parent, wxID_ANY, _L("Multiple Filament Materials Detected"),
                    wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX)
         , m_filaments(filaments)
@@ -10541,6 +10540,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     // ===========================================================================
     std::vector<FilamentSupportInfo> all_filament_infos;
     std::set<std::string> unique_supported_material_ids;
+    std::set<std::string> unique_preset_names;
     int supported_count = 0;
 
     for (size_t i = 0; i < extruders.size(); ++i) {
@@ -10548,6 +10548,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
         if (extruder_idx >= 0 && extruder_idx < (int)preset_filaments.size()) {
             FilamentSupportInfo info = check_filament_helio_support(preset_filaments[extruder_idx], extruder_idx);
             all_filament_infos.push_back(info);
+            unique_preset_names.insert(info.preset_name);
             if (info.is_supported) {
                 supported_count++;
                 if (!info.material_id.empty())
@@ -10557,17 +10558,20 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     }
 
     bool material_already_selected = false;
+    int unsupported_count = (int)all_filament_infos.size() - supported_count;
 
-    // Case: Multiple different supported materials — show HelioMixedFilamentDialog
-    if (extruders.size() > 1 && unique_supported_material_ids.size() > 1) {
-        std::set<std::string> unique_display_types;
-        for (const auto& info : all_filament_infos) {
-            if (info.is_supported && !info.filament_type.empty())
-                unique_display_types.insert(info.filament_type);
-        }
-
+    // Case: Multiple different materials — show HelioMixedFilamentDialog
+    // Triggers when multiple extruders use different filament presets and at
+    // least one is supported.  Covers:
+    // 1. Multiple different supported materials (original behavior)
+    // 2. Mixed supported/unsupported materials (any type combination)
+    // 3. Same-type presets that map to the same material_id but are different
+    //    brands (e.g. "Bambu PLA Basic" + "Generic PLA") — previously slipped
+    //    through because unique_supported_material_ids.size() was 1
+    if (extruders.size() > 1 && unique_preset_names.size() > 1 &&
+        supported_count > 0) {
         HelioMixedFilamentDialog mixed_dialog(static_cast<wxWindow*>(wxGetApp().mainframe),
-                                              all_filament_infos, unique_display_types);
+                                              all_filament_infos);
         mixed_dialog.ShowModal();
 
         int choice = mixed_dialog.get_user_choice();
@@ -10577,59 +10581,6 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
             material_already_selected = true;
         } else {
             return -1;
-        }
-    }
-
-    // Case: Some supported, some unsupported (same type)
-    int unsupported_count = (int)all_filament_infos.size() - supported_count;
-    if (!material_already_selected && extruders.size() > 1 &&
-        supported_count > 0 && unsupported_count > 0 && unique_supported_material_ids.size() <= 1) {
-
-        std::vector<FilamentSupportInfo> unsupported_filaments;
-        for (const auto& info : all_filament_infos) {
-            if (!info.is_supported)
-                unsupported_filaments.push_back(info);
-        }
-
-        std::string first_unsupported_name = unsupported_filaments[0].preset_name;
-        size_t atPos = first_unsupported_name.find('@');
-        std::string target_name = (atPos != std::string::npos) ? first_unsupported_name.substr(0, atPos) : first_unsupported_name;
-        boost::trim(target_name);
-
-        std::vector<std::string> keywords = extract_material_keywords(target_name);
-        std::vector<HelioQuery::SupportedData> similar_materials = find_similar_materials(target_name, keywords);
-
-        std::string default_material_id;
-        for (const auto& info : all_filament_infos) {
-            if (info.is_supported && !info.material_id.empty()) {
-                default_material_id = info.material_id;
-                break;
-            }
-        }
-
-        if (!similar_materials.empty()) {
-            HelioUnsupportedFilamentsDialog unsupported_dialog(
-                static_cast<wxWindow*>(wxGetApp().mainframe),
-                unsupported_filaments, similar_materials, default_material_id);
-            unsupported_dialog.ShowModal();
-
-            int choice = unsupported_dialog.get_user_choice();
-            if (choice == 1) {
-                material_id = unsupported_dialog.get_selected_material_id();
-                helio_using_reference_material = true;
-                material_already_selected = true;
-            } else if (choice == 3) {
-                // Refresh succeeded — all materials now supported, re-check to get IDs
-                material_already_selected = false;
-            } else {
-                return -1;
-            }
-        } else {
-            if (!default_material_id.empty()) {
-                material_id = default_material_id;
-                helio_using_reference_material = true;
-                material_already_selected = true;
-            }
         }
     }
 
