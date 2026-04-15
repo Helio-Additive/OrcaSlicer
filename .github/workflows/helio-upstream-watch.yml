@@ -55,8 +55,11 @@ jobs:
             NEW_TAGS="None"
           fi
 
-          # Commits on main since last release
-          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          # Commits on main since last release (exclude prereleases — git's
+          # version:refname sort ranks e.g. v2.3.2-rc2 above v2.3.2 otherwise)
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
+            | grep -Ev -- '-(alpha|beta|rc|pre|dev)([0-9]+)?$' \
+            | head -1)
           MAIN_COMMITS=$(git rev-list --count "$LATEST_TAG"..upstream/main 2>/dev/null || echo "unknown")
 
           # Active release branches

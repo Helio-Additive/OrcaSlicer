@@ -77,8 +77,12 @@ jobs:
             BRANCH_NAME="helio-upstream-main-$(date '+%Y-%m-%d')-${SHORT_SHA}"
             TRACKING_TAG="helio-last-synced-main"
           else
-            # Find latest upstream v* tag
-            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+            # Find latest upstream stable v* tag (exclude alpha/beta/rc/pre/dev
+            # prereleases — git's version:refname sort otherwise ranks e.g.
+            # v2.3.2-rc2 above v2.3.2, causing stable releases to be missed)
+            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
+              | grep -Ev -- '-(alpha|beta|rc|pre|dev)([0-9]+)?$' \
+              | head -1)
             if [ -z "$LATEST_TAG" ]; then
               echo "No upstream release tags found"
               exit 1
