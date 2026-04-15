@@ -87,7 +87,7 @@ jobs:
               | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)
             if [ -z "$LATEST_TAG" ]; then
-              echo "No upstream release tags found"
+              echo "No stable upstream release tags found" >&2
               exit 1
             fi
             SYNC_REF="$LATEST_TAG"
