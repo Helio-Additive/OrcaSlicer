@@ -9857,12 +9857,6 @@ public:
         warning_box->SetSizer(warning_sizer);
         main_sizer->Add(warning_box, 0, wxALL, wxWindowBase::FromDIP(15, this));
 
-        Label* future_msg = new Label(this, Label::Body_13,
-            _L("True multi-material support will be added in a future update."), LB_AUTO_WRAP);
-        future_msg->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#6B6B6B")));
-        future_msg->Wrap(wxWindowBase::FromDIP(470, this));
-        main_sizer->Add(future_msg, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
-
         // Option 1: Proceed with single filament
         StaticBox* option1_box = new StaticBox(this, wxID_ANY, wxDefaultPosition,
                                                wxSize(wxWindowBase::FromDIP(470, this), -1));
@@ -10006,6 +10000,40 @@ public:
 
         option2_box->SetSizer(option2_sizer);
         main_sizer->Add(option2_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
+
+        // Option 3: Enable multi-material optimization
+        wxColour option3_bg = is_dark_mode ? wxColour(30, 40, 60) : wxColour("#E3F2FD");
+        wxColour option3_border = is_dark_mode ? wxColour(66, 165, 245) : wxColour("#42A5F5");
+        wxColour option3_text_color = is_dark_mode ? wxColour(240, 240, 240) : text_color;
+
+        StaticBox* option3_box = new StaticBox(this, wxID_ANY, wxDefaultPosition,
+                                               wxSize(wxWindowBase::FromDIP(470, this), -1));
+        option3_box->SetBackgroundColor(StateColor(std::make_pair(option3_bg, (int)StateColor::Normal)));
+        option3_box->SetBackgroundColour(option3_bg);
+        option3_box->SetBorderColor(StateColor(std::make_pair(option3_border, (int)StateColor::Normal)));
+        option3_box->SetBorderWidth(1);
+        option3_box->SetCornerRadius(wxWindowBase::FromDIP(6, this));
+
+        wxBoxSizer* option3_sizer = new wxBoxSizer(wxVERTICAL);
+        option3_sizer->AddSpacer(wxWindowBase::FromDIP(12, this));
+
+        Label* option3_title = new Label(option3_box, Label::Head_14,
+            _L("Option 3: Enable multi-material optimization"));
+        option3_title->SetForegroundColour(option3_text_color);
+        option3_sizer->Add(option3_title, 0, wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
+        option3_sizer->AddSpacer(wxWindowBase::FromDIP(8, this));
+
+        wxString option3_desc_text = _L("Click third-party icon") + wxString(L" \u2192 ")
+                                     + _L("Enable Helio Additive") + wxString(L" \u2192 ")
+                                     + _L("Check \"Experimental: Enable multi-material support\"");
+        Label* option3_desc = new Label(option3_box, Label::Body_13, option3_desc_text, LB_AUTO_WRAP);
+        option3_desc->SetForegroundColour(option3_text_color);
+        option3_desc->Wrap(wxWindowBase::FromDIP(440, this));
+        option3_sizer->Add(option3_desc, 0, wxEXPAND | wxLEFT | wxRIGHT, wxWindowBase::FromDIP(16, this));
+        option3_sizer->AddSpacer(wxWindowBase::FromDIP(12, this));
+
+        option3_box->SetSizer(option3_sizer);
+        main_sizer->Add(option3_box, 0, wxLEFT | wxRIGHT | wxBOTTOM, wxWindowBase::FromDIP(15, this));
 
         SetSizerAndFit(main_sizer);
         {
