@@ -604,7 +604,7 @@ void HelioQuery::optimization_feedback(const std::string helio_api_url, const st
 
     query_body = boost::str(boost::format(query_body)
         % optimization_id
-        % rating
+        % float_to_string_decimal_point(rating)
         % comment);
     auto http = Http::post(helio_api_url);
 
@@ -1213,15 +1213,15 @@ std::string HelioQuery::generate_simulation_graphql_query(const std::string &gco
     std::vector<std::string> settings_fields;
 
     if (temperatureStabilizationHeight != -1) {
-        settings_fields.push_back(boost::str(boost::format(R"(                    "temperatureStabilizationHeight": %1%)") % temperatureStabilizationHeight));
+        settings_fields.push_back(R"(                    "temperatureStabilizationHeight": )" + float_to_string_decimal_point(temperatureStabilizationHeight));
     }
 
     if (airTemperatureAboveBuildPlate != -1) {
-        settings_fields.push_back(boost::str(boost::format(R"(                    "airTemperatureAboveBuildPlate": %1%)") % airTemperatureAboveBuildPlate));
+        settings_fields.push_back(R"(                    "airTemperatureAboveBuildPlate": )" + float_to_string_decimal_point(airTemperatureAboveBuildPlate));
     }
 
     if (stabilizedAirTemperature != -1) {
-        settings_fields.push_back(boost::str(boost::format(R"(                    "stabilizedAirTemperature": %1%)") % stabilizedAirTemperature));
+        settings_fields.push_back(R"(                    "stabilizedAirTemperature": )" + float_to_string_decimal_point(stabilizedAirTemperature));
     }
 
     std::string settings_block;
@@ -1269,15 +1269,15 @@ std::string HelioQuery::generate_optimization_graphql_query(const std::string& g
     // Step 1.SimulationSettingsInput
     std::vector<std::string> simulation_fields;
     if (temperatureStabilizationHeight != -1) {
-        simulation_fields.push_back(boost::str(boost::format(R"("temperatureStabilizationHeight": %1%)") % temperatureStabilizationHeight));
+        simulation_fields.push_back(R"("temperatureStabilizationHeight": )" + float_to_string_decimal_point(temperatureStabilizationHeight));
     }
-    
+
     if (airTemperatureAboveBuildPlate != -1) {
-        simulation_fields.push_back(boost::str(boost::format(R"("airTemperatureAboveBuildPlate": %1%)") % airTemperatureAboveBuildPlate));
+        simulation_fields.push_back(R"("airTemperatureAboveBuildPlate": )" + float_to_string_decimal_point(airTemperatureAboveBuildPlate));
     }
 
     if (stabilizedAirTemperature != -1) {
-        simulation_fields.push_back(boost::str(boost::format(R"("stabilizedAirTemperature": %1%)") % stabilizedAirTemperature));
+        simulation_fields.push_back(R"("stabilizedAirTemperature": )" + float_to_string_decimal_point(stabilizedAirTemperature));
     }
 
     std::string simulation_block = boost::join(simulation_fields, ",\n");
@@ -1286,28 +1286,25 @@ std::string HelioQuery::generate_optimization_graphql_query(const std::string& g
     std::vector<std::string> optimization_fields;
 
     if (useOldMethod) {
-        // OLD METHOD: Use optimizeOuterwall boolean (fallback when API print priority options unavailable)
-        optimization_fields.push_back(boost::str(boost::format(R"("optimizeOuterwall": %1%)")
-            % (optimizeOuterwall ? "true" : "false")));
+        optimization_fields.push_back(std::string(R"("optimizeOuterwall": )") + (optimizeOuterwall ? "true" : "false"));
     } else if (!printPriority.empty()) {
-        // NEW METHOD: Use printPriority string
-        optimization_fields.push_back(boost::str(boost::format(R"("printPriority": "%1%")") % printPriority));
+        optimization_fields.push_back(R"("printPriority": ")" + printPriority + R"(")");
     }
 
     if (minVelocity != -1) {
-        optimization_fields.push_back(boost::str(boost::format(R"("minVelocity": %1%)") % minVelocity));
+        optimization_fields.push_back(R"("minVelocity": )" + float_to_string_decimal_point(minVelocity));
     }
 
     if (maxVelocity != -1) {
-        optimization_fields.push_back(boost::str(boost::format(R"("maxVelocity": %1%)") % maxVelocity));
+        optimization_fields.push_back(R"("maxVelocity": )" + float_to_string_decimal_point(maxVelocity));
     }
-    
+
     if (minExtruderFlowRate != -1) {
-        optimization_fields.push_back(boost::str(boost::format(R"("minExtruderFlowRate": %1%)") % minExtruderFlowRate));
+        optimization_fields.push_back(R"("minExtruderFlowRate": )" + float_to_string_decimal_point(minExtruderFlowRate));
     }
-    
+
     if (maxExtruderFlowRate != -1) {
-        optimization_fields.push_back(boost::str(boost::format(R"("maxExtruderFlowRate": %1%)") % maxExtruderFlowRate));
+        optimization_fields.push_back(R"("maxExtruderFlowRate": )" + float_to_string_decimal_point(maxExtruderFlowRate));
     }
     
     optimization_fields.push_back(R"("residualStrategySettings": {"strategy": "LINEAR"})");
