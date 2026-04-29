@@ -3,6 +3,7 @@
 #ifdef _WIN32
     #include <charconv>
 #endif
+#include <locale>
 #include <stdexcept>
 
 #include <fast_float/fast_float.h>
