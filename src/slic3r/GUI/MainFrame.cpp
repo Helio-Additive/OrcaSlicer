@@ -1856,7 +1856,6 @@ wxBoxSizer* MainFrame::create_side_tools()
     m_print_option_btn->Enable();
     sizer->Add(0, 0, 1, wxEXPAND, 0);
     sizer->Add(expand_program_holder, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(4));
-    sizer->Add(FromDIP(15), 0, 0, 0, 0);
     sizer->Add(slice_panel);
     sizer->Add(FromDIP(15), 0, 0, 0, 0);
     sizer->Add(print_panel);
