@@ -152,6 +152,16 @@ jobs:
             exit 0
           fi
 
+          # If the sync target is already an ancestor of HEAD, the merge was
+          # done out-of-band (e.g. a manual PR).  Update the tracking tag and skip.
+          if git merge-base --is-ancestor "$SYNC_SHA" HEAD; then
+            echo "Target $SYNC_LABEL ($SYNC_SHA) is already merged into HEAD — updating tracking tag and skipping"
+            git tag -f "$TRACKING_TAG" "$SYNC_SHA"
+            git push origin "$TRACKING_TAG" --force
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
@@ -269,7 +279,11 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
         run: |
           git merge --abort
-          git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
+          BRANCH="${{ steps.sync_branch.outputs.branch }}"
+          # Delete any existing remote branch first — previous runs may have
+          # created it, and branch-protection rules block --force-with-lease.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git push origin "$BRANCH"
 
       - name: Handle merge conflicts
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
