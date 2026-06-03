@@ -280,9 +280,22 @@ jobs:
         run: |
           git merge --abort
           BRANCH="${{ steps.sync_branch.outputs.branch }}"
-          # Delete any existing remote branch first — previous runs may have
-          # created it, and branch-protection rules block --force-with-lease.
-          git push origin --delete "$BRANCH" 2>/dev/null || true
+          LOCAL_TIP=$(git rev-parse HEAD)
+          REMOTE_TIP=$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')
+
+          if [ -n "$REMOTE_TIP" ]; then
+            if [ "$REMOTE_TIP" = "$LOCAL_TIP" ]; then
+              echo "Remote branch '$BRANCH' already at same commit — skipping push."
+              exit 0
+            fi
+            # If someone pushed conflict-resolution commits on top, don't clobber them.
+            if git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP"; then
+              echo "::warning::Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipping to avoid losing work."
+              exit 0
+            fi
+            # Remote is at a stale commit from a previous run — safe to replace.
+            git push origin --delete "$BRANCH"
+          fi
           git push origin "$BRANCH"
 
       - name: Handle merge conflicts
