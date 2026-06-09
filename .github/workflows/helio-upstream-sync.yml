@@ -162,6 +162,22 @@ jobs:
             exit 0
           fi
 
+          # Handle squash merges: the ancestor check above fails when a PR was
+          # squash-merged because the original upstream commit is not in the
+          # history.  Try a trial merge — if it succeeds with no diff, the
+          # content is already incorporated.
+          if git merge --no-commit --no-ff "$SYNC_SHA" 2>/dev/null; then
+            if git diff --cached --quiet 2>/dev/null; then
+              echo "Target $SYNC_LABEL already incorporated (squash merge detected) — updating tracking tag and skipping"
+              git merge --abort 2>/dev/null || git reset --hard HEAD
+              git tag -f "$TRACKING_TAG" "$SYNC_SHA"
+              git push origin "$TRACKING_TAG" --force
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+
           echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
@@ -293,10 +309,13 @@ jobs:
               echo "::warning::Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipping to avoid losing work."
               exit 0
             fi
-            # Remote is at a stale commit from a previous run — safe to replace.
-            git push origin --delete "$BRANCH"
+            # Remote is at a stale commit from a previous run — force-push to
+            # replace it.  Using --force avoids the need to delete the branch
+            # first, which fails when branch protection rules block deletion.
+            git push origin "$BRANCH" --force
+          else
+            git push origin "$BRANCH"
           fi
-          git push origin "$BRANCH"
 
       - name: Handle merge conflicts
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
