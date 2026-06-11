@@ -2,6 +2,15 @@
 
 > Auto-generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2`
 > This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
+> Updated for the v2.4.0-beta upstream sync: upstream added `acceleration` and `jerk`
+> visualization fields that sit **between** `pressure_advance` and the Helio
+> `thermal_index_*` fields in `PathVertex` (libvgcode) and `MoveVertex` (GCodeProcessor).
+> All positional aggregate initializers (Rule 5) must keep that order:
+> `..., pressure_advance, acceleration, jerk, thermal_index_mean, thermal_index_min, thermal_index_max`.
+> The `EViewType` enum likewise orders `Acceleration, Jerk` before `ThermalIndexMean/Min/Max`.
+> Also note: v2.4.0 refactored `GCodeViewer.cpp` tooltips into a `properties_rows`
+> vector and moved the status-bar text into a `detail_buf` switch in
+> `render_position_window()` — the Helio TI rows/cases live there now.
 
 ## Stats
 - **64 files changed**: 32 new, 32 modified, 0 deleted
