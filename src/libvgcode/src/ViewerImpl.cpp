@@ -1516,6 +1516,7 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     case EViewType::Jerk:
     {
         return m_jerk_range.get_color_at(v.jerk);
+    }
 // Helio: Thermal index visualization
     case EViewType::ThermalIndexMean:
     {

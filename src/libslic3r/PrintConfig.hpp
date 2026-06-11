@@ -76,11 +76,6 @@ enum class WipeTowerType {
     Type2,
 };
 
-enum class WipeTowerType {
-    Type1,
-    Type2,
-};
-
 enum PrintHostType {
     htPrusaLink, htPrusaConnect, htOctoPrint, htDuet, htFlashAir, htAstroBox, htRepetier, htMKS, htESP3D, htCrealityPrint, htObico, htFlashforge, htSimplyPrint, htElegooLink, ht3DPrinterOS, htMoonraker
 };
