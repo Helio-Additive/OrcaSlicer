@@ -9507,6 +9507,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
 
         // Reload the preview with the new gcode result and switch to preview tab
         preview->reload_print();
+        wxGetApp().mainframe->select_tab(MainFrame::tpPreview);
         set_current_panel(preview, true);
 
         // Switch to Thermal Index view if helio data is available

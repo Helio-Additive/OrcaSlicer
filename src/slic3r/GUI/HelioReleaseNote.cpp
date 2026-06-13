@@ -184,10 +184,16 @@ void HelioStatementDialog::on_confirm(wxMouseEvent& e)
     show_pat_page();
     request_pat();
 
-    // Show the Helio button in main window immediately (mirrors on_uninstall hide logic)
-    if (wxGetApp().mainframe->expand_program_holder) {
-        wxGetApp().mainframe->expand_program_holder->ShowExpandButton(wxGetApp().mainframe->expand_helio_id, true);
-        wxGetApp().mainframe->Layout();
+    // Show the Helio button in main window — deferred via CallAfter to avoid
+    // lifecycle issues when this dialog is shown from inside another modal.
+    if (wxGetApp().mainframe) {
+        wxGetApp().mainframe->CallAfter([]{
+            auto* mf = wxGetApp().mainframe;
+            if (mf && mf->expand_program_holder) {
+                mf->expand_program_holder->ShowExpandButton(mf->expand_helio_id, true);
+                mf->Layout();
+            }
+        });
     }
 
     Layout();
@@ -2061,17 +2067,17 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // velocity — populated from parsed G-code; only sent to backend when
     // "Slicer default" limits mode is selected (see wxEVT_COMBOBOX handler below)
     wxBoxSizer* min_velocity_item = create_input_item(panel_velocity_volumetric, "min_velocity", _L("Min Velocity"), wxT("mm/s"), { double_min_checker } );
-    m_input_items["min_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(min_speed, 0)));
+    m_input_items["min_velocity"]->GetTextCtrl()->SetValue(wxString::Format("%.0f", s_round(min_speed, 0)));
 
     wxBoxSizer* max_velocity_item = create_input_item(panel_velocity_volumetric, "max_velocity", _L("Max Velocity"), wxT("mm/s"), { double_min_checker });
-    m_input_items["max_velocity"]->GetTextCtrl()->SetLabel(wxString::Format("%.0f", s_round(max_speed, 0)));
+    m_input_items["max_velocity"]->GetTextCtrl()->SetValue(wxString::Format("%.0f", s_round(max_speed, 0)));
 
     // volumetric speed — use slicer config defaults
     wxBoxSizer* min_volumetric_speed_item = create_input_item(panel_velocity_volumetric, "min_volumetric_speed", _L("Min Volumetric Speed"), wxT("mm\u00B3/s"), { double_min_checker });
-    m_input_items["min_volumetric_speed"]->GetTextCtrl()->SetLabel(wxString::Format("%.2f", s_round(min_volumetric_speed, 2)));
+    m_input_items["min_volumetric_speed"]->GetTextCtrl()->SetValue(wxString::Format("%.2f", s_round(min_volumetric_speed, 2)));
 
     wxBoxSizer* max_volumetric_speed_item = create_input_item(panel_velocity_volumetric, "max_volumetric_speed", _L("Max Volumetric Speed"), wxT("mm\u00B3/s"), { double_min_checker });
-    m_input_items["max_volumetric_speed"]->GetTextCtrl()->SetLabel(wxString::Format("%.2f", s_round(max_volumetric_speed, 2)));
+    m_input_items["max_volumetric_speed"]->GetTextCtrl()->SetValue(wxString::Format("%.2f", s_round(max_volumetric_speed, 2)));
 
     sizer_velocity_volumetric->Add(min_velocity_item, 0, wxEXPAND, 0);
     sizer_velocity_volumetric->Add(max_velocity_item, 0, wxEXPAND|wxTOP, FromDIP(6));
@@ -2675,7 +2681,7 @@ wxBoxSizer* HelioInputDialog::create_input_optimize_layers(wxWindow* parent, int
     });
     m_layer_min_item->GetTextCtrl()->SetValidator(wxTextValidator(wxFILTER_NUMERIC));
     m_layer_min_item->GetTextCtrl()->SetMaxLength(10);
-    m_layer_min_item->GetTextCtrl()->SetLabel("2");
+    m_layer_min_item->GetTextCtrl()->SetValue("2");
     m_layer_min_item->SetValCheckers({layer_range_checker});
     m_layer_min_item->SetToolTip(layers_tooltip);
     m_layer_min_item->GetTextCtrl()->SetToolTip(layers_tooltip);
@@ -2695,7 +2701,7 @@ wxBoxSizer* HelioInputDialog::create_input_optimize_layers(wxWindow* parent, int
     });
     m_layer_max_item->GetTextCtrl()->SetValidator(wxTextValidator(wxFILTER_NUMERIC));
     m_layer_max_item->GetTextCtrl()->SetMaxLength(10);
-    m_layer_max_item->GetTextCtrl()->SetLabel(wxString::Format("%d", layer_count));
+    m_layer_max_item->GetTextCtrl()->SetValue(wxString::Format("%d", layer_count));
     m_layer_max_item->SetValCheckers({ layer_range_checker });
     m_layer_max_item->SetToolTip(layers_tooltip);
     m_layer_max_item->GetTextCtrl()->SetToolTip(layers_tooltip);
