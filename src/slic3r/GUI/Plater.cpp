@@ -9514,6 +9514,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
         preview->get_canvas3d()->get_gcode_viewer().set_view_type(libvgcode::EViewType::ThermalIndexMean);
 
         this->update();
+        q->force_update_all_plate_thumbnails();
 
         // Show rating dialog for optimization
         if (a.action == 1) {
