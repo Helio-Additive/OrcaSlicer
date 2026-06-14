@@ -1413,6 +1413,11 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
         if (it != view_type_items.end())
             m_view_type_sel = std::distance(view_type_items.begin(), it);
         set_view_type(cur_vt);
+    } else if (is_thermal_view) {
+        auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
+        if (it != view_type_items.end())
+            m_view_type_sel = std::distance(view_type_items.begin(), it);
+        set_view_type(libvgcode::EViewType::FeatureType);
     } else if (m_viewer.get_used_extruders_count() > 1) {
         auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::ColorPrint);
         if (it != view_type_items.end())
@@ -1529,7 +1534,17 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
         bool is_thermal2 = (cur_vt2 == libvgcode::EViewType::ThermalIndexMean ||
                             cur_vt2 == libvgcode::EViewType::ThermalIndexMin ||
                             cur_vt2 == libvgcode::EViewType::ThermalIndexMax);
-        if (!(is_thermal2 && m_has_thermal_index_data) && m_viewer.get_used_extruders_count() > 1) {
+        if (is_thermal2 && m_has_thermal_index_data) {
+            // TI view with data — keep it
+        } else if (is_thermal2) {
+            for (int i = 0; i < view_type_items.size(); i++) {
+                if (view_type_items[i] == libvgcode::EViewType::FeatureType) {
+                    m_view_type_sel = i;
+                    break;
+                }
+            }
+            set_view_type(libvgcode::EViewType::FeatureType);
+        } else if (m_viewer.get_used_extruders_count() > 1) {
             for (int i = 0; i < view_type_items.size(); i++) {
                 if (view_type_items[i] == libvgcode::EViewType::ColorPrint) {
                     m_view_type_sel = i;
