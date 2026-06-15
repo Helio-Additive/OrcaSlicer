@@ -502,7 +502,7 @@ void HelioStatementDialog::create_legal_page()
     wxBoxSizer* privacy_content_sizer = new wxBoxSizer(wxVERTICAL);
     
     auto privacy_text = new Label(privacy_content_panel, Label::Body_12, 
-        _L("This service is provided and hosted by a third party, Helio Additive. All data collection and processing activities are solely managed by Helio Additive, and Bambu Lab assumes no responsibility in this regard. By clicking \"Agree and Proceed\", you agree to Helio Additive's privacy policy."));
+        _L("This service is provided and hosted by a third party, Helio Additive. All data collection and processing activities are solely managed by Helio Additive, and Orca Slicer assumes no responsibility in this regard. By clicking \"Agree and Proceed\", you agree to Helio Additive's privacy policy."));
     privacy_text->SetForegroundColour(wxColour(200, 200, 200));
     privacy_text->SetMinSize(wxSize(FromDIP(560), -1));
     privacy_text->Wrap(FromDIP(560));
