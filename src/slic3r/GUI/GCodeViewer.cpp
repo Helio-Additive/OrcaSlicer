@@ -1343,9 +1343,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             }
         }
     }
-    if (m_has_thermal_index_data) {
-        update_by_mode(wxGetApp().get_mode());
-    }
+    update_by_mode(wxGetApp().get_mode());
 
 // #if !VGCODE_ENABLE_COG_AND_TOOL_MARKERS
 //     const size_t vertices_count = m_viewer.get_vertices_count();
@@ -1403,12 +1401,27 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     
     // ORCA: Only show filament/color print preview if more than one tool/extruder is actually used in the toolpaths.
     // Only reset back to Toolpaths (FeatureType) if we are currently in ColorPrint and this load is single-tool.
-    if (m_viewer.get_used_extruders_count() > 1) {
+    // Helio: preserve ThermalIndex view type across plate switches / gcode reloads
+    const auto cur_vt = get_view_type();
+    bool is_thermal_view = (cur_vt == libvgcode::EViewType::ThermalIndexMean ||
+                            cur_vt == libvgcode::EViewType::ThermalIndexMin ||
+                            cur_vt == libvgcode::EViewType::ThermalIndexMax);
+    if (is_thermal_view && m_has_thermal_index_data) {
+        auto it = std::find(view_type_items.begin(), view_type_items.end(), cur_vt);
+        if (it != view_type_items.end())
+            m_view_type_sel = std::distance(view_type_items.begin(), it);
+        set_view_type(cur_vt);
+    } else if (is_thermal_view) {
+        auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
+        if (it != view_type_items.end())
+            m_view_type_sel = std::distance(view_type_items.begin(), it);
+        set_view_type(libvgcode::EViewType::FeatureType);
+    } else if (m_viewer.get_used_extruders_count() > 1) {
         auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::ColorPrint);
         if (it != view_type_items.end())
             m_view_type_sel = std::distance(view_type_items.begin(), it);
         set_view_type(libvgcode::EViewType::ColorPrint);
-    } else if (get_view_type() == libvgcode::EViewType::ColorPrint) {
+    } else if (cur_vt == libvgcode::EViewType::ColorPrint) {
         auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
         if (it != view_type_items.end())
             m_view_type_sel = std::distance(view_type_items.begin(), it);
@@ -1513,15 +1526,31 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     }
 
     // set to color print by default if use multi extruders
-    if (m_viewer.get_used_extruders_count() > 1) {
-        for (int i = 0; i < view_type_items.size(); i++) {
-            if (view_type_items[i] == libvgcode::EViewType::ColorPrint) {
-                m_view_type_sel = i;
-                break;
+    // Helio: preserve ThermalIndex view type if the loaded data contains TI
+    {
+        const auto cur_vt2 = get_view_type();
+        bool is_thermal2 = (cur_vt2 == libvgcode::EViewType::ThermalIndexMean ||
+                            cur_vt2 == libvgcode::EViewType::ThermalIndexMin ||
+                            cur_vt2 == libvgcode::EViewType::ThermalIndexMax);
+        if (is_thermal2 && m_has_thermal_index_data) {
+            // TI view with data — keep it
+        } else if (is_thermal2) {
+            for (int i = 0; i < view_type_items.size(); i++) {
+                if (view_type_items[i] == libvgcode::EViewType::FeatureType) {
+                    m_view_type_sel = i;
+                    break;
+                }
             }
+            set_view_type(libvgcode::EViewType::FeatureType);
+        } else if (m_viewer.get_used_extruders_count() > 1) {
+            for (int i = 0; i < view_type_items.size(); i++) {
+                if (view_type_items[i] == libvgcode::EViewType::ColorPrint) {
+                    m_view_type_sel = i;
+                    break;
+                }
+            }
+            set_view_type(libvgcode::EViewType::ColorPrint);
         }
-
-        set_view_type(libvgcode::EViewType::ColorPrint);
     }
 
     bool only_gcode_3mf = false;
@@ -1569,9 +1598,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
             }
         }
     }
-    if (m_has_thermal_index_data) {
-        update_by_mode(wxGetApp().get_mode());
-    }
+    update_by_mode(wxGetApp().get_mode());
 
     const libvgcode::AABox bbox = m_viewer.get_extrusion_bounding_box();
     const BoundingBoxf3 paths_bounding_box(libvgcode::convert(bbox[0]).cast<double>(), libvgcode::convert(bbox[1]).cast<double>());
