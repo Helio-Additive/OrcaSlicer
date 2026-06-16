@@ -108,6 +108,27 @@ std::string format_error(std::string body)
     return message;
 }
 
+// Heuristic: does this error string describe a transient/retryable backend condition
+// (gateway disconnect, upstream timeout, 5xx) rather than a terminal failure? Used to keep
+// polling a healthy long-running job through brief blips instead of aborting it.
+static bool error_looks_transient(const std::string& error)
+{
+    if (error.empty())
+        return false;
+    std::string lower;
+    lower.reserve(error.size());
+    for (unsigned char c : error)
+        lower += static_cast<char>(std::tolower(c));
+    static const char* kTransientMarkers[] =
+        {"disconnect",        "timed out", "timeout", "temporarily", "unavailable", "connection reset", "connection refused",
+         "could not connect", "502",       "503",     "504",         "bad gateway", "gateway",          "try again"};
+    for (const char* marker : kTransientMarkers) {
+        if (lower.find(marker) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 double HelioQuery::convert_speed(float mm_per_second) {
     double value = static_cast<double>(mm_per_second) / 1000.0;
     return std::round(value * 1e9) / 1e9;
@@ -1193,13 +1214,16 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
     return res;
 }
 
-std::string HelioQuery::generate_simulation_graphql_query(const std::string &gcode_id,
-                                                          float temperatureStabilizationHeight,
-                                                          float airTemperatureAboveBuildPlate,
-                                                          float stabilizedAirTemperature)
+std::string HelioQuery::generate_simulation_graphql_query(const std::string& gcode_id,
+                                                          float              temperatureStabilizationHeight,
+                                                          float              airTemperatureAboveBuildPlate,
+                                                          float              stabilizedAirTemperature,
+                                                          const std::string& job_name)
 {
     CNumericLocalesSetter locales_setter;
-    std::string name = generateTimestampedString();
+    // Use a caller-supplied stable name when provided so create-retries reuse the same name
+    // (enables adopt-by-name); otherwise fall back to a fresh timestamped name as before.
+    std::string name = job_name.empty() ? generateTimestampedString() : job_name;
 
     std::string base_query = R"( {
         "query": "mutation CreateSimulation($input: CreateSimulationInput!) { createSimulation(input: $input) { id name progress status gcode { id name } printer { id name } material { id name } reportJsonUrl thermalIndexGcodeUrl estimatedSimulationDurationSeconds insertedAt updatedAt } }",
@@ -1240,21 +1264,24 @@ std::string HelioQuery::generate_simulation_graphql_query(const std::string &gco
 }
 
 std::string HelioQuery::generate_optimization_graphql_query(const std::string& gcode_id,
-    const std::string& printPriority,
-    bool optimizeOuterwall,
-    bool useOldMethod,
-    float temperatureStabilizationHeight,
-    float airTemperatureAboveBuildPlate,
-    float stabilizedAirTemperature,
-    double minVelocity,
-    double maxVelocity,
-    double minExtruderFlowRate,
-    double maxExtruderFlowRate,
-    int layersToOptimizeStart,
-    int layersToOptimizeEnd)
+                                                            const std::string& printPriority,
+                                                            bool               optimizeOuterwall,
+                                                            bool               useOldMethod,
+                                                            float              temperatureStabilizationHeight,
+                                                            float              airTemperatureAboveBuildPlate,
+                                                            float              stabilizedAirTemperature,
+                                                            double             minVelocity,
+                                                            double             maxVelocity,
+                                                            double             minExtruderFlowRate,
+                                                            double             maxExtruderFlowRate,
+                                                            int                layersToOptimizeStart,
+                                                            int                layersToOptimizeEnd,
+                                                            const std::string& job_name)
 {
     CNumericLocalesSetter locales_setter;
-    std::string name = generateTimestampedString();
+    // Use a caller-supplied stable name when provided so create-retries reuse the same name
+    // (enables adopt-by-name); otherwise fall back to a fresh timestamped name as before.
+    std::string name = job_name.empty() ? generateTimestampedString() : job_name;
 
     // basic query structure
     std::string base_query = R"( {
@@ -1371,10 +1398,11 @@ std::string HelioQuery::create_optimization_default_get(const std::string helio_
     return res;
 }
 
-HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::string helio_api_url,
-                                                                 const std::string helio_api_key,
-                                                                 const std::string gcode_id,
-                                                                 SimulationInput sinput)
+HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::string  helio_api_url,
+                                                                 const std::string  helio_api_key,
+                                                                 const std::string  gcode_id,
+                                                                 SimulationInput    sinput,
+                                                                 const std::string& job_name)
 {
     /*field processing*/
     const float chamber_temp = sinput.chamber_temp;
@@ -1392,11 +1420,8 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
     const float object_proximity_airtemp_kelvin = chamber_temp == -1 ? -1 : chamber_temp + 273.15;
     const float layer_threshold_meters          = layer_threshold / 1000;
 
-    std::string query_body = generate_simulation_graphql_query(gcode_id,
-                                                    layer_threshold_meters,
-                                                    initial_room_temp_kelvin,
-                                                    object_proximity_airtemp_kelvin
-    );
+    std::string query_body = generate_simulation_graphql_query(gcode_id, layer_threshold_meters, initial_room_temp_kelvin,
+                                                               object_proximity_airtemp_kelvin, job_name);
 
     HelioQuery::CreateSimulationResult res;
     auto http = Http::post(helio_api_url);
@@ -1524,11 +1549,22 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
             }
         })
         .on_complete([&res](std::string body, unsigned status) {
-            nlohmann::json parsed_obj = nlohmann::json::parse(body);
-            res.status                = status;
+            res.status = status;
+            nlohmann::json parsed_obj;
+            try {
+                parsed_obj = nlohmann::json::parse(body);
+            } catch (const std::exception& e) {
+                // A transport blip can surface as a non-JSON / empty body on an HTTP 200.
+                res.error     = std::string("Helio: invalid simulation poll response: ") + e.what();
+                res.transient = true;
+                return;
+            }
             if (parsed_obj.contains("errors")) {
                 std::string message = format_error(body);
                 res.error = message;
+                // HTTP-200-with-errors is a momentary gateway/upstream blip when the message
+                // looks transient; keep polling rather than aborting a healthy job.
+                res.transient = error_looks_transient(message);
             } else {
                 if (parsed_obj["data"]["simulation"]["status"] == "FAILED") {
                     res.error = _u8L("Helio simulation task failed");
@@ -1565,7 +1601,7 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
                         }
                         res.simulationResult.printInfo = info;
                     }
-                    
+
                     // Parse speedFactor if present
                     if (parsed_obj["data"]["simulation"].contains("speedFactor") && 
                         !parsed_obj["data"]["simulation"]["speedFactor"].is_null()) {
@@ -1602,16 +1638,20 @@ HelioQuery::CheckSimulationProgressResult HelioQuery::check_simulation_progress(
         .on_error([&res](std::string body, std::string error, unsigned status) {
             res.error  = error;
             res.status = status;
+            // Transport-level failure: retry connection drops / 5xx / 429, but treat definitive
+            // HTTP errors (e.g. 401/403/404) as terminal.
+            res.transient = (status == 0 || status == 429 || status >= 500 || error_looks_transient(error));
         })
         .perform_sync();
 
     return res;
 }
 
-Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(const std::string helio_api_url, 
-                                                                             const std::string helio_api_key, 
-                                                                             const std::string gcode_id,
-                                                                             OptimizationInput oinput)
+Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(const std::string  helio_api_url,
+                                                                             const std::string  helio_api_key,
+                                                                             const std::string  gcode_id,
+                                                                             OptimizationInput  oinput,
+                                                                             const std::string& job_name)
 {
 
     std::string query_body;
@@ -1643,34 +1683,17 @@ Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(con
         const double min_volumetric_speed = convert_volume_speed(oinput.min_volumetric_speed);
         const double max_volumetric_speed = convert_volume_speed(oinput.max_volumetric_speed);
 
-        query_body = generate_optimization_graphql_query(gcode_id,
-            print_priority,
-            oinput.optimize_outerwall,
-            oinput.use_old_method,
-            layer_threshold_meters,
-            initial_room_temp_kelvin,
-            object_proximity_airtemp_kelvin,
-            min_velocity,
-            max_velocity,
-            min_volumetric_speed,
-            max_volumetric_speed,
-            oinput.layers_to_optimize[0],
-            oinput.layers_to_optimize[1]);
+        query_body = generate_optimization_graphql_query(gcode_id, print_priority, oinput.optimize_outerwall, oinput.use_old_method,
+                                                         layer_threshold_meters, initial_room_temp_kelvin, object_proximity_airtemp_kelvin,
+                                                         min_velocity, max_velocity, min_volumetric_speed, max_volumetric_speed,
+                                                         oinput.layers_to_optimize[0], oinput.layers_to_optimize[1], job_name);
     }
     else {
-        query_body = generate_optimization_graphql_query(gcode_id,
-            print_priority,
-            oinput.optimize_outerwall,
-            oinput.use_old_method,
-            layer_threshold_meters,
-            initial_room_temp_kelvin,
-            object_proximity_airtemp_kelvin,
-            oinput.min_velocity,
-            oinput.max_velocity,
-            oinput.min_volumetric_speed,
-            oinput.max_volumetric_speed,
-            oinput.layers_to_optimize[0],
-            oinput.layers_to_optimize[1]);
+        query_body = generate_optimization_graphql_query(gcode_id, print_priority, oinput.optimize_outerwall, oinput.use_old_method,
+                                                         layer_threshold_meters, initial_room_temp_kelvin, object_proximity_airtemp_kelvin,
+                                                         oinput.min_velocity, oinput.max_velocity, oinput.min_volumetric_speed,
+                                                         oinput.max_volumetric_speed, oinput.layers_to_optimize[0],
+                                                         oinput.layers_to_optimize[1], job_name);
     }
     
 
@@ -1799,12 +1822,23 @@ Slic3r::HelioQuery::CheckOptimizationResult HelioQuery::check_optimization_progr
             }
         })
         .on_complete([&res](std::string body, unsigned status) {
-            nlohmann::json parsed_obj = nlohmann::json::parse(body);
-            res.status                = status;
+            res.status = status;
+            nlohmann::json parsed_obj;
+            try {
+                parsed_obj = nlohmann::json::parse(body);
+            } catch (const std::exception& e) {
+                // A transport blip can surface as a non-JSON / empty body on an HTTP 200.
+                res.error     = std::string("Helio: invalid optimization poll response: ") + e.what();
+                res.transient = true;
+                return;
+            }
 
             if (parsed_obj.contains("errors")) {
                 std::string message = format_error(body);
                 res.error = message;
+                // HTTP-200-with-errors is a momentary gateway/upstream blip when the message
+                // looks transient; keep polling rather than aborting a healthy job.
+                res.transient = error_looks_transient(message);
             } else {
                 if (parsed_obj["data"]["optimization"]["status"] == "FAILED") {
                     res.error = _u8L("Helio optimization task failed");
@@ -1824,6 +1858,9 @@ Slic3r::HelioQuery::CheckOptimizationResult HelioQuery::check_optimization_progr
         .on_error([&res](std::string body, std::string error, unsigned status) {
             res.error  = error;
             res.status = status;
+            // Transport-level failure: retry connection drops / 5xx / 429, but treat definitive
+            // HTTP errors (e.g. 401/403/404) as terminal.
+            res.transient = (status == 0 || status == 429 || status >= 500 || error_looks_transient(error));
         })
         .perform_sync();
 
@@ -1935,59 +1972,87 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
             return;
         }
 
-        HelioQuery::PresignedURLResult create_presigned_url_res = HelioQuery::create_presigned_url(helio_api_url, helio_api_key);
+        // Upload with retry: fetch a FRESH presigned URL each attempt and re-PUT. A PUT to S3 is
+        // idempotent, so this safely covers mid-transfer drops and presigned-URL expiry on large
+        // files / slow links. Mirrors the create-retry style used below.
+        HelioQuery::PresignedURLResult create_presigned_url_res;
+        HelioQuery::UploadFileResult   upload_file_res;
+        const int                      kMaxUploadAttempts = 4;
+        bool                           upload_succeeded   = false;
 
-        if (create_presigned_url_res.error.empty() && create_presigned_url_res.status == 200 && !was_canceled()) {
-            status = Slic3r::PrintBase::SlicingStatus(5, _u8L("Helio: Presigned URL Created"));
-            status.is_helio = true;
+        for (int attempt = 1; attempt <= kMaxUploadAttempts && !was_canceled(); ++attempt) {
+            create_presigned_url_res = HelioQuery::create_presigned_url(helio_api_url, helio_api_key);
+
+            if (create_presigned_url_res.error.empty() && create_presigned_url_res.status == 200 && !create_presigned_url_res.url.empty() &&
+                !was_canceled()) {
+                status          = Slic3r::PrintBase::SlicingStatus(5, _u8L("Helio: Presigned URL Created"));
+                status.is_helio = true;
+                evt             = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
+                wxQueueEvent(GUI::wxGetApp().plater(), evt);
+
+                upload_file_res = HelioQuery::upload_file_to_presigned_url(m_gcode_result->filename, create_presigned_url_res.url);
+                if (upload_file_res.success) {
+                    upload_succeeded = true;
+                    break;
+                }
+            }
+
+            if (attempt < kMaxUploadAttempts && !was_canceled()) {
+                BOOST_LOG_TRIVIAL(warning) << "Helio: upload attempt " << attempt << "/" << kMaxUploadAttempts << " failed (presign status "
+                                           << create_presigned_url_res.status << ", presign error: " << create_presigned_url_res.error
+                                           << ", upload error: " << upload_file_res.error << "); retrying";
+
+                Slic3r::PrintBase::SlicingStatus retry_status = Slic3r::PrintBase::SlicingStatus(
+                    5, (boost::format(_u8L("Helio: Retrying upload... (attempt %1%/%2%)")) % (attempt + 1) % kMaxUploadAttempts).str());
+                retry_status.is_helio = true;
+                evt                   = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, retry_status);
+                wxQueueEvent(GUI::wxGetApp().plater(), evt);
+
+                boost::this_thread::sleep_for(boost::chrono::seconds(2 * attempt)); // 2s, 4s, 6s backoff
+            }
+        }
+
+        if (upload_succeeded && !was_canceled()) {
+            status = Slic3r::PrintBase::SlicingStatus(10, _u8L("Helio: file succesfully uploaded"));
             evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
             wxQueueEvent(GUI::wxGetApp().plater(), evt);
 
-            HelioQuery::UploadFileResult upload_file_res = HelioQuery::upload_file_to_presigned_url(m_gcode_result->filename,
-                                                                                                    create_presigned_url_res.url);
-
-            if (upload_file_res.success && !was_canceled()) {
-                status = Slic3r::PrintBase::SlicingStatus(10, _u8L("Helio: file succesfully uploaded"));
-                evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
-                wxQueueEvent(GUI::wxGetApp().plater(), evt);
-
-                HelioQuery::CreateGCodeResult create_gcode_res;
-                if (use_v3) {
-                    create_gcode_res = HelioQuery::create_gcode_v3(create_presigned_url_res.key, helio_api_url,
-                                                                   helio_api_key, printer_id, materials,
-                                                                   is_multi_color, is_multi_material);
-                } else {
-                    create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_url,
-                                                                helio_api_key, printer_id, filament_id);
-                }
-
-                if (action == 0) {
-                    create_simulation_step(create_gcode_res, notification_manager);
-                }
-                else if (action == 1) {
-                    create_optimization_step(create_gcode_res, notification_manager);
-                }
-
+            HelioQuery::CreateGCodeResult create_gcode_res;
+            if (use_v3) {
+                create_gcode_res = HelioQuery::create_gcode_v3(create_presigned_url_res.key, helio_api_url, helio_api_key, printer_id,
+                                                               materials, is_multi_color, is_multi_material);
             } else {
-                set_state(STATE_CANCELED);
-
-                Slic3r::HelioCompletionEvent* evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0, "", "", false,
-                                                                                     _u8L("Helio: file upload failed"));
-                wxQueueEvent(GUI::wxGetApp().plater(), evt);
-            }
-        } else {
-            std::string presigned_url_message = (boost::format("error: %1%") % create_presigned_url_res.error).str();
-
-            if (create_presigned_url_res.status == 401) {
-                presigned_url_message += "\n ";
-                presigned_url_message += _u8L("Please make sure you have the corrent API key set in preferences.");
+                create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_url, helio_api_key, printer_id,
+                                                            filament_id);
             }
 
+            if (action == 0) {
+                create_simulation_step(create_gcode_res, notification_manager);
+            } else if (action == 1) {
+                create_optimization_step(create_gcode_res, notification_manager);
+            }
+
+        } else if (!was_canceled()) {
             set_state(STATE_CANCELED);
 
+            // Distinguish a persistent presign failure (surface its message, incl. the 401 hint)
+            // from an upload that kept failing after a good presign.
+            std::string failure_message;
+            if (create_presigned_url_res.status != 200 || !create_presigned_url_res.error.empty() || create_presigned_url_res.url.empty()) {
+                failure_message = (boost::format("error: %1%") % create_presigned_url_res.error).str();
+                if (create_presigned_url_res.status == 401) {
+                    failure_message += "\n ";
+                    failure_message += _u8L("Please make sure you have the correct API key set in preferences.");
+                }
+            } else {
+                failure_message = _u8L("Helio: file upload failed");
+            }
+
             Slic3r::HelioCompletionEvent* evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0, "", "", false,
-                                                                                 presigned_url_message);
+                                                                                 failure_message);
             wxQueueEvent(GUI::wxGetApp().plater(), evt);
+        } else {
+            set_state(STATE_CANCELED);
         }
     } else {
         set_state(STATE_CANCELED);
@@ -2005,6 +2070,10 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
         const std::string gcode_id = create_gcode_res.id;
         HelioQuery::CreateSimulationResult create_simulation_res;
 
+        // Stable, unique job name so an ambiguous create (a gateway timeout that actually queued the
+        // job) can be adopted by name instead of re-created, avoiding a duplicate run / credit.
+        const std::string job_name = HelioQuery::generateTimestampedString();
+
         const int max_create_retries = 3;
         for (int retry = 0; retry < max_create_retries && !was_canceled(); ++retry) {
             if (retry > 0) {
@@ -2016,8 +2085,27 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                 retry_status.is_helio = true;
                 Slic3r::SlicingStatusEvent* retry_evt = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, retry_status);
                 wxQueueEvent(GUI::wxGetApp().plater(), retry_evt);
+
+                // The previous attempt's timeout may have queued the job server-side; adopt it by
+                // name instead of creating a duplicate. (get_recent_runs prepends "Bearer ", so pass
+                // the raw key.)
+                HelioQuery::GetRecentRunsResult recent = HelioQuery::get_recent_runs(helio_api_url, helio_origin_key);
+                if (recent.success) {
+                    for (const auto& run : recent.simulations) {
+                        if (run.name == job_name) {
+                            BOOST_LOG_TRIVIAL(warning)
+                                << "Helio: adopting existing simulation '" << run.name << "' (id " << run.id << ") instead of re-creating";
+                            create_simulation_res.success = true;
+                            create_simulation_res.id      = run.id;
+                            create_simulation_res.name    = run.name;
+                            break;
+                        }
+                    }
+                    if (create_simulation_res.success)
+                        break;
+                }
             }
-            create_simulation_res = HelioQuery::create_simulation(helio_api_url, helio_api_key, gcode_id, simulation_input_data);
+            create_simulation_res = HelioQuery::create_simulation(helio_api_url, helio_api_key, gcode_id, simulation_input_data, job_name);
             if (create_simulation_res.success) break;
         }
 
@@ -2038,13 +2126,43 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
             int times_tried            = 0;
             int max_unsuccessful_tries = 5;
             int times_queried          = 0;
+            int       transient_tries        = 0;
+            const int max_transient_tries    = 60; // tolerate ~minutes of blips before giving up
 
             while (!was_canceled()) {
                 HelioQuery::CheckSimulationProgressResult check_simulation_progress_res =
                     HelioQuery::check_simulation_progress(helio_api_url, helio_api_key, create_simulation_res.id);
 
+                // Transient blip (disconnect / 5xx / HTTP-200-with-errors): keep polling with backoff
+                // instead of aborting a healthy job. Only a terminal FAILED or the cap stops us.
+                if (check_simulation_progress_res.transient) {
+                    transient_tries++;
+                    BOOST_LOG_TRIVIAL(warning) << "Helio: transient error during simulation poll (attempt " << transient_tries << "/"
+                                               << max_transient_tries << "): " << check_simulation_progress_res.error;
+                    if (transient_tries >= max_transient_tries) {
+                        set_state(STATE_CANCELED);
+                        std::string error_msg = _u8L("Helio: simulation failed") + "\n" + check_simulation_progress_res.error;
+                        Slic3r::HelioCompletionEvent* fail_evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0,
+                                                                                                  "", "", false, error_msg);
+                        wxQueueEvent(GUI::wxGetApp().plater(), fail_evt);
+                        break;
+                    }
+                    Slic3r::PrintBase::SlicingStatus t_status =
+                        Slic3r::PrintBase::SlicingStatus(35, _u8L("Helio: connection issue, retrying..."));
+                    t_status.is_helio = true;
+                    evt               = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, t_status);
+                    wxQueueEvent(GUI::wxGetApp().plater(), evt);
+                    int backoff = 3 + transient_tries;
+                    if (backoff > 15)
+                        backoff = 15;
+                    times_queried++;
+                    boost::this_thread::sleep_for(boost::chrono::seconds(backoff));
+                    continue;
+                }
+
                 if (check_simulation_progress_res.status == 200) {
-                    times_tried = 0;
+                    times_tried     = 0;
+                    transient_tries = 0;
                     if (check_simulation_progress_res.error.empty()) {
                         std::string trailing_dots = "";
 
@@ -2162,6 +2280,10 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
         const std::string gcode_id = create_gcode_res.id;
         HelioQuery::CreateOptimizationResult create_optimization_res;
 
+        // Stable, unique job name so an ambiguous create (a gateway timeout that actually queued the
+        // job) can be adopted by name instead of re-created, avoiding a duplicate run / credit.
+        const std::string job_name = HelioQuery::generateTimestampedString();
+
         const int max_create_retries = 3;
         for (int retry = 0; retry < max_create_retries && !was_canceled(); ++retry) {
             if (retry > 0) {
@@ -2173,8 +2295,28 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
                 retry_status.is_helio = true;
                 Slic3r::SlicingStatusEvent* retry_evt = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, retry_status);
                 wxQueueEvent(GUI::wxGetApp().plater(), retry_evt);
+
+                // The previous attempt's timeout may have queued the job server-side; adopt it by
+                // name instead of creating a duplicate. (get_recent_runs prepends "Bearer ", so pass
+                // the raw key.)
+                HelioQuery::GetRecentRunsResult recent = HelioQuery::get_recent_runs(helio_api_url, helio_origin_key);
+                if (recent.success) {
+                    for (const auto& run : recent.optimizations) {
+                        if (run.name == job_name) {
+                            BOOST_LOG_TRIVIAL(warning) << "Helio: adopting existing optimization '" << run.name << "' (id " << run.id
+                                                       << ") instead of re-creating";
+                            create_optimization_res.success = true;
+                            create_optimization_res.id      = run.id;
+                            create_optimization_res.name    = run.name;
+                            break;
+                        }
+                    }
+                    if (create_optimization_res.success)
+                        break;
+                }
             }
-            create_optimization_res = HelioQuery::create_optimization(helio_api_url, helio_api_key, gcode_id, optimization_input_data);
+            create_optimization_res = HelioQuery::create_optimization(helio_api_url, helio_api_key, gcode_id, optimization_input_data,
+                                                                      job_name);
             if (create_optimization_res.success) break;
         }
 
@@ -2195,13 +2337,43 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
             int times_tried = 0;
             int max_unsuccessful_tries = 5;
             int times_queried = 0;
+            int       transient_tries        = 0;
+            const int max_transient_tries    = 60; // tolerate ~minutes of blips before giving up
 
             while (!was_canceled()) {
                 HelioQuery::CheckOptimizationResult check_optimzaion_progress_res =
                     HelioQuery::check_optimization_progress(helio_api_url, helio_api_key, create_optimization_res.id);
 
+                // Transient blip (disconnect / 5xx / HTTP-200-with-errors): keep polling with backoff
+                // instead of aborting a healthy job. Only a terminal FAILED or the cap stops us.
+                if (check_optimzaion_progress_res.transient) {
+                    transient_tries++;
+                    BOOST_LOG_TRIVIAL(warning) << "Helio: transient error during optimization poll (attempt " << transient_tries << "/"
+                                               << max_transient_tries << "): " << check_optimzaion_progress_res.error;
+                    if (transient_tries >= max_transient_tries) {
+                        set_state(STATE_CANCELED);
+                        std::string error_msg = _u8L("Helio: optimization failed") + "\n" + check_optimzaion_progress_res.error;
+                        Slic3r::HelioCompletionEvent* fail_evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0,
+                                                                                                  "", "", false, error_msg);
+                        wxQueueEvent(GUI::wxGetApp().plater(), fail_evt);
+                        break;
+                    }
+                    Slic3r::PrintBase::SlicingStatus t_status =
+                        Slic3r::PrintBase::SlicingStatus(35, _u8L("Helio: connection issue, retrying..."));
+                    t_status.is_helio = true;
+                    evt               = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, t_status);
+                    wxQueueEvent(GUI::wxGetApp().plater(), evt);
+                    int backoff = 3 + transient_tries;
+                    if (backoff > 15)
+                        backoff = 15;
+                    times_queried++;
+                    boost::this_thread::sleep_for(boost::chrono::seconds(backoff));
+                    continue;
+                }
+
                 if (check_optimzaion_progress_res.status == 200) {
-                    times_tried = 0;
+                    times_tried     = 0;
+                    transient_tries = 0;
                     if (check_optimzaion_progress_res.error.empty()) {
                         std::string trailing_dots = "";
 

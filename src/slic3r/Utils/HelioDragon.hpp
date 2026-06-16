@@ -211,6 +211,7 @@ public:
         std::string url;
         std::string error;
         std::string trace_id;
+        bool             transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
         SimulationResult simulationResult;
     };
 
@@ -224,6 +225,7 @@ public:
         std::string url;
         std::string error;
         std::string trace_id;
+        bool        transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
         std::string qualityMeanImprovement;
         std::string qualityStdImprovement;
     };
@@ -342,10 +344,11 @@ public:
     static void clear_print_priority_cache();
 
     /*for helio simulation*/
-    static CreateSimulationResult create_simulation(const std::string helio_api_url,
-                                                    const std::string helio_api_key,
-                                                    const std::string gcode_id,
-                                                    SimulationInput sinput);
+    static CreateSimulationResult create_simulation(const std::string  helio_api_url,
+                                                    const std::string  helio_api_key,
+                                                    const std::string  gcode_id,
+                                                    SimulationInput    sinput,
+                                                    const std::string& job_name = "");
 
     static void stop_simulation(const std::string helio_api_url,
                                                   const std::string helio_api_key,
@@ -357,10 +360,11 @@ public:
 
 
     /*for helio optimization*/
-    static CreateOptimizationResult create_optimization(const std::string helio_api_url,
-                                                        const std::string helio_api_key,
-                                                        const std::string gcode_id,
-                                                        OptimizationInput oinput);
+    static CreateOptimizationResult create_optimization(const std::string  helio_api_url,
+                                                        const std::string  helio_api_key,
+                                                        const std::string  gcode_id,
+                                                        OptimizationInput  oinput,
+                                                        const std::string& job_name = "");
 
     static void stop_optimization(const std::string helio_api_url,
                                             const std::string helio_api_key,
@@ -375,24 +379,26 @@ public:
 
 
     static std::string generate_default_optimization_query(const std::string& gcode_id);
-    static std::string generate_simulation_graphql_query(const std::string& gcode_id, 
-                                                         float temperatureStabilizationHeight = -1, 
-                                                         float airTemperatureAboveBuildPlate = -1,
-                                                         float stabilizedAirTemperature = -1);
+    static std::string generate_simulation_graphql_query(const std::string& gcode_id,
+                                                         float              temperatureStabilizationHeight = -1,
+                                                         float              airTemperatureAboveBuildPlate  = -1,
+                                                         float              stabilizedAirTemperature       = -1,
+                                                         const std::string& job_name                       = "");
 
     static std::string generate_optimization_graphql_query(const std::string& gcode_id,
                                                            const std::string& printPriority,
-                                                           bool optimizeOuterwall,
-                                                           bool useOldMethod,
-                                                           float temperatureStabilizationHeight = -1,
-                                                           float airTemperatureAboveBuildPlate = -1,
-                                                           float stabilizedAirTemperature = -1,
-                                                           double minVelocity = -1,
-                                                           double maxVelocity = -1,
-                                                           double minExtruderFlowRate = -1,
-                                                           double maxExtruderFlowRate = -1,
-                                                           int layersToOptimizeStart = -1,
-                                                           int layersToOptimizeEnd = -1);
+                                                           bool               optimizeOuterwall,
+                                                           bool               useOldMethod,
+                                                           float              temperatureStabilizationHeight = -1,
+                                                           float              airTemperatureAboveBuildPlate  = -1,
+                                                           float              stabilizedAirTemperature       = -1,
+                                                           double             minVelocity                    = -1,
+                                                           double             maxVelocity                    = -1,
+                                                           double             minExtruderFlowRate            = -1,
+                                                           double             maxExtruderFlowRate            = -1,
+                                                           int                layersToOptimizeStart          = -1,
+                                                           int                layersToOptimizeEnd            = -1,
+                                                           const std::string& job_name                       = "");
     static std::string generateTimestampedString()
     {
         // Get the current UTC time
