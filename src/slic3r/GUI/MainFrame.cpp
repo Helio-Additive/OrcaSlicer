@@ -3888,6 +3888,12 @@ void MainFrame::select_tab(wxPanel* panel)
     select_tab(size_t(page_idx));
 }
 
+void MainFrame::select_tab_silent(size_t tab)
+{
+    if (m_tabpanel->GetSelection() != (int)tab)
+        m_tabpanel->ChangeSelection(tab);
+}
+
 //BBS
 void MainFrame::jump_to_monitor(std::string dev_id)
 {

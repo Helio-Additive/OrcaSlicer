@@ -2015,7 +2015,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
             }
 
             if (found_extrusion) {
-                layer_count = static_cast<int>(max_layer_id);
+                layer_count = static_cast<int>(max_layer_id) + 1;
                 if (speed_min < std::numeric_limits<float>::max()) gcode_min_speed = speed_min;
                 if (speed_max > 0.0f) gcode_max_speed = speed_max;
                 if (vol_min < std::numeric_limits<float>::max()) gcode_min_vol_rate = vol_min;

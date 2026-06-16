@@ -9505,9 +9505,12 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
         GCodeProcessorResult *res2 = background_process.get_current_gcode_result();
         *res2 = *helio_background_process.m_gcode_result;
 
-        // Reload the preview with the new gcode result and switch to preview tab
+        // Reload the preview with the new gcode result and switch to preview tab.
+        // Use select_tab_silent to avoid the async EVT_GLVIEWTOOLBAR_PREVIEW
+        // that select_tab triggers — that event calls set_current_panel with
+        // no_slice=false and would queue a reslice that replaces the Helio gcode.
         preview->reload_print();
-        wxGetApp().mainframe->select_tab(MainFrame::tpPreview);
+        wxGetApp().mainframe->select_tab_silent(MainFrame::tpPreview);
         set_current_panel(preview, true);
 
         // Switch to Thermal Index view if helio data is available
