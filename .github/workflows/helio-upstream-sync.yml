@@ -341,14 +341,27 @@ jobs:
               return;
             }
 
-            const body = [
+            // Truncate conflict list if it would push the body over
+            // GitHub's 65 536-character issue-body limit.
+            const conflictLines = (conflicts || '').split('\n');
+            const MAX_BODY = 65000; // leave headroom for encoding overhead
+            const MAX_CONFLICT_LINES = 200;
+            let conflictBlock;
+            if (conflictLines.length > MAX_CONFLICT_LINES) {
+              conflictBlock = conflictLines.slice(0, MAX_CONFLICT_LINES).join('\n')
+                + `\n... and ${conflictLines.length - MAX_CONFLICT_LINES} more files (${conflictLines.length} total)`;
+            } else {
+              conflictBlock = conflicts;
+            }
+
+            let body = [
               `## Merge conflicts detected syncing ${syncLabel}`,
               '',
-              `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts.`,
+              `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts in **${conflictLines.length} files**.`,
               '',
               '### Conflicted files',
               '```',
-              conflicts,
+              conflictBlock,
               '```',
               '',
               '### Helio-relevant upstream changes',
@@ -369,6 +382,12 @@ jobs:
               '',
               'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
             ].join('\n');
+
+            // Final safety: hard-truncate if still over the limit
+            if (body.length > MAX_BODY) {
+              body = body.slice(0, MAX_BODY)
+                + '\n\n---\n*Issue body truncated — full conflict list available via `git diff --name-only --diff-filter=U`*';
+            }
 
             // Ensure required labels exist before creating the issue; a missing
             // label causes a 422 validation error that would suppress the issue.
