@@ -9708,6 +9708,16 @@ static std::vector<HelioQuery::SupportedData> find_similar_printers(
     return similar_printers;
 }
 
+static std::string strip_nozzle_suffix(const std::string& preset_name, const Preset& preset)
+{
+    auto *printer_model_opt = preset.config.opt<ConfigOptionString>("printer_model");
+    if (printer_model_opt && !printer_model_opt->value.empty())
+        return printer_model_opt->value;
+
+    static const std::regex nozzle_re(R"(\s+\d+\.?\d*\s+[Nn]ozzle\s*$)");
+    return std::regex_replace(preset_name, nozzle_re, "");
+}
+
 static std::pair<std::string, size_t> match_printer_with_boundaries(
     const std::string& target_name,
     const std::vector<HelioQuery::SupportedData>& supported_printers)
@@ -10451,8 +10461,9 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": preset_name = '" << preset_name << "'";
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": global_supported_printers.size() = " << HelioQuery::global_supported_printers.size();
 
-    std::string printer_target_name = preset_name;
+    std::string printer_target_name = strip_nozzle_suffix(preset_name, preset_bundle->printers.get_edited_preset());
     boost::trim(printer_target_name);
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": printer_target_name (nozzle stripped) = '" << printer_target_name << "'";
 
     if (printer_target_name.empty()) {
         GUI::MessageDialog msgdialog(nullptr, _L("Invalid printer preset. Unable to slice with Helio."), "", wxICON_WARNING | wxOK);
@@ -10797,8 +10808,9 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": preset_name = '" << preset_name << "'";
 
-    std::string printer_target_name = preset_name;
+    std::string printer_target_name = strip_nozzle_suffix(preset_name, preset_bundle->printers.get_edited_preset());
     boost::trim(printer_target_name);
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": printer_target_name (nozzle stripped) = '" << printer_target_name << "'";
 
     if (printer_target_name.empty()) {
         GUI::MessageDialog msgdialog(nullptr, _L("Invalid printer preset. Unable to slice with Helio."), "", wxICON_WARNING | wxOK);
