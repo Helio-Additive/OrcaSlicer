@@ -337,6 +337,44 @@ If upstream renames functions that Helio calls, update Helio code to use the new
 - `restart_background_process()` → contains interleaved Helio code
 - `set_slicing_progress_percentage()` → signature modified by Helio
 
+## Upstream Sync: squash merges & the merge-base graft
+
+**Why upstream-sync PRs are squash-merged.** The release branch enforces a
+"commits must have verified signatures" rule. Upstream (SoftFever) commits are
+unsigned, so a real merge — which drags hundreds of unsigned commits into the
+branch — is rejected. Squash-merging collapses the whole sync into **one
+GitHub-signed commit**, which satisfies the rule. So: **upstream-sync PRs must be
+squash-merged** (normal Helio feature PRs are unaffected).
+
+**The side effect.** A squash keeps the *file contents* of the upstream release
+but discards its *ancestry*. Git no longer knows those files came from upstream.
+On the **next** sync, git's merge-base falls all the way back to the last commit
+we still share with upstream, and every upstream change since then re-surfaces as
+a conflict. Real example: a `v2.4.0-beta → v2.4.1` delta of **~5 files** exploded
+to **7,876** because the base fell back to `v2.3.2`.
+
+**The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
+workflow ephemerally grafts the upstream commit our content is based on onto the
+branch tip. For tag-release syncs that commit is derived from `version.inc`
+(authoritative — it names the synced release); for `main` syncs it comes from the
+`helio-last-synced-main` tracking tag (`version.inc` would name an older release
+there and must not be used):
+
+```bash
+git replace --graft <release_tip> $(git rev-parse <release_tip>^@) <prev_upstream_commit>
+git merge <new_upstream_tag>      # now only the true delta conflicts
+git replace -d <release_tip>      # remove overlay BEFORE any push
+```
+
+`git replace --graft` is a **local-only** overlay (`refs/replace/*`) that is never
+pushed — it only corrects git's merge-base computation. It is removed before any
+push, so nothing unsigned reaches a protected branch. When resolving a conflict
+issue by hand, run the exact `git replace --graft` command from the issue body
+first, or you will face the full (inflated) conflict set instead of the real delta.
+
+**Never** merge an upstream-sync PR with "Create a merge commit" — it both
+violates the signature rule and re-flattens on the following sync. Always squash.
+
 ## Build Verification
 
 ### Linux (CI — cheapest, catches 95%+ of issues)

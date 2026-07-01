@@ -16,6 +16,7 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - Detects out-of-band merges (e.g. manual PRs) via ancestor check and auto-updates the tracking tag
 - Handles pre-existing conflict branches safely: checks for divergence before replacing (skips if someone has pushed resolution commits, force-pushes to replace stale branches from previous runs)
 - Detects squash merges: when the ancestor check fails, tries a trial merge to detect if content is already incorporated
+- **Merge-base graft**: upstream-sync PRs are squash-merged (required by the release branch's "verified signatures" rule — a squash yields one signed commit instead of hundreds of unsigned upstream ones). Squashing discards upstream ancestry, so before each merge the workflow ephemerally grafts the last-synced upstream commit (derived from `version.inc` for tag-release syncs, or the `helio-last-synced-main` tracking tag for `main` syncs) via `git replace --graft` to keep the merge-base correct. Without it, conflicts balloon (a ~5-file delta once exploded to 7,876). The graft is local-only and removed before any push. **Always squash-merge upstream-sync PRs, never a merge commit.** See `HELIO_INTEGRATION.md` → "Upstream Sync: squash merges & the merge-base graft".
 
 ### Issue Dedupe (`dedupe-issues.yml`)
 - Triggers on new issue opened or manual `workflow_dispatch` with issue number
