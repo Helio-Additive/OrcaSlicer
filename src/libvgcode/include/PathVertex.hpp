@@ -92,6 +92,15 @@ struct PathVertex
     //
     float pressure_advance{ 0.0f };
     //
+    // ORCA: Add Acceleration visualization support
+    // Acceleration value
+    //
+    float acceleration{ 0.0f };
+    //
+    // ORCA: Add Jerk visualization support
+    // Jerk value
+    //
+    float jerk{ 0.0f };
     // Helio: Thermal index mean value (-100 to 100)
     //
     float thermal_index_mean{ -200.0f };

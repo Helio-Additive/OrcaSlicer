@@ -291,6 +291,10 @@ private:
     ColorRange m_temperature_range;
     // ORCA: Add Pressure Advance visualization support
     ColorRange m_pressure_advance_range;
+    // ORCA: Add Acceleration visualization support
+    ColorRange m_acceleration_range;
+    // ORCA: Add Jerk visualization support
+    ColorRange m_jerk_range;
     // Helio: Thermal index visualization
     ColorRange m_thermal_index_mean_range;
     ColorRange m_thermal_index_min_range;
