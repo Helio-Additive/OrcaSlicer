@@ -193,6 +193,60 @@ jobs:
           git checkout -b "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
+      # Upstream-sync PRs are squash-merged into the release branch (required by
+      # the "verified signatures" branch rule — a squash yields a single
+      # GitHub-signed commit instead of hundreds of unsigned upstream commits).
+      # The side effect is that squashing discards the upstream ancestry, so the
+      # NEXT sync's merge-base falls all the way back to the last commit we still
+      # share with upstream — inflating the conflict set enormously (e.g. a
+      # v2.4.0-beta -> v2.4.1 delta of ~5 files exploded to 7,876 because the
+      # base fell back to v2.3.2). See HELIO_INTEGRATION.md ("Merge-base graft").
+      #
+      # Fix: before merging, ephemerally graft the upstream commit our current
+      # content is based on onto the branch tip via `git replace --graft`. This
+      # is LOCAL-ONLY (a refs/replace/* overlay that is never pushed) and is
+      # removed again before any push, so nothing unsigned ever reaches a
+      # protected branch. It only corrects git's merge-base computation.
+      - name: Establish correct merge base (ephemeral graft)
+        if: steps.check.outputs.skip != 'true'
+        id: graft
+        run: |
+          set -euo pipefail
+          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
+          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
+          TIP=$(git rev-parse HEAD)
+
+          # Determine PREV_UPSTREAM = the upstream commit our branch content is
+          # based on. Prefer version.inc (authoritative — it names the upstream
+          # release the tree was synced to); fall back to the tracking tag.
+          PREV=""
+          VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
+          if [ -n "$VER" ]; then
+            for cand in "v$VER" "$VER"; do
+              if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
+                c=$(git rev-parse "refs/tags/$cand^{commit}")
+                if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
+              fi
+            done
+          fi
+          if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
+            c=$(git rev-parse "$TRACKING_TAG^{commit}")
+            if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; fi
+          fi
+
+          # Graft only when PREV is a real, newer common ancestor that git does
+          # not already know about (i.e. history was flattened by a squash).
+          if [ -n "$PREV" ] && ! git merge-base --is-ancestor "$PREV" "$TIP"; then
+            git replace --graft "$TIP" $(git rev-parse "$TIP^@") "$PREV"
+            echo "grafted=true" >> "$GITHUB_OUTPUT"
+            echo "graft_commit=$TIP" >> "$GITHUB_OUTPUT"
+            echo "prev_upstream=$PREV" >> "$GITHUB_OUTPUT"
+            echo "Grafted $PREV onto $TIP — merge-base corrected to the last synced upstream commit."
+          else
+            echo "grafted=false" >> "$GITHUB_OUTPUT"
+            echo "No graft applied (no newer shared upstream ancestor found; using default merge-base)."
+          fi
+
       - name: Attempt merge
         if: steps.check.outputs.skip != 'true'
         id: merge
@@ -207,12 +261,22 @@ jobs:
           else
             echo "status=conflict" >> "$GITHUB_OUTPUT"
 
-            # Collect conflict details
-            CONFLICTS=$(git diff --name-only --diff-filter=U)
-            echo "conflicted_files<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$CONFLICTS" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            # Write the conflict list to a file rather than a step output / env
+            # var. A large list (thousands of files) overflows the OS argument
+            # limit when passed as an env var into a later step, crashing it with
+            # "Argument list too long" before the tracking issue can be created.
+            git diff --name-only --diff-filter=U > "$GITHUB_WORKSPACE/sync-conflicts.txt"
+            COUNT=$(wc -l < "$GITHUB_WORKSPACE/sync-conflicts.txt" | tr -d ' ')
+            echo "conflict_count=$COUNT" >> "$GITHUB_OUTPUT"
+            echo "Merge produced $COUNT conflicted files."
           fi
+
+      # Drop the local replace overlay now that the merge is done, so every
+      # subsequent push sends only real (signed) history. Runs regardless of
+      # merge outcome; a conflicted merge is aborted later in the push step.
+      - name: Remove ephemeral graft
+        if: always() && steps.graft.outputs.grafted == 'true'
+        run: git replace -d "${{ steps.graft.outputs.graft_commit }}" || true
 
       - name: Identify Helio-relevant upstream changes
         if: steps.check.outputs.skip != 'true'
@@ -325,25 +389,59 @@ jobs:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
-          CONFLICTS: ${{ steps.merge.outputs.conflicted_files }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
+          GRAFTED: ${{ steps.graft.outputs.grafted }}
+          GRAFT_COMMIT: ${{ steps.graft.outputs.graft_commit }}
+          PREV_UPSTREAM: ${{ steps.graft.outputs.prev_upstream }}
         with:
           script: |
+            const fs = require('fs');
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
             const syncSha = process.env.SYNC_SHA;
             const target = process.env.TARGET_BRANCH;
-            const conflicts = process.env.CONFLICTS;
             const helioReport = process.env.HELIO_REPORT;
+            const grafted = process.env.GRAFTED === 'true';
+            const graftCommit = process.env.GRAFT_COMMIT || '';
+            const prevUpstream = process.env.PREV_UPSTREAM || '';
 
             if (!branch || !syncLabel) {
               core.setFailed('Missing required env vars: SYNC_BRANCH or SYNC_LABEL');
               return;
             }
 
+            // Read the conflict list from the file written by the merge step
+            // (avoids the OS argument-size limit that a large env var would hit).
+            let conflicts = '';
+            try {
+              conflicts = fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/sync-conflicts.txt`, 'utf8').trim();
+            } catch (e) {
+              console.warn('Could not read sync-conflicts.txt:', e.message);
+            }
+
+            // Reproduce the CI merge-base locally: without the same graft, a
+            // squash-flattened base makes the merge conflict on thousands of
+            // files instead of the true upstream delta.
+            const graftStep = grafted
+              ? [
+                  '2. Re-establish the correct merge base (matches CI — without this the',
+                  '   merge conflicts on far more files), then merge:',
+                  '   ```bash',
+                  `   git replace --graft ${graftCommit} $(git rev-parse ${graftCommit}^@) ${prevUpstream}`,
+                  `   git merge ${syncSha}`,
+                  `   # ...resolve conflicts, then: git replace -d ${graftCommit}`,
+                  '   ```',
+                ]
+              : [
+                  '2. Merge the upstream target:',
+                  '   ```bash',
+                  `   git merge ${syncSha}`,
+                  '   ```',
+                ];
+
             // Truncate conflict list if it would push the body over
             // GitHub's 65 536-character issue-body limit.
-            const conflictLines = (conflicts || '').split('\n');
+            const conflictLines = conflicts ? conflicts.split('\n') : [];
             const MAX_BODY = 65000; // leave headroom for encoding overhead
             const MAX_CONFLICT_LINES = 200;
             let conflictBlock;
@@ -368,17 +466,20 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Pull the sync branch and fetch upstream:',
+              '1. Check out the release branch and fetch upstream:',
               '   ```bash',
-              `   git fetch origin && git checkout ${branch}`,
+              `   git fetch origin && git checkout ${target}`,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
-              `   git fetch upstream && git merge ${syncSha}`,
+              '   git fetch upstream --tags',
               '   ```',
-              '2. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
+              ...graftStep,
+              '3. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
               '   ```bash',
               '   claude "Read HELIO_INTEGRATION.md then fix the merge conflicts. Preserve all Helio code."',
               '   ```',
-              '3. Push fixes — the PR will be created on the next workflow run, or create one manually.',
+              '4. Squash-merge the resulting PR into the release branch (a squash keeps',
+              '   the "verified signatures" rule satisfied). Do NOT push unsigned',
+              '   upstream commits to a protected branch.',
               '',
               'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
             ].join('\n');
