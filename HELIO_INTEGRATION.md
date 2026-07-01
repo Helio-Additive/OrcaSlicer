@@ -354,8 +354,11 @@ a conflict. Real example: a `v2.4.0-beta → v2.4.1` delta of **~5 files** explo
 to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
-workflow ephemerally grafts the upstream commit our content is based on (derived
-from `version.inc`) onto the branch tip:
+workflow ephemerally grafts the upstream commit our content is based on onto the
+branch tip. For tag-release syncs that commit is derived from `version.inc`
+(authoritative — it names the synced release); for `main` syncs it comes from the
+`helio-last-synced-main` tracking tag (`version.inc` would name an older release
+there and must not be used):
 
 ```bash
 git replace --graft <release_tip> $(git rev-parse <release_tip>^@) <prev_upstream_commit>

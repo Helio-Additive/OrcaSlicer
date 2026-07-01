@@ -217,17 +217,24 @@ jobs:
           TIP=$(git rev-parse HEAD)
 
           # Determine PREV_UPSTREAM = the upstream commit our branch content is
-          # based on. Prefer version.inc (authoritative — it names the upstream
-          # release the tree was synced to); fall back to the tracking tag.
+          # based on.
+          #  - Tag-release syncs (TRACKING_TAG=helio-last-synced): version.inc
+          #    authoritatively names the upstream release the tree was synced to,
+          #    so prefer it (the tracking tag can lag). Tracking tag as fallback.
+          #  - Main syncs (TRACKING_TAG=helio-last-synced-main): version.inc names
+          #    an older tagged release, NOT the last synced main commit, so it must
+          #    NOT be used — prefer the tracking tag, which points at that commit.
           PREV=""
-          VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
-          if [ -n "$VER" ]; then
-            for cand in "v$VER" "$VER"; do
-              if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
-                c=$(git rev-parse "refs/tags/$cand^{commit}")
-                if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
-              fi
-            done
+          if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
+            if [ -n "$VER" ]; then
+              for cand in "v$VER" "$VER"; do
+                if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
+                  c=$(git rev-parse "refs/tags/$cand^{commit}")
+                  if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
+                fi
+              done
+            fi
           fi
           if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
@@ -466,9 +473,9 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Check out the release branch and fetch upstream:',
+              '1. Check out the sync branch (already pushed by CI) and fetch upstream:',
               '   ```bash',
-              `   git fetch origin && git checkout ${target}`,
+              `   git fetch origin && git checkout ${branch}`,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
               '   git fetch upstream --tags',
               '   ```',
