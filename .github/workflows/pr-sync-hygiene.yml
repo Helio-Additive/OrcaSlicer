@@ -1,0 +1,38 @@
+name: Sync PR hygiene
+
+# Defense-in-depth for the upstream-sync notification problem. The sync workflow
+# now squashes the branch before opening the PR, but a hand-made or mis-built sync
+# PR could still carry upstream's individual commits. GitHub auto-subscribes the
+# author of every commit in a PR to that PR's thread, so an un-squashed sync PR
+# subscribes ~100+ external upstream contributors and emails them on every comment.
+# This check fails such a PR so it gets squashed first. See CLAUDE.md → Upstream Sync.
+
+on:
+  pull_request:
+    branches:
+      - orca-latest-parity-bambu
+
+permissions:
+  contents: read
+
+jobs:
+  require-squashed-sync:
+    runs-on: ubuntu-latest
+    # Only guard upstream-sync PRs: automated sync branches or the upstream-sync label.
+    if: >-
+      startsWith(github.head_ref, 'helio-release-candidate-') ||
+      startsWith(github.head_ref, 'helio-upstream-') ||
+      contains(github.event.pull_request.labels.*.name, 'upstream-sync')
+    steps:
+      - name: Require the sync branch to be squashed
+        env:
+          COMMITS: ${{ github.event.pull_request.commits }}
+        run: |
+          echo "Commits in this sync PR: ${COMMITS:-unknown}"
+          # A squashed sync is a single commit. A merge that carries upstream
+          # history is hundreds. 20 is a generous ceiling that still catches it.
+          if [ "${COMMITS:-0}" -gt 20 ]; then
+            echo "::error::This upstream-sync PR has ${COMMITS} commits — it still carries upstream's individual commits, which subscribes ~100+ external contributors to this PR's notifications. Squash the sync branch to a single commit before opening: git commit-tree <merge-tree> -p <target-tip>. See CLAUDE.md → Upstream Sync."
+            exit 1
+          fi
+          echo "Sync PR is squashed ✓"

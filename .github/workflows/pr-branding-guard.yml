@@ -1,0 +1,34 @@
+name: Branding guard
+
+# Blocks upstream branding/distribution copy from leaking into the Helio fork's
+# README during upstream syncs. Upstream "improves" the Linux install docs with a
+# Flathub badge and the `com.orcaslicer.OrcaSlicer` flatpak id — but Helio is not
+# published on Flathub and ships Helio-prefixed assets from the Helio releases
+# page, so those docs misdirect users to upstream OrcaSlicer. See
+# HELIO_INTEGRATION.md Rule 11.
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+
+permissions:
+  contents: read
+
+jobs:
+  branding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject upstream distribution markers in README
+        run: |
+          # Patterns that only ever belong to upstream's distribution channels.
+          # (Deliberately NOT matching generic OrcaSlicer/OrcaSlicer release links,
+          # which legitimately appear for the Windows WebView2 / vcredist runtimes.)
+          PATTERNS='com\.orcaslicer\.OrcaSlicer|flathub\.org/apps/com\.orcaslicer|dl\.flathub\.org'
+          if grep -nEi "$PATTERNS" README.md; then
+            echo "::error file=README.md::README contains upstream distribution markers (Flathub badge / com.orcaslicer.OrcaSlicer). The Helio fork is not on Flathub and ships Helio-prefixed assets — keep the Helio branding (--ours). See HELIO_INTEGRATION.md Rule 11."
+            exit 1
+          fi
+          echo "No upstream distribution markers in README ✓"

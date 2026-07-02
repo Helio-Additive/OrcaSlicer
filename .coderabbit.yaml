@@ -1,0 +1,17 @@
+# CodeRabbit configuration
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# Upstream syncs change thousands of upstream-owned data files (printer/material
+# profiles, translations, vendored deps). That blows past CodeRabbit's per-PR file
+# cap, so it skips the review entirely ("too many files") — even though the code
+# surface worth reviewing is only ~100 files. Excluding those data trees lets the
+# review focus on src/**, CI workflows, and the conflict-resolved files.
+reviews:
+  path_filters:
+    - "!resources/profiles/**"
+    - "!localization/**"
+    - "!**/*.po"
+    - "!**/*.pot"
+    - "!deps/**"
+    - "!**/*.dll"
+    - "!**/*.lib"
