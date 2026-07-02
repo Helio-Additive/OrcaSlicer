@@ -23,12 +23,23 @@ jobs:
 
       - name: Reject upstream distribution markers in README
         run: |
-          # Patterns that only ever belong to upstream's distribution channels.
-          # (Deliberately NOT matching generic OrcaSlicer/OrcaSlicer release links,
-          # which legitimately appear for the Windows WebView2 / vcredist runtimes.)
-          PATTERNS='com\.orcaslicer\.OrcaSlicer|flathub\.org/apps/com\.orcaslicer|dl\.flathub\.org'
-          if grep -nEi "$PATTERNS" README.md; then
-            echo "::error file=README.md::README contains upstream distribution markers (Flathub badge / com.orcaslicer.OrcaSlicer). The Helio fork is not on Flathub and ships Helio-prefixed assets — keep the Helio branding (--ours). See HELIO_INTEGRATION.md Rule 11."
-            exit 1
+          fail=0
+
+          # 1) Flathub markers — never valid for Helio (the fork is not on Flathub).
+          if grep -nEi 'com\.orcaslicer\.OrcaSlicer|flathub' README.md; then
+            echo "::error file=README.md::README contains Flathub / com.orcaslicer.OrcaSlicer markers. The Helio fork is not published on Flathub — keep the Helio branding (--ours). See HELIO_INTEGRATION.md Rule 11."
+            fail=1
           fi
+
+          # 2) Upstream release-page / AppImage download links. These misdirect users
+          #    to upstream OrcaSlicer builds instead of Helio releases. The ONLY
+          #    legitimate upstream release links are the pinned Windows runtime
+          #    installers (WebView2, vcredist), so allow-list those and flag the rest.
+          if grep -nE 'OrcaSlicer/OrcaSlicer/releases' README.md \
+               | grep -vE 'MicrosoftEdgeWebView2RuntimeInstaller|vcredist'; then
+            echo "::error file=README.md::README links to upstream OrcaSlicer release assets (download/AppImage). Point Linux/primary downloads at the Helio releases page; only the pinned WebView2/vcredist runtime installers may reference upstream releases. See HELIO_INTEGRATION.md Rule 11."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "No upstream distribution markers in README ✓"

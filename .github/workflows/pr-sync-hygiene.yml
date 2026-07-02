@@ -9,6 +9,10 @@ name: Sync PR hygiene
 
 on:
   pull_request:
+    # `labeled` is required so the upstream-sync-label gate below is re-evaluated
+    # when a maintainer adds the label after opening (the default types are only
+    # opened/synchronize/reopened).
+    types: [opened, synchronize, reopened, labeled]
     branches:
       - orca-latest-parity-bambu
 
@@ -29,10 +33,12 @@ jobs:
           COMMITS: ${{ github.event.pull_request.commits }}
         run: |
           echo "Commits in this sync PR: ${COMMITS:-unknown}"
-          # A squashed sync is a single commit. A merge that carries upstream
-          # history is hundreds. 20 is a generous ceiling that still catches it.
-          if [ "${COMMITS:-0}" -gt 20 ]; then
-            echo "::error::This upstream-sync PR has ${COMMITS} commits — it still carries upstream's individual commits, which subscribes ~100+ external contributors to this PR's notifications. Squash the sync branch to a single commit before opening: git commit-tree <merge-tree> -p <target-tip>. See CLAUDE.md → Upstream Sync."
+          # Policy: a sync PR must be exactly ONE internally-authored squashed commit
+          # (see the squash-before-PR step in helio-upstream-sync.yml). Anything more
+          # means upstream's individual commits are still present — even a small weekly
+          # `main` sync of 2-20 commits subscribes those authors to this PR. Require 1.
+          if [ "${COMMITS:-0}" -ne 1 ]; then
+            echo "::error::This upstream-sync PR has ${COMMITS} commits — a sync PR must be a single squashed, internally-authored commit, or it subscribes the upstream commit authors to this PR's notifications. Squash the sync branch before opening: git commit-tree <merge-tree> -p <target-tip>. See CLAUDE.md → Upstream Sync."
             exit 1
           fi
-          echo "Sync PR is squashed ✓"
+          echo "Sync PR is a single squashed commit ✓"
