@@ -35,8 +35,8 @@ jobs:
           #    to upstream OrcaSlicer builds instead of Helio releases. The ONLY
           #    legitimate upstream release links are the pinned Windows runtime
           #    installers (WebView2, vcredist), so allow-list those and flag the rest.
-          if grep -nE 'OrcaSlicer/OrcaSlicer/releases' README.md \
-               | grep -vE 'MicrosoftEdgeWebView2RuntimeInstaller|vcredist'; then
+          if grep -nEi 'OrcaSlicer/OrcaSlicer/releases' README.md \
+               | grep -viE 'MicrosoftEdgeWebView2RuntimeInstaller|vcredist'; then
             echo "::error file=README.md::README links to upstream OrcaSlicer release assets (download/AppImage). Point Linux/primary downloads at the Helio releases page; only the pinned WebView2/vcredist runtime installers may reference upstream releases. See HELIO_INTEGRATION.md Rule 11."
             fail=1
           fi
