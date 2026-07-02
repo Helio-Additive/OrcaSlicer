@@ -3954,7 +3954,29 @@ void TabFilament::build()
 
         optgroup = page->new_optgroup(L("Print chamber temperature"), L"param_chamber_temp");
         optgroup->append_single_option_line("activate_chamber_temp_control", "material_temperatures#print-chamber-temperature");
-        optgroup->append_single_option_line("chamber_temperature", "material_temperatures#print-chamber-temperature");
+        line = { L("Chamber temperature"), L("Target chamber temperature, and the minimal chamber temperature at which printing should start") };
+        line.label_path = "material_temperatures#print-chamber-temperature";
+        Option chamber_temp_target_opt = optgroup->get_option("chamber_temperature");
+        chamber_temp_target_opt.opt.label = L("Target");
+        line.append_option(chamber_temp_target_opt);
+        Option chamber_min_temp_opt = optgroup->get_option("chamber_minimal_temperature");
+        chamber_min_temp_opt.opt.label = L("Minimal");
+        line.append_option(chamber_min_temp_opt);
+        optgroup->append_line(line);
+        optgroup->m_on_change = [this](t_config_option_key opt_key, boost::any value) {
+            DynamicPrintConfig& filament_config = m_preset_bundle->filaments.get_edited_preset().config;
+
+            update_dirty();
+            if (opt_key == "chamber_temperature") {
+                m_config_manipulation.check_chamber_temperature(&filament_config);
+                m_config_manipulation.check_chamber_minimal_temperature(&filament_config);
+            }
+            else if (opt_key == "chamber_minimal_temperature") {
+                m_config_manipulation.check_chamber_minimal_temperature(&filament_config);
+            }
+
+            on_value_change(opt_key, value);
+        };
 
         optgroup = page->new_optgroup(L("Print temperature"), L"param_extruder_temp");
         line = { L("Nozzle"), L("Nozzle temperature when printing") };
@@ -4028,9 +4050,6 @@ void TabFilament::build()
             }
             else if (opt_key == "nozzle_temperature_initial_layer") {
                 m_config_manipulation.check_nozzle_temperature_initial_layer_range(&filament_config);
-            }
-            else if (opt_key == "chamber_temperature") {
-                m_config_manipulation.check_chamber_temperature(&filament_config);
             }
 
             on_value_change(opt_key, value);
@@ -4477,6 +4496,7 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("gcode_flavor", "printer_basic_information_advanced#g-code-flavor");
         optgroup->append_single_option_line("pellet_modded_printer", "printer_basic_information_advanced#pellet-modded-printer");
         optgroup->append_single_option_line("bbl_use_printhost", "printer_basic_information_advanced#use-3rd-party-print-host");
+        optgroup->append_single_option_line("use_3mf");
         optgroup->append_single_option_line("scan_first_layer" , "printer_basic_information_advanced#scan-first-layer");
         optgroup->append_single_option_line("enable_power_loss_recovery", "printer_basic_information_advanced#power-loss-recovery");
         //option  = optgroup->get_option("wrapping_exclude_area");
@@ -7457,7 +7477,7 @@ void Tab::switch_excluder(int extruder_id)
                 if (extruder_id2 > 0)
                     index = get_index_for_extruder(extruder_id2);
                 is_extruder = true;
-            } else if (page->title().StartsWith("Speed limitation")) {
+            } else if (page->title().StartsWith("Motion ability")) {
                 index = get_index_for_extruder(extruder_id == -1 ? 0 : extruder_id, 2);
             }
         }

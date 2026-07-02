@@ -1461,8 +1461,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
 
     // load_toolpaths(gcode_result, build_volume, exclude_bounding_box);
     
-    // ORCA: Only show filament/color print preview if more than one tool/extruder is actually used in the toolpaths.
-    // Only reset back to Toolpaths (FeatureType) if we are currently in ColorPrint and this load is single-tool.
+    // ORCA: Apply smart default view type when extruder count changes.
     // Helio: preserve ThermalIndex view type across plate switches / gcode reloads
     const auto cur_vt = get_view_type();
     bool is_thermal_view = (cur_vt == libvgcode::EViewType::ThermalIndexMean ||
@@ -1478,16 +1477,25 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
         if (it != view_type_items.end())
             m_view_type_sel = std::distance(view_type_items.begin(), it);
         set_view_type(libvgcode::EViewType::FeatureType);
-    } else if (m_viewer.get_used_extruders_count() > 1) {
-        auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::ColorPrint);
-        if (it != view_type_items.end())
-            m_view_type_sel = std::distance(view_type_items.begin(), it);
-        set_view_type(libvgcode::EViewType::ColorPrint);
-    } else if (cur_vt == libvgcode::EViewType::ColorPrint) {
-        auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
-        if (it != view_type_items.end())
-            m_view_type_sel = std::distance(view_type_items.begin(), it);
-        set_view_type(libvgcode::EViewType::FeatureType);
+    } else {
+        int current_count = m_viewer.get_used_extruders_count();
+        if (current_count > 1) {
+            if (m_last_extruder_count_default_applied != 2) {
+                auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::ColorPrint);
+                if (it != view_type_items.end())
+                    m_view_type_sel = std::distance(view_type_items.begin(), it);
+                set_view_type(libvgcode::EViewType::ColorPrint);
+                m_last_extruder_count_default_applied = 2;
+            }
+        } else {
+            if (m_last_extruder_count_default_applied != 1) {
+                auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
+                if (it != view_type_items.end())
+                    m_view_type_sel = std::distance(view_type_items.begin(), it);
+                set_view_type(libvgcode::EViewType::FeatureType);
+                m_last_extruder_count_default_applied = 1;
+            }
+        }
     }
 
     // BBS: data for rendering color arrangement recommendation
@@ -1587,8 +1595,13 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             m_viewer.set_time_mode(libvgcode::convert(PrintEstimatedStatistics::ETimeMode::Normal));
     }
 
-    // set to color print by default if use multi extruders
-    // Helio: preserve ThermalIndex view type if the loaded data contains TI
+    // Helio: preserve ThermalIndex view type if the loaded data contains TI.
+    // NOTE: the multi-extruder ColorPrint defaulting deliberately lives ONLY in
+    // the block near the top of this function, which is gated by
+    // m_last_extruder_count_default_applied so it applies once per extruder-count
+    // change and then respects the user's manual view choice. Do not re-assert
+    // ColorPrint here — an unconditional override would fire on every reload/plate
+    // switch and defeat that sentinel. This block only handles the TI case.
     {
         const auto cur_vt2 = get_view_type();
         bool is_thermal2 = (cur_vt2 == libvgcode::EViewType::ThermalIndexMean ||
@@ -1604,16 +1617,9 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
                 }
             }
             set_view_type(libvgcode::EViewType::FeatureType);
-        } else if (m_viewer.get_used_extruders_count() > 1) {
-            for (int i = 0; i < view_type_items.size(); i++) {
-                if (view_type_items[i] == libvgcode::EViewType::ColorPrint) {
-                    m_view_type_sel = i;
-                    break;
-                }
-            }
-            set_view_type(libvgcode::EViewType::ColorPrint);
         }
     }
+
 
     bool only_gcode_3mf = false;
     PartPlate* current_plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
