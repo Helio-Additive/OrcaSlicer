@@ -263,6 +263,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Record the target-branch tip BEFORE merging. The squash step uses this
+          # as the single parent. Do not derive it from HEAD^1 after the merge: a
+          # fast-forwardable sync (bootstrap / no local delta) produces no merge
+          # commit, so HEAD^1 would be the upstream parent and the squash would
+          # still carry upstream commits.
+          echo "pre_merge=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
           if git merge "$SYNC_REF" --no-edit; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
@@ -568,12 +575,21 @@ jobs:
       # commit authors. The PR is squash-merged anyway, so nothing is lost.
       - name: Squash clean merge into a single commit
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        # Pass tag-derived values through env vars, never interpolated directly into
+        # the run: body — git ref names can contain shell metacharacters (`, $, (, ))
+        # that GitHub template expansion does not escape (template-injection).
+        env:
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          TARGET_BRANCH: ${{ steps.branch.outputs.target }}
+          PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
         run: |
-          BASE=$(git rev-parse HEAD^1)        # target-branch tip before the merge (first parent)
-          TREE=$(git rev-parse "HEAD^{tree}") # resolved merge tree
+          BASE="$PRE_MERGE"                   # target-branch tip recorded before the merge
+          TREE=$(git rev-parse "HEAD^{tree}") # resolved merge (or fast-forwarded) tree
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
-            -m "Upstream sync: ${{ steps.target.outputs.sync_label }} into ${{ steps.branch.outputs.target }} (squashed)" \
-            -m "Squashed single-commit sync of upstream ${{ steps.target.outputs.sync_ref }} (${{ steps.target.outputs.sync_sha }})." \
+            -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
+            -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
             -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications.")
           git reset --hard "$NEW"
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
