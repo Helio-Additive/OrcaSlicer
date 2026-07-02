@@ -11,6 +11,7 @@ add_executable(${_TEST_NAME}_tests
     test_clipper_utils.cpp
     test_config.cpp
     test_preset_bundle_loading.cpp
+    test_preset_setting_id.cpp
     test_elephant_foot_compensation.cpp
     test_geometry.cpp
     test_placeholder_parser.cpp
@@ -38,4 +39,4 @@ set_property(TARGET ${_TEST_NAME}_tests PROPERTY FOLDER "tests")
 
 orcaslicer_copy_test_dlls()
 
-catch_discover_tests(${_TEST_NAME}_tests)
+orcaslicer_discover_tests(${_TEST_NAME}_tests)

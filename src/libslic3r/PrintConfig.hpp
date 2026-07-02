@@ -1467,6 +1467,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool,                enable_filament_ramming))
     ((ConfigOptionBool,                tool_change_on_wipe_tower))
     ((ConfigOptionBool,                support_multi_bed_types))
+    ((ConfigOptionBool,                use_3mf))
 
     // Small Area Infill Flow Compensation
     ((ConfigOptionStrings,              small_area_infill_flow_compensation_model))
@@ -1646,7 +1647,8 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
 
     ((ConfigOptionBools,               activate_chamber_temp_control))
     ((ConfigOptionInts ,               chamber_temperature))
-    
+    ((ConfigOptionInts ,               chamber_minimal_temperature))
+
     // Orca: support adaptive bed mesh
     ((ConfigOptionFloat,               preferred_orientation))
     ((ConfigOptionPoint,               bed_mesh_min))
