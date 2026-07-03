@@ -1,0 +1,45 @@
+name: Branding guard
+
+# Blocks upstream branding/distribution copy from leaking into the Helio fork's
+# README during upstream syncs. Upstream "improves" the Linux install docs with a
+# Flathub badge and the `com.orcaslicer.OrcaSlicer` flatpak id — but Helio is not
+# published on Flathub and ships Helio-prefixed assets from the Helio releases
+# page, so those docs misdirect users to upstream OrcaSlicer. See
+# HELIO_INTEGRATION.md Rule 11.
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+
+permissions:
+  contents: read
+
+jobs:
+  branding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject upstream distribution markers in README
+        run: |
+          fail=0
+
+          # 1) Flathub markers — never valid for Helio (the fork is not on Flathub).
+          if grep -nEi 'com\.orcaslicer\.OrcaSlicer|flathub' README.md; then
+            echo "::error file=README.md::README contains Flathub / com.orcaslicer.OrcaSlicer markers. The Helio fork is not published on Flathub — keep the Helio branding (--ours). See HELIO_INTEGRATION.md Rule 11."
+            fail=1
+          fi
+
+          # 2) Upstream release-page / AppImage download links. These misdirect users
+          #    to upstream OrcaSlicer builds instead of Helio releases. The ONLY
+          #    legitimate upstream release links are the pinned Windows runtime
+          #    installers (WebView2, vcredist), so allow-list those and flag the rest.
+          if grep -nEi 'OrcaSlicer/OrcaSlicer/releases' README.md \
+               | grep -viE 'MicrosoftEdgeWebView2RuntimeInstaller|vcredist'; then
+            echo "::error file=README.md::README links to upstream OrcaSlicer release assets (download/AppImage). Point Linux/primary downloads at the Helio releases page; only the pinned WebView2/vcredist runtime installers may reference upstream releases. See HELIO_INTEGRATION.md Rule 11."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "No upstream distribution markers in README ✓"

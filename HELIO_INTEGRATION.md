@@ -337,6 +337,22 @@ If upstream renames functions that Helio calls, update Helio code to use the new
 - `restart_background_process()` → contains interleaved Helio code
 - `set_slicing_progress_percentage()` → signature modified by Helio
 
+### Rule 11: Branding & Distribution Docs (keep `--ours`)
+`README.md` is deliberately rebranded for the Helio fork ("Helio Orca Slicer",
+downloads point at the **Helio** releases page, assets are `Helio`-prefixed).
+Upstream frequently "improves" install docs, but those improvements point at
+**upstream's** distribution channels — which do **not** serve Helio:
+- Flathub `com.orcaslicer.OrcaSlicer` — Helio is **not** published on Flathub.
+- AppImage / release links to `github.com/OrcaSlicer/OrcaSlicer/releases` — Helio
+  ships from `github.com/Helio-Additive/OrcaSlicer/releases` with `Helio`-prefixed
+  asset names.
+
+So for `README.md` conflicts (and any other branding/distribution/marketing copy),
+**keep the Helio side (`--ours`)** unless a change is genuinely branding-neutral.
+Do **not** blanket "take upstream" on docs the way you would for upstream-owned
+data files (e.g. `resources/profiles/*.json`). If upstream adds a genuinely useful
+branding-neutral note, port just that note into the Helio wording by hand.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
@@ -374,6 +390,17 @@ first, or you will face the full (inflated) conflict set instead of the real del
 
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.
+
+**Squash the sync branch *before* the PR is opened, too.** GitHub auto-subscribes
+the author of every commit in a PR to that PR's notification thread. A sync branch
+that still carries upstream's hundreds of individual commits therefore subscribes
+~100+ external upstream contributors, who then get emailed on every bot/reviewer
+comment on the fork's sync PR ("why am I on this email chain"). The workflow now
+collapses a clean merge into a single internally-authored commit before pushing
+(`git commit-tree <merge-tree> -p <target-tip>`), and the conflict-resolution issue
+instructs resolvers to do the same. The squashed commit's tree is byte-identical to
+the merge result, so nothing is lost. See CLAUDE.md → "Upstream Sync" for the
+one-liner.
 
 ## Build Verification
 
