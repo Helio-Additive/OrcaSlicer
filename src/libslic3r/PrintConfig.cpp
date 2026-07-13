@@ -839,6 +839,14 @@ void PrintConfigDef::init_common_params()
     def->cli = ConfigOptionDef::nocli;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("use_3mf", coBool);
+    def->label = L("Use 3MF instead of G-code");
+    def->tooltip = L("Enable this if the printer accepts a 3MF file as the print job. When enabled, Orca Slicer "
+                     "sends the sliced file as a .gcode.3mf, instead of a plain .gcode file.");
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("printer_agent", coString);
     def->label = L("Printer Agent");
     def->tooltip = L("Select the network agent implementation for printer communication.");
@@ -1305,15 +1313,14 @@ void PrintConfigDef::init_fff_params()
     def = this->add("bridge_density", coPercent);
     def->label = L("External bridge density");
     def->category = L("Strength");
-    def->tooltip = L("Controls the density (spacing) of external bridge lines. Default is 100%.\n"
+    def->tooltip = L("Controls the density (spacing) of external bridge lines.\n"
                      "Theoretically, 100% means a solid bridge, but due to the tendency of bridge extrusions to sag, 100% may not be sufficient.\n\n"
                      "- Higher than 100% density (Recommended Max 125%):\n"
                      "  - Pros: Produces smoother bridge surfaces, as overlapping lines provide additional support during printing.\n"
                      "  - Cons: Can cause overextrusion, which may reduce lower and upper surface quality and increase the risk of warping.\n\n"
                      "- Lower than 100% density (Min 10%):\n"
                      "  - Pros: Can create a string-like first layer. Faster and with better cooling because there is more space for air to circulate around the extruded bridge.\n"
-                     "  - Cons: May lead to sagging and poorer surface finish.\n\n"
-                     "Recommended range: Minimum 10% - Maximum 125%.");
+                     "  - Cons: May lead to sagging and poorer surface finish.");
     def->sidetext = "%";
     def->min = 10;
     def->max = 125;
@@ -1323,7 +1330,7 @@ void PrintConfigDef::init_fff_params()
     def = this->add("internal_bridge_density", coPercent);
     def->label = L("Internal bridge density");
     def->category = L("Strength");
-    def->tooltip = L("Controls the density (spacing) of internal bridge lines. Default is 100%. 100% means a solid internal bridge.\n\n"
+    def->tooltip = L("Controls the density (spacing) of internal bridge lines.\n"
                      "Internal bridges act as intermediate support between sparse infill and top solid infill and can strongly affect top surface quality.\n\n"
                      "- Higher than 100% density (Recommended Max 125%):\n"
                      "  - Pros: Improves internal bridge strength and support under top layers, reducing sagging and improving top-surface finish.\n"
@@ -1353,7 +1360,7 @@ void PrintConfigDef::init_fff_params()
     def = this->add("bridge_line_width", coFloatOrPercent);
     def->label = L("Bridge");
     def->category = L("Quality");
-    def->tooltip = L("Bridge line width is expressed either as an absolute value or as a percentage of the active nozzle diameter (percentages are computed from the nozzle diameter).\n"
+    def->tooltip = L("Line width of the Bridge. If expressed as a %, it will be computed over the nozzle diameter.\n"
                      "Recommended to use with a higher Bridge density or Bridge flow ratio.\n\n"
                      "The maximum value is 100% or the nozzle diameter.\n"
                      "If set to 0, the line width will match the Internal solid infill width.");
@@ -4402,7 +4409,7 @@ void PrintConfigDef::init_fff_params()
     def->tooltip  = L("Reduce the height of top-surface perimeters to match the model edge height.\n"
                       "Affects perimeters with a slope less than this angle (degrees).\n"
                       "A reasonable value is 35. Set to 0 to disable.");
-    def->sidetext = L("°");
+    def->sidetext = u8"°";	// degrees, don't need translation
     def->min      = 0;
     def->max      = 90;
     def->mode     = comExpert;
@@ -4416,7 +4423,7 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("zaa_min_z", coFloat);
-    def->label    = L("Minimum z height");
+    def->label    = L("Minimum Z height");
     def->category = L("Quality");
     def->tooltip  = L("Minimum Z-layer height.\n"
                       "Also controls the slicing plane.");
@@ -6636,6 +6643,21 @@ void PrintConfigDef::init_fff_params()
                     );
     def->sidetext = L(u8"\u2103" /* °C */);	// degrees Celsius, CIS languages need translation
     def->full_label = L("Chamber temperature");
+    def->min = 0;
+    def->max = max_temp;
+    def->set_default_value(new ConfigOptionInts{0});
+
+    def = this->add("chamber_minimal_temperature", coInts);
+    def->label = L("Minimal");
+    def->tooltip = L("This is the chamber temperature at which printing should start, while the chamber continues heating "
+                     "toward the \"Target\" chamber temperature. For example, set the Target to 60 and the Minimal to 50 to "
+                     "begin printing once the chamber reaches 50°C, without waiting for the full 60°C.\n\n"
+                     "It sets a G-code variable named chamber_minimal_temperature, which can be passed to your print start macro "
+                     "or a heat soak macro, like this: PRINT_START (other variables) CHAMBER_MIN_TEMP=[chamber_minimal_temperature].\n\n"
+                     "Unlike the \"Target\" chamber temperature, this option does not emit any M141/M191 commands; it only exposes "
+                     "the value to your custom G-code. It should not exceed the \"Target\" chamber temperature.");
+    def->sidetext = L(u8"\u2103" /* °C */);	// degrees Celsius, CIS languages need translation
+    def->full_label = L("Chamber minimal temperature");
     def->min = 0;
     def->max = max_temp;
     def->set_default_value(new ConfigOptionInts{0});
@@ -11315,6 +11337,7 @@ TemperaturesConfigDef::TemperaturesConfigDef()
     new_def("bed_temperature_initial_layer", coInts, "First layer bed temperature", "Vector of first layer bed temperatures for each extruder/filament. Provides the same value as first_layer_bed_temperature.")
     new_def("bed_temperature_initial_layer_single", coInt, "First layer bed temperature (initial extruder)", "First layer bed temperature for the initial extruder. Same as bed_temperature_initial_layer[initial_extruder]")
     new_def("chamber_temperature", coInts, "Chamber temperature", "Vector of chamber temperatures for each extruder/filament.")
+    new_def("chamber_minimal_temperature", coInts, "Chamber minimal temperature", "Vector of minimal chamber temperatures for each extruder/filament.")
     new_def("overall_chamber_temperature", coInt, "Overall chamber temperature", "Overall chamber temperature. This value is the maximum chamber temperature of any extruder/filament used.")
     new_def("first_layer_bed_temperature", coInts, "First layer bed temperature", "Vector of first layer bed temperatures for each extruder/filament. Provides the same value as bed_temperature_initial_layer.")
     new_def("first_layer_temperature", coInts, "First layer temperature", "Vector of first layer temperatures for each extruder/filament.")
