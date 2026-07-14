@@ -676,7 +676,7 @@ public:
     // Helio cloud processing
     bool            is_helio_enable();
     static void     request_helio_pat(std::function<void(std::string)> func);
-    static void     request_helio_supported_data();
+    static void     request_helio_supported_data(bool force_refresh = false);
 
     // Parameters extracted from the command line to be passed to GUI after initialization.
     GUI_InitParams* init_params { nullptr };

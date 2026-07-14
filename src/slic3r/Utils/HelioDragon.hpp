@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "PrintHost.hpp"
+#include "HelioSupportData.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "nlohmann/json.hpp"
 #include "../GUI/BackgroundSlicingProcess.hpp"
@@ -85,14 +86,8 @@ public:
         std::string trace_id;
     };
 
-    struct SupportedData
-    {
-        std::string id;
-        std::string name;
-        std::string native_name;
-        std::string feedstock;
-        bool heated_chamber{false};
-    };
+    using SupportedData = HelioSupportedData;
+    using SupportDataSnapshot = std::shared_ptr<const std::vector<SupportedData>>;
 
     struct PrintPriorityOption {
         std::string value;        // Enum value: "SPEED_AND_STRENGTH"
@@ -288,8 +283,21 @@ public:
     static std::string get_helio_api_url();
     static std::string get_helio_pat();
     static void set_helio_pat(std::string pat);
-    static void request_support_machine(const std::string helio_api_url, const std::string helio_api_key, int page, int retries_left = 3);
-    static void request_support_material(const std::string helio_api_url, const std::string helio_api_key, int page, int retries_left = 3);
+    static bool request_all_support_machine(const std::string& helio_api_url,
+                                            const std::string& helio_api_key,
+                                            bool force_refresh = false);
+    static bool request_all_support_materials(const std::string& helio_api_url,
+                                              const std::string& helio_api_key,
+                                              bool force_refresh = false);
+
+    static SupportDataSnapshot  supported_printers_snapshot();
+    static SupportDataSnapshot  supported_materials_snapshot();
+    static SupportDataLoadState supported_printers_state();
+    static SupportDataLoadState supported_materials_state();
+    static std::string          supported_printers_last_error();
+    static std::string          supported_materials_last_error();
+    static SupportDataAvailability supported_data_availability();
+    static void                 shutdown_background_requests();
     static void request_pat_token(std::function<void(std::string)> func);
     static void optimization_feedback(const std::string helio_api_url, const std::string helio_api_key, std::string optimization_id, float rating, std::string comment);
     static PresignedURLResult create_presigned_url(const std::string helio_api_url, const std::string helio_api_key);
@@ -314,21 +322,6 @@ public:
                                               const std::vector<MaterialInput>& materials,
                                               bool isMultiColor, bool isMultiMaterial);
 
-    static void request_all_support_machine(const std::string helio_api_url, const std::string helio_api_key)
-    {
-        global_printers_fully_loaded = false;
-        global_supported_printers.clear();
-        clear_print_priority_cache();
-        request_support_machine(helio_api_url, helio_api_key, 1);
-    }
-
-    static void request_all_support_materials(const std::string helio_api_url, const std::string helio_api_key)
-    {
-        global_materials_fully_loaded = false;
-        global_supported_materials.clear();
-        clear_print_priority_cache();
-        request_support_material(helio_api_url, helio_api_key, 1);
-    }
 
     static void request_print_priority_options(
         const std::string& helio_api_url,
@@ -411,10 +404,6 @@ public:
         return "OrcaSlicer " + iso_datetime;
     }
 
-    static std::vector<SupportedData> global_supported_printers;
-    static std::vector<SupportedData> global_supported_materials;
-    static bool global_printers_fully_loaded;
-    static bool global_materials_fully_loaded;
     static std::map<std::string, std::vector<PrintPriorityOption>> global_print_priority_cache;
     static std::string last_simulation_trace_id;
     static std::string last_optimization_trace_id;

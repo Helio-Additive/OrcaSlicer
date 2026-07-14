@@ -1,5 +1,6 @@
 #include "HelioDragon.hpp"
 
+#include <atomic>
 #include <string>
 #include <wx/string.h>
 #include <wx/file.h>
@@ -8,6 +9,7 @@
 #include <vector>
 #include <boost/format.hpp>
 #include "PrintHost.hpp"
+#include "Http.hpp"
 #include "libslic3r/Thread.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/PrintBase.hpp"
@@ -26,10 +28,6 @@
 
 namespace Slic3r {
 
-std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_printers;
-std::vector<HelioQuery::SupportedData> HelioQuery::global_supported_materials;
-bool HelioQuery::global_printers_fully_loaded = false;
-bool HelioQuery::global_materials_fully_loaded = false;
 std::map<std::string, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::global_print_priority_cache;
 
 std::string HelioQuery::last_simulation_trace_id;
@@ -228,188 +226,241 @@ void HelioQuery::request_remaining_optimizations(const std::string & helio_api_u
         .perform();
 }
 
-void HelioQuery::request_support_machine(const std::string helio_api_url, const std::string helio_api_key, int page, int retries_left)
+namespace {
+
+class HelioRequestWorkers
 {
-    std::string query_body = R"( {
-            "query": "query GetPrinters($page: Int) { printers(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Printer  { id name heatedChamber alternativeNames { bambustudio } } } } }",
-            "variables": {"page": %1%}
-		} )";
+public:
+    using Task = std::function<void(const std::atomic_bool&)>;
 
-    query_body = boost::str(boost::format(query_body) % page);
-
-    std::string url_copy  = helio_api_url;
-    std::string key_copy  = helio_api_key;
-    int         page_copy = page;
-
-    std::string response_headers;
-    auto http = Http::post(url_copy);
-
-    http.header("Content-Type", "application/json")
-        .header("Authorization", "Bearer " + helio_api_key)
-        .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
-        .header("HelioAdditive-Client-Version", helio_client_version())
-        .set_post_body(query_body);
-
-    http.timeout_connect(20)
-        .timeout_max(100)
-        .on_complete([url_copy, key_copy, page_copy, retries_left](std::string body, unsigned status) {
-            nlohmann::json                         parsed_obj = nlohmann::json::parse(body);
-            std::vector<HelioQuery::SupportedData> supported_printers;
-
-            try {
-                if (parsed_obj.contains("data") && parsed_obj["data"].contains("printers")) {
-                    auto materials = parsed_obj["data"]["printers"];
-                    if (materials.contains("objects") && materials["objects"].is_array()) {
-                        for (const auto &pobj : materials["objects"]) {
-                            HelioQuery::SupportedData sp;
-                            if (pobj.contains("id") && !pobj["id"].is_null()) { sp.id = pobj["id"].get<std::string>(); }
-                            if (pobj.contains("name") && !pobj["id"].is_null()) { sp.name = pobj["name"].get<std::string>(); }
-                            if (pobj.contains("heatedChamber") && pobj["heatedChamber"].is_boolean()) { sp.heated_chamber = pobj["heatedChamber"].get<bool>(); }
-
-                            if (pobj.contains("alternativeNames") && pobj["alternativeNames"].is_object()) {
-                                auto alternativeNames = pobj["alternativeNames"];
-
-                                if (alternativeNames.contains("bambustudio") && !alternativeNames["bambustudio"].is_null()) {
-                                    sp.native_name = alternativeNames["bambustudio"].get<std::string>();
-                                }
-                            }
-
-                            supported_printers.push_back(sp);
-                        }
-                    }
-
-                    HelioQuery::global_supported_printers.insert(HelioQuery::global_supported_printers.end(), supported_printers.begin(), supported_printers.end());
-
-                    if (materials.contains("pageInfo") && materials["pageInfo"].contains("hasNextPage") && materials["pageInfo"]["hasNextPage"].get<bool>()) {
-                        HelioQuery::request_support_machine(url_copy, key_copy, page_copy + 1, retries_left);
-                    } else {
-                        HelioQuery::global_printers_fully_loaded = true;
-                        BOOST_LOG_TRIVIAL(info) << "Helio: all printer pages loaded, total: " << HelioQuery::global_supported_printers.size();
-                    }
+    bool start(Task task)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_stopping.load(std::memory_order_acquire)) {
+            return false;
+        }
+        reap_finished_locked();
+        auto finished = std::make_shared<std::atomic_bool>(false);
+        try {
+            m_workers.reserve(m_workers.size() + 1);
+            m_workers.emplace_back();
+            Worker& worker = m_workers.back();
+            worker.finished = finished;
+            worker.thread = std::thread([this, task = std::move(task), finished]() mutable {
+                try {
+                    task(m_stopping);
+                } catch (...) {
                 }
-            } catch (const std::exception& e) {
-                BOOST_LOG_TRIVIAL(error) << "Helio request_support_machine (page " << page_copy << ", retries=" << retries_left << "): " << e.what();
-                if (retries_left > 0) {
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-                    HelioQuery::request_support_machine(url_copy, key_copy, page_copy, retries_left - 1);
-                } else {
-                    HelioQuery::global_printers_fully_loaded = true;
-                }
-            } catch (...) {
-                BOOST_LOG_TRIVIAL(error) << "Helio request_support_machine (page " << page_copy << ", retries=" << retries_left << "): unknown error";
-                if (retries_left > 0) {
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-                    HelioQuery::request_support_machine(url_copy, key_copy, page_copy, retries_left - 1);
-                } else {
-                    HelioQuery::global_printers_fully_loaded = true;
-                }
+                finished->store(true, std::memory_order_release);
+            });
+        } catch (...) {
+            if (!m_workers.empty() && m_workers.back().finished == finished &&
+                !m_workers.back().thread.joinable()) {
+                m_workers.pop_back();
             }
-        })
-        .on_error([url_copy, key_copy, page_copy, retries_left](std::string body, std::string error, unsigned status) {
-            BOOST_LOG_TRIVIAL(error) << "request_support_machine error (page " << page_copy << ", retries=" << retries_left << "): " << error << ", status: " << status << ", body: " << body;
-            if (retries_left > 0) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
-                HelioQuery::request_support_machine(url_copy, key_copy, page_copy, retries_left - 1);
-            } else {
-                HelioQuery::global_printers_fully_loaded = true;
+            return false;
+        }
+        return true;
+    }
+
+    void shutdown()
+    {
+        std::vector<Worker> workers;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_stopping.store(true, std::memory_order_release);
+            workers.swap(m_workers);
+        }
+        for (Worker& worker : workers) {
+            if (worker.thread.joinable()) {
+                worker.thread.join();
             }
-        })
-        .perform();
+        }
+    }
+
+private:
+    struct Worker { std::thread thread; std::shared_ptr<std::atomic_bool> finished; };
+
+    void reap_finished_locked()
+    {
+        m_workers.erase(
+            std::remove_if(m_workers.begin(), m_workers.end(), [](Worker& w) {
+                if (w.finished && w.finished->load(std::memory_order_acquire)) {
+                    if (w.thread.joinable()) w.thread.join();
+                    return true;
+                }
+                return false;
+            }),
+            m_workers.end());
+    }
+
+    std::mutex          m_mutex;
+    std::atomic_bool    m_stopping{false};
+    std::vector<Worker> m_workers;
+};
+
+HelioRequestWorkers& helio_request_workers()
+{
+    static HelioRequestWorkers* workers = new HelioRequestWorkers;
+    return *workers;
 }
 
-void HelioQuery::request_support_material(const std::string helio_api_url, const std::string helio_api_key, int page, int retries_left)
+SupportDataHttpResponse helio_fetch_support_data_page(SupportDataCatalogKind kind,
+                                                       const std::string& helio_api_url,
+                                                       const std::string& helio_api_key,
+                                                       int page,
+                                                       const std::atomic_bool& stopping)
 {
-    std::string query_body = R"( {
-			"query": "query GetMaterias($page: Int) { materials(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Material  { id name feedstock alternativeNames { bambustudio } } } } }",
-            "variables": {"page": %1%}
-		} )";
+    const char* query = kind == SupportDataCatalogKind::Printers
+        ? "query GetPrinters($page: Int) { printers(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Printer  { id name heatedChamber alternativeNames { bambustudio } } } } }"
+        : "query GetMaterias($page: Int) { materials(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Material  { id name feedstock alternativeNames { bambustudio } } } } }";
 
-    query_body = boost::str(boost::format(query_body) % page);
+    nlohmann::json request_body;
+    request_body["query"] = query;
+    request_body["variables"]["page"] = page;
 
-    std::string url_copy  = helio_api_url;
-    std::string key_copy  = helio_api_key;
-    int         page_copy = page;
+    SupportDataHttpResponse response;
 
-    auto http = Http::post(url_copy);
+    if (stopping.load(std::memory_order_acquire)) {
+        response.error = "Helio support-data request stopped during shutdown";
+        return response;
+    }
 
+    auto http = Http::post(helio_api_url);
     http.header("Content-Type", "application/json")
         .header("Authorization", "Bearer " + helio_api_key)
         .header("HelioAdditive-Client-Name", SLIC3R_APP_NAME)
         .header("HelioAdditive-Client-Version", helio_client_version())
-        .set_post_body(query_body);
-
-    http.timeout_connect(20)
+        .set_post_body(request_body.dump())
+        .timeout_connect(20)
         .timeout_max(100)
-        .on_complete([url_copy, key_copy, page_copy, retries_left](std::string body, unsigned status) {
-            BOOST_LOG_TRIVIAL(info) << "request_support_material" << body;
-            nlohmann::json                         parsed_obj = nlohmann::json::parse(body);
-            std::vector<HelioQuery::SupportedData> supported_materials;
-
-            try {
-                if (parsed_obj.contains("data") && parsed_obj["data"].contains("materials")) {
-                    auto materials = parsed_obj["data"]["materials"];
-                    if (materials.contains("objects") && materials["objects"].is_array()) {
-                        for (const auto &pobj : materials["objects"]) {
-                            HelioQuery::SupportedData sp;
-                            if (pobj.contains("id") && !pobj["id"].is_null()) { sp.id = pobj["id"].get<std::string>(); }
-                            if (pobj.contains("name") && !pobj["id"].is_null()) { sp.name = pobj["name"].get<std::string>(); }
-                            if (pobj.contains("feedstock") && !pobj["feedstock"].is_null()) { sp.feedstock = pobj["feedstock"].get<std::string>(); }
-                            if (pobj.contains("alternativeNames") && pobj["alternativeNames"].is_object()) {
-                                auto alternativeNames = pobj["alternativeNames"];
-
-                                //bambu materials
-                                if (alternativeNames.contains("bambustudio") && !alternativeNames["bambustudio"].is_null()) {
-                                    sp.native_name = alternativeNames["bambustudio"].get<std::string>();
-                                }
-                                //third party materials
-                                else {
-                                    if (pobj.contains("name") && !pobj["id"].is_null()) { sp.native_name = pobj["name"].get<std::string>(); }
-                                }
-                            }
-                            // Only include materials with feedstock type FILAMENT
-                            if (sp.feedstock == "FILAMENT") {
-                                supported_materials.push_back(sp);
-                            }
-                        }
-                    }
-
-                    HelioQuery::global_supported_materials.insert(HelioQuery::global_supported_materials.end(), supported_materials.begin(), supported_materials.end());
-
-                    if (materials.contains("pageInfo") && materials["pageInfo"].contains("hasNextPage") && materials["pageInfo"]["hasNextPage"].get<bool>()) {
-                        HelioQuery::request_support_material(url_copy, key_copy, page_copy + 1, retries_left);
-                    } else {
-                        HelioQuery::global_materials_fully_loaded = true;
-                        BOOST_LOG_TRIVIAL(info) << "Helio: all material pages loaded, total: " << HelioQuery::global_supported_materials.size();
-                    }
-                }
-            } catch (const std::exception& e) {
-                BOOST_LOG_TRIVIAL(error) << "Helio request_support_material (page " << page_copy << ", retries=" << retries_left << "): " << e.what();
-                if (retries_left > 0) {
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-                    HelioQuery::request_support_material(url_copy, key_copy, page_copy, retries_left - 1);
-                } else {
-                    HelioQuery::global_materials_fully_loaded = true;
-                }
-            } catch (...) {
-                BOOST_LOG_TRIVIAL(error) << "Helio request_support_material (page " << page_copy << ", retries=" << retries_left << "): unknown error";
-                if (retries_left > 0) {
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-                    HelioQuery::request_support_material(url_copy, key_copy, page_copy, retries_left - 1);
-                } else {
-                    HelioQuery::global_materials_fully_loaded = true;
-                }
-            }
+        .on_complete([&response](std::string body, unsigned status) {
+            response.status = status;
+            response.body   = std::move(body);
         })
-        .on_error([url_copy, key_copy, page_copy, retries_left](std::string body, std::string error, unsigned status) {
-            BOOST_LOG_TRIVIAL(error) << "request_support_material error (page " << page_copy << ", retries=" << retries_left << "): " << error << ", status: " << status << ", body: " << body;
-            if (retries_left > 0) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
-                HelioQuery::request_support_material(url_copy, key_copy, page_copy, retries_left - 1);
-            } else {
-                HelioQuery::global_materials_fully_loaded = true;
-            }
+        .on_error([&response](std::string body, std::string error, unsigned status) {
+            response.status = status;
+            response.body   = std::move(body);
+            response.error  = std::move(error);
         })
-        .perform();
+        .perform_sync();
+
+    return response;
+}
+
+SupportDataCatalogStore& helio_printers_store()
+{
+    static SupportDataCatalogStore* store =
+        new SupportDataCatalogStore(SupportDataCatalogKind::Printers);
+    return *store;
+}
+
+SupportDataCatalogStore& helio_materials_store()
+{
+    static SupportDataCatalogStore* store =
+        new SupportDataCatalogStore(SupportDataCatalogKind::Materials);
+    return *store;
+}
+
+bool helio_request_support_data(SupportDataCatalogStore& store,
+                                const std::string& helio_api_url,
+                                const std::string& helio_api_key,
+                                bool force_refresh)
+{
+    if (!store.try_begin(force_refresh)) {
+        return false;
+    }
+
+    const bool worker_started = helio_request_workers().start(
+        [&store, helio_api_url, helio_api_key](const std::atomic_bool& stopping) {
+            store.run(
+                [&helio_api_url, &helio_api_key, &stopping](SupportDataCatalogKind kind, int page) {
+                    return helio_fetch_support_data_page(kind, helio_api_url, helio_api_key, page, stopping);
+                },
+                [&stopping](int seconds) {
+                    for (int elapsed = 0;
+                         elapsed < seconds * 10 && !stopping.load(std::memory_order_acquire);
+                         ++elapsed) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+                },
+                [](const SupportDataLoadAttempt& attempt) {
+                    const char* catalog = attempt.kind == SupportDataCatalogKind::Printers ? "printers" : "materials";
+                    BOOST_LOG_TRIVIAL(warning) << "Helio support-data load: catalog=" << catalog
+                        << ", page=" << attempt.page
+                        << ", retry-kind=" << helio_retry_kind_name(attempt.retry_kind)
+                        << ", attempt=" << attempt.attempt << "/" << attempt.max_attempts
+                        << ", status=" << attempt.status
+                        << ", trace-id=" << attempt.trace_id
+                        << ", error=" << attempt.error;
+                });
+        });
+
+    if (!worker_started) {
+        store.run([](SupportDataCatalogKind, int) {
+            SupportDataHttpResponse response;
+            response.error = "Failed to start Helio support-data worker";
+            return response;
+        });
+        return false;
+    }
+    return true;
+}
+
+} // anonymous namespace
+
+bool HelioQuery::request_all_support_machine(const std::string& helio_api_url,
+                                             const std::string& helio_api_key,
+                                             bool force_refresh)
+{
+    return helio_request_support_data(helio_printers_store(), helio_api_url, helio_api_key, force_refresh);
+}
+
+bool HelioQuery::request_all_support_materials(const std::string& helio_api_url,
+                                               const std::string& helio_api_key,
+                                               bool force_refresh)
+{
+    return helio_request_support_data(helio_materials_store(), helio_api_url, helio_api_key, force_refresh);
+}
+
+HelioQuery::SupportDataSnapshot HelioQuery::supported_printers_snapshot()
+{
+    return helio_printers_store().snapshot();
+}
+
+HelioQuery::SupportDataSnapshot HelioQuery::supported_materials_snapshot()
+{
+    return helio_materials_store().snapshot();
+}
+
+SupportDataLoadState HelioQuery::supported_printers_state()
+{
+    return helio_printers_store().state();
+}
+
+SupportDataLoadState HelioQuery::supported_materials_state()
+{
+    return helio_materials_store().state();
+}
+
+std::string HelioQuery::supported_printers_last_error()
+{
+    return helio_printers_store().last_error();
+}
+
+std::string HelioQuery::supported_materials_last_error()
+{
+    return helio_materials_store().last_error();
+}
+
+SupportDataAvailability HelioQuery::supported_data_availability()
+{
+    return Slic3r::support_data_availability(helio_printers_store().view(), helio_materials_store().view());
+}
+
+void HelioQuery::shutdown_background_requests()
+{
+    helio_request_workers().shutdown();
 }
 
 void HelioQuery::request_print_priority_options(

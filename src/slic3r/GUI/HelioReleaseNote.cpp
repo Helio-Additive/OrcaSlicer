@@ -1697,13 +1697,16 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // Determine heated_chamber from Helio API (default: false)
     bool has_heated_chamber = false;
     if (!printer_name.empty()) {
-        std::string target_lower = boost::to_lower_copy(printer_name);
-        for (const auto& p : HelioQuery::global_supported_printers) {
-            if (p.native_name.empty()) continue;
-            std::string native_lower = boost::to_lower_copy(p.native_name);
-            if (target_lower == native_lower || target_lower.find(native_lower) != std::string::npos) {
-                has_heated_chamber = p.heated_chamber;
-                break;
+        const auto supported_printers = HelioQuery::supported_printers_snapshot();
+        if (supported_printers) {
+            std::string target_lower = boost::to_lower_copy(printer_name);
+            for (const auto& p : *supported_printers) {
+                if (p.native_name.empty()) continue;
+                std::string native_lower = boost::to_lower_copy(p.native_name);
+                if (target_lower == native_lower || target_lower.find(native_lower) != std::string::npos) {
+                    has_heated_chamber = p.heated_chamber;
+                    break;
+                }
             }
         }
     }
