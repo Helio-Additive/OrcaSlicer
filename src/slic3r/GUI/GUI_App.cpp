@@ -2540,6 +2540,7 @@ int GUI_App::OnExit()
 {
     stop_http_server();
     stop_sync_user_preset();
+    Slic3r::HelioQuery::shutdown_background_requests();
 
     if (m_device_manager) {
         delete m_device_manager;

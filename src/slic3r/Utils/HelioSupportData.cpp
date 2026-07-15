@@ -182,7 +182,7 @@ SupportDataPageResult parse_support_data_page(SupportDataCatalogKind        kind
                 }
             } else {
                 if (!required_string(object, "feedstock", item.feedstock)) {
-                    return incomplete_page(response, "Helio materials page contains an incomplete feedstock value");
+                    continue;
                 }
             }
 

@@ -313,7 +313,7 @@ SupportDataHttpResponse helio_fetch_support_data_page(SupportDataCatalogKind kin
 {
     const char* query = kind == SupportDataCatalogKind::Printers
         ? "query GetPrinters($page: Int) { printers(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Printer  { id name heatedChamber alternativeNames { bambustudio } } } } }"
-        : "query GetMaterias($page: Int) { materials(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Material  { id name feedstock alternativeNames { bambustudio } } } } }";
+        : "query GetMaterials($page: Int) { materials(page: $page, pageSize: 20) { pages pageInfo { hasNextPage } objects { ... on Material  { id name feedstock alternativeNames { bambustudio } } } } }";
 
     nlohmann::json request_body;
     request_body["query"] = query;

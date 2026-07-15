@@ -11,6 +11,7 @@
 #include <regex>
 #include <future>
 #include <thread>
+#include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <boost/nowide/cstdio.hpp>
 #include <boost/iterator/counting_iterator.hpp>
@@ -10768,26 +10769,39 @@ private:
         // Store a copy for the background thread callback
         m_unsupported_copy = unsupported_filaments;
 
-        // Run refresh in background thread to avoid blocking UI
-        m_refresh_thread = std::make_unique<std::thread>([this]() {
-            wxGetApp().request_helio_supported_data(true);
+        // Kick off the refresh from the main thread (safe wxWidgets access)
+        std::string url = HelioQuery::get_helio_api_url();
+        std::string key = HelioQuery::get_helio_pat();
+        if (HelioQuery::request_all_support_machine(url, key, true) ||
+            HelioQuery::request_all_support_materials(url, key, true)) {
+            HelioQuery::clear_print_priority_cache();
+        }
 
-            // Wait for stores to finish loading
+        m_dialog_alive = std::make_shared<std::atomic<bool>>(true);
+        auto alive = m_dialog_alive;
+
+        // Wait for stores to finish loading in a background thread
+        m_refresh_thread = std::make_unique<std::thread>([this, alive]() {
             constexpr int timeout_ms = 60000;
             int elapsed = 0;
-            while (elapsed < timeout_ms &&
+            while (*alive && elapsed < timeout_ms &&
                    (HelioQuery::supported_materials_state() == SupportDataLoadState::Loading ||
                     HelioQuery::supported_printers_state() == SupportDataLoadState::Loading)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 elapsed += 100;
             }
 
-            // Post result back to GUI thread
-            wxTheApp->CallAfter([this]() {
-                on_refresh_complete();
-            });
+            if (*alive) {
+                wxTheApp->CallAfter([this, alive]() {
+                    if (*alive) on_refresh_complete();
+                });
+            }
         });
         m_refresh_thread->detach();
+    }
+
+    ~HelioUnsupportedFilamentsDialog() {
+        if (m_dialog_alive) *m_dialog_alive = false;
     }
 
     void on_refresh_complete() {
@@ -10825,6 +10839,7 @@ private:
     Label* m_refresh_status{nullptr};
     std::vector<FilamentSupportInfo> m_unsupported_copy;
     std::unique_ptr<std::thread> m_refresh_thread;
+    std::shared_ptr<std::atomic<bool>> m_dialog_alive;
 };
 
 // ===========================================================================
@@ -17742,7 +17757,9 @@ int Plater::get_helio_process_status() const
 
 void Plater::set_materials_from_helio()
 {
-    p->helio_elements_fetched = (HelioQuery::supported_materials_state() == SupportDataLoadState::Ready);
+    p->helio_elements_fetched =
+        (HelioQuery::supported_materials_state() == SupportDataLoadState::Ready) &&
+        (HelioQuery::supported_printers_state() == SupportDataLoadState::Ready);
 }
 
 void Plater::set_materials_invalid_from_helio()

@@ -1,5 +1,4 @@
-#ifndef slic3r_HelioSupportData_hpp_
-#define slic3r_HelioSupportData_hpp_
+#pragma once
 
 #include "HelioRetryPolicy.hpp"
 
@@ -135,5 +134,3 @@ private:
 };
 
 } // namespace Slic3r
-
-#endif // slic3r_HelioSupportData_hpp_

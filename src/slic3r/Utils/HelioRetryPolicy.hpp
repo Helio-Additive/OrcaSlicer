@@ -1,5 +1,4 @@
-#ifndef slic3r_HelioRetryPolicy_hpp_
-#define slic3r_HelioRetryPolicy_hpp_
+#pragma once
 
 #include <string>
 
@@ -50,5 +49,3 @@ private:
 };
 
 } // namespace Slic3r
-
-#endif // slic3r_HelioRetryPolicy_hpp_

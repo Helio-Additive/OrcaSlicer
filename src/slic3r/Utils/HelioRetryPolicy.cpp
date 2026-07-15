@@ -130,7 +130,7 @@ HelioRetryKind helio_classify_graphql_response(unsigned status, const nlohmann::
 
 HelioRetryKind helio_classify_graphql_response(unsigned status, const std::string& body)
 {
-    if (helio_is_terminal_http_status(status) || status != 200) {
+    if (status != 200) {
         return HelioRetryKind::None;
     }
 
@@ -155,8 +155,9 @@ HelioRetryKind helio_classify_retry(unsigned status,
         return HelioRetryKind::Transient;
     }
 
-    (void) body;
-    (void) transport_error;
+    if (helio_is_transient_error_message(body) || helio_is_transient_error_message(transport_error)) {
+        return HelioRetryKind::Transient;
+    }
     return HelioRetryKind::None;
 }
 
