@@ -334,6 +334,10 @@ SupportDataHttpResponse helio_fetch_support_data_page(SupportDataCatalogKind kin
         .set_post_body(request_body.dump())
         .timeout_connect(20)
         .timeout_max(100)
+        .on_progress([&stopping](Http::Progress, bool& cancel) {
+            if (stopping.load(std::memory_order_acquire))
+                cancel = true;
+        })
         .on_complete([&response](std::string body, unsigned status) {
             response.status = status;
             response.body   = std::move(body);

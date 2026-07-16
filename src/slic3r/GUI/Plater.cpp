@@ -10758,6 +10758,10 @@ public:
     int get_user_choice() const { return m_user_choice; }
     std::string get_selected_material_id() const { return m_selected_material_id; }
 
+    ~HelioUnsupportedFilamentsDialog() {
+        if (m_dialog_alive) *m_dialog_alive = false;
+    }
+
 private:
     void on_refresh_and_retry(const std::vector<FilamentSupportInfo>& unsupported_filaments) {
         m_refresh_button->Enable(false);
@@ -10772,8 +10776,9 @@ private:
         // Kick off the refresh from the main thread (safe wxWidgets access)
         std::string url = HelioQuery::get_helio_api_url();
         std::string key = HelioQuery::get_helio_pat();
-        if (HelioQuery::request_all_support_machine(url, key, true) ||
-            HelioQuery::request_all_support_materials(url, key, true)) {
+        bool printers_started  = HelioQuery::request_all_support_machine(url, key, true);
+        bool materials_started = HelioQuery::request_all_support_materials(url, key, true);
+        if (printers_started || materials_started) {
             HelioQuery::clear_print_priority_cache();
         }
 
@@ -10798,10 +10803,6 @@ private:
             }
         });
         m_refresh_thread->detach();
-    }
-
-    ~HelioUnsupportedFilamentsDialog() {
-        if (m_dialog_alive) *m_dialog_alive = false;
     }
 
     void on_refresh_complete() {
