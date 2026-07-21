@@ -1033,8 +1033,7 @@ void HelioStatementDialog::request_pat()
                         copy_pat_button->Show();
                     }
 
-                    /*request helio data*/
-                    wxGetApp().request_helio_supported_data();
+                    // set_helio_pat triggers force-refresh automatically
                 }
             }
         });
