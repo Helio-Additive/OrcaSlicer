@@ -609,10 +609,19 @@ std::string HelioQuery::get_helio_pat()
 
 void HelioQuery::set_helio_pat(std::string pat)
 {
+    const std::string old_pat = get_helio_pat();
     if (GUI::wxGetApp().app_config->get("region") == "China") {
         GUI::wxGetApp().app_config->set("helio_pat_china", pat);
     } else {
         GUI::wxGetApp().app_config->set("helio_pat_other", pat);
+    }
+    GUI::wxGetApp().app_config->set("helio_access_token", pat);
+
+    if (!pat.empty() && pat != old_pat) {
+        BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";
+        const std::string url = get_helio_api_url();
+        request_all_support_machine(url, pat, true);
+        request_all_support_materials(url, pat, true);
     }
 }
 

@@ -9967,8 +9967,11 @@ static FilamentSupportInfo check_filament_helio_support(const std::string& filam
     boost::trim(target_name);
 
     const auto supported_materials = HelioQuery::supported_materials_snapshot();
-    if (!supported_materials)
+    if (!supported_materials) {
+        BOOST_LOG_TRIVIAL(warning) << "check_filament_helio_support: snapshot is null for '"
+                                   << filament_preset_name << "'";
         return info;
+    }
 
     size_t best_match_length = 0;
     for (const HelioQuery::SupportedData& pdata : *supported_materials) {
@@ -10005,6 +10008,13 @@ static FilamentSupportInfo check_filament_helio_support(const std::string& filam
             info.is_supported = true;
         }
     }
+
+    if (!info.is_supported) {
+        BOOST_LOG_TRIVIAL(warning) << "check_filament_helio_support: no match for '"
+                                   << target_name << "' (preset: '" << filament_preset_name
+                                   << "') among " << supported_materials->size() << " materials";
+    }
+
     return info;
 }
 
@@ -11625,9 +11635,8 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
     if (!(partplate_list.get_curr_plate()->empty())) {
         helio_processing_disabled = true;
-        auto    app_config    = wxGetApp().app_config;
-        std::string helio_api_key = app_config->get("helio_access_token");
-        std::string helio_api_url = app_config->get("helio_api_url");
+        std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+        std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
 
         std::string helio_printer_id  = q->get_helio_printer_id_for_the_current_selection().value_or("");
 
