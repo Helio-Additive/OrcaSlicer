@@ -2619,6 +2619,7 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
 
             BOOST_LOG_TRIVIAL(info) << "get_recent_runs response status: " << status;
             BOOST_LOG_TRIVIAL(info) << "get_recent_runs response body length: " << body.length();
+            BOOST_LOG_TRIVIAL(info) << "get_recent_runs response body: " << body.substr(0, 500);
 
             if (status != 200) {
                 success = false;
@@ -2630,8 +2631,25 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
             try {
                 nlohmann::json parsed = nlohmann::json::parse(body);
 
+                // Check for GraphQL-level errors (HTTP 200 but query failed)
+                if (parsed.contains("errors") && parsed["errors"].is_array() && !parsed["errors"].empty()) {
+                    std::string gql_error;
+                    for (const auto& err : parsed["errors"]) {
+                        if (err.contains("message") && err["message"].is_string()) {
+                            if (!gql_error.empty()) gql_error += "; ";
+                            gql_error += err["message"].get<std::string>();
+                        }
+                    }
+                    BOOST_LOG_TRIVIAL(error) << "get_recent_runs GraphQL errors: " << gql_error;
+                    if (!parsed.contains("data") || parsed["data"].is_null()) {
+                        success = false;
+                        error_msg = "API error: " + gql_error;
+                        return;
+                    }
+                }
+
                 // Parse optimizations
-                if (parsed.contains("data") && parsed["data"].contains("optimizations")) {
+                if (parsed.contains("data") && !parsed["data"].is_null() && parsed["data"].contains("optimizations")) {
                     auto opts = parsed["data"]["optimizations"];
                     BOOST_LOG_TRIVIAL(info) << "Found optimizations in response";
                     if (opts.contains("objects") && opts["objects"].is_array()) {
@@ -2718,7 +2736,7 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
                 BOOST_LOG_TRIVIAL(info) << "Total optimizations parsed: " << temp_optimizations.size();
 
                 // Parse simulations
-                if (parsed.contains("data") && parsed["data"].contains("simulations")) {
+                if (parsed.contains("data") && !parsed["data"].is_null() && parsed["data"].contains("simulations")) {
                     auto sims = parsed["data"]["simulations"];
                     BOOST_LOG_TRIVIAL(info) << "Found simulations in response";
                     if (sims.contains("objects") && sims["objects"].is_array()) {

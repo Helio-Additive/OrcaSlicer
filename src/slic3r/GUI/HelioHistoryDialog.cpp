@@ -284,11 +284,11 @@ void HelioHistoryDialog::load_recent_runs()
         auto result = HelioQuery::get_recent_runs(helio_api_url, helio_pat);
 
         if (!result.success) {
-            // Error occurred - show empty state
-            BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Query failed - " << result.error;
+            BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Query failed - " << result.error
+                                     << " (HTTP " << result.status << ")";
             m_optimizations.clear();
             m_simulations.clear();
-            show_empty_state();
+            show_error_state(result.error);
             return;
         }
 
@@ -334,6 +334,28 @@ void HelioHistoryDialog::show_empty_state()
     if (m_loading_label) m_loading_label->Hide();
     if (m_empty_state_panel) m_empty_state_panel->Show();
     if (m_content_panel) m_content_panel->Hide();
+    Layout();
+}
+
+void HelioHistoryDialog::show_error_state(const std::string& error)
+{
+    if (m_loading_label) m_loading_label->Hide();
+    if (m_content_panel) m_content_panel->Hide();
+    if (m_empty_state_panel) {
+        auto* sizer = m_empty_state_panel->GetSizer();
+        if (sizer) {
+            for (auto* child : m_empty_state_panel->GetChildren()) {
+                if (auto* label = dynamic_cast<Label*>(child)) {
+                    if (label->GetForegroundColour() == HELIO_TEXT) {
+                        label->SetLabel(_L("Failed to Load History"));
+                    } else if (label->GetForegroundColour() == HELIO_MUTED) {
+                        label->SetLabel(wxString::FromUTF8(error));
+                    }
+                }
+            }
+        }
+        m_empty_state_panel->Show();
+    }
     Layout();
 }
 

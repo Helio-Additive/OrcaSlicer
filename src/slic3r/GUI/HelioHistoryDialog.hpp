@@ -78,6 +78,7 @@ private:
     void load_recent_runs();
     void show_loading_state();
     void show_empty_state();
+    void show_error_state(const std::string& error);
     void show_content();
 
     // Helper functions
