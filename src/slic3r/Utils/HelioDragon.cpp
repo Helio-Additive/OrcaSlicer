@@ -2617,9 +2617,8 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
         .on_complete([&temp_optimizations, &temp_simulations, &success, &error_msg, &status_code](std::string body, unsigned status) {
             status_code = status;
 
-            BOOST_LOG_TRIVIAL(info) << "get_recent_runs response status: " << status;
-            BOOST_LOG_TRIVIAL(info) << "get_recent_runs response body length: " << body.length();
-            BOOST_LOG_TRIVIAL(info) << "get_recent_runs response body: " << body.substr(0, 500);
+            BOOST_LOG_TRIVIAL(info) << "get_recent_runs response status: " << status
+                                     << ", body length: " << body.length();
 
             if (status != 200) {
                 success = false;
@@ -2642,6 +2641,15 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
                     }
                     BOOST_LOG_TRIVIAL(error) << "get_recent_runs GraphQL errors: " << gql_error;
                     if (!parsed.contains("data") || parsed["data"].is_null()) {
+                        success = false;
+                        error_msg = "API error: " + gql_error;
+                        return;
+                    }
+                    // Partial data: errors present but data is non-null — check if the
+                    // requested root fields are both null (authorization/scoping failure)
+                    bool opts_null = !parsed["data"].contains("optimizations") || parsed["data"]["optimizations"].is_null();
+                    bool sims_null = !parsed["data"].contains("simulations") || parsed["data"]["simulations"].is_null();
+                    if (opts_null && sims_null) {
                         success = false;
                         error_msg = "API error: " + gql_error;
                         return;

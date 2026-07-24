@@ -332,7 +332,18 @@ void HelioHistoryDialog::show_loading_state()
 void HelioHistoryDialog::show_empty_state()
 {
     if (m_loading_label) m_loading_label->Hide();
-    if (m_empty_state_panel) m_empty_state_panel->Show();
+    if (m_empty_state_panel) {
+        for (auto* child : m_empty_state_panel->GetChildren()) {
+            if (auto* label = dynamic_cast<Label*>(child)) {
+                if (label->GetForegroundColour() == HELIO_TEXT) {
+                    label->SetLabel(_L("No Recent Runs Found"));
+                } else if (label->GetForegroundColour() == HELIO_MUTED) {
+                    label->SetLabel(_L("No completed simulations or optimizations found"));
+                }
+            }
+        }
+        m_empty_state_panel->Show();
+    }
     if (m_content_panel) m_content_panel->Hide();
     Layout();
 }
