@@ -11582,6 +11582,12 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
     if (!(partplate_list.get_curr_plate()->empty())) {
         helio_processing_disabled = true;
         std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
+        if (helio_api_key.empty()) {
+            // Fallback for users who configured a token via Preferences before the
+            // region-specific "helio_pat_*" keys existed; the legacy value is still
+            // persisted under "helio_access_token".
+            helio_api_key = wxGetApp().app_config->get("helio_access_token");
+        }
         std::string helio_api_url = Slic3r::HelioQuery::get_helio_api_url();
 
         std::string helio_printer_id  = q->get_helio_printer_id_for_the_current_selection().value_or("");

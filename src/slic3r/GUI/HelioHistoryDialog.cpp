@@ -25,6 +25,7 @@
 #include <wx/stdpaths.h>
 #include <wx/file.h>
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <regex>
@@ -355,12 +356,21 @@ void HelioHistoryDialog::show_error_state(const std::string& error)
     if (m_empty_state_panel) {
         auto* sizer = m_empty_state_panel->GetSizer();
         if (sizer) {
+            // Backend/GraphQL error messages can be arbitrarily long and unbounded; cap the
+            // displayed length and wrap the text so it can't overflow the non-scrolling
+            // empty-state panel (the history scroll window has horizontal scrolling disabled).
+            constexpr size_t max_error_len = 200;
+            wxString display_error = wxString::FromUTF8(error);
+            if (display_error.length() > max_error_len) {
+                display_error = display_error.Left(max_error_len) + "...";
+            }
             for (auto* child : m_empty_state_panel->GetChildren()) {
                 if (auto* label = dynamic_cast<Label*>(child)) {
                     if (label->GetForegroundColour() == HELIO_TEXT) {
                         label->SetLabel(_L("Failed to Load History"));
                     } else if (label->GetForegroundColour() == HELIO_MUTED) {
-                        label->SetLabel(wxString::FromUTF8(error));
+                        label->SetLabel(display_error);
+                        label->Wrap(std::max(FromDIP(200), GetClientSize().GetWidth() - FromDIP(80)));
                     }
                 }
             }

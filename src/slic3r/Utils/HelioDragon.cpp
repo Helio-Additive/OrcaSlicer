@@ -2656,6 +2656,15 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
                     }
                 }
 
+                // Reject responses with missing/null/non-object `data` even when no GraphQL
+                // "errors" array was present (e.g. HTTP 200 with body `{"data":null}`).
+                if (!parsed.contains("data") || !parsed["data"].is_object()) {
+                    success = false;
+                    error_msg = "API error: invalid response data";
+                    BOOST_LOG_TRIVIAL(error) << "get_recent_runs response missing or invalid 'data' field";
+                    return;
+                }
+
                 // Parse optimizations
                 if (parsed.contains("data") && !parsed["data"].is_null() && parsed["data"].contains("optimizations")) {
                     auto opts = parsed["data"]["optimizations"];
