@@ -398,6 +398,14 @@ bool helio_request_support_data(SupportDataCatalogStore& store,
                         << ", trace-id=" << attempt.trace_id
                         << ", error=" << attempt.error;
                 });
+
+            // A force-refresh (e.g. the user linking/replacing a PAT) may have arrived
+            // while this load was already in flight; try_begin() queues it instead of
+            // dropping it (see SupportDataCatalogStore::try_begin()). Honor it now with
+            // freshly-read credentials, since the ones this run used may already be stale.
+            if (!stopping.load(std::memory_order_acquire) && store.consume_pending_refresh()) {
+                helio_request_support_data(store, HelioQuery::get_helio_api_url(), HelioQuery::get_helio_pat(), true);
+            }
         });
 
     if (!worker_started) {
@@ -616,6 +624,11 @@ void HelioQuery::set_helio_pat(std::string pat)
         GUI::wxGetApp().app_config->set("helio_pat_other", pat);
     }
     GUI::wxGetApp().app_config->set("helio_access_token", pat);
+    // Callers commonly save the app config for "helio_access_token" *before* calling this
+    // function, so the regional helio_pat_china/helio_pat_other key set just above would
+    // otherwise remain unsaved in memory only. Persist it now so get_helio_pat() (which
+    // reads the regional key) reflects the latest PAT after a restart.
+    GUI::wxGetApp().app_config->save();
 
     if (!pat.empty() && pat != old_pat) {
         BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";

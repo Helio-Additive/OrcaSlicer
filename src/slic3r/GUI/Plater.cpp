@@ -17814,7 +17814,11 @@ std::optional<std::string> Plater::get_helio_material_id_for_the_current_selecti
 
 std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selection()
 {
-    if (HelioQuery::supported_printers_state() != SupportDataLoadState::Ready)
+    // Use the aggregate availability check (rather than a strict Ready state check) so
+    // that a still-usable last-good snapshot is accepted even after a force refresh has
+    // failed (SupportDataCatalogStore::fail() keeps the previous snapshot around, and
+    // supported_data_availability() reports it as Usable in that case).
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable)
         return std::nullopt;
 
     // First check printer config for explicit helio_printer_id

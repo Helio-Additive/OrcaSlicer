@@ -248,6 +248,14 @@ bool SupportDataCatalogStore::try_begin(bool force_refresh)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_state == SupportDataLoadState::Loading) {
+        if (force_refresh) {
+            // A load is already in flight (e.g. from Helio startup) and it may be using
+            // stale credentials (e.g. the user just linked/replaced a PAT). Queue a
+            // follow-up refresh instead of discarding this request outright: once the
+            // in-flight run finishes, the caller re-checks consume_pending_refresh() and
+            // re-triggers a fresh load with current credentials.
+            m_pending_refresh = true;
+        }
         return false;
     }
     if (m_snapshot && !force_refresh) {
@@ -257,9 +265,20 @@ bool SupportDataCatalogStore::try_begin(bool force_refresh)
         return false;
     }
 
-    m_state       = SupportDataLoadState::Loading;
+    m_state            = SupportDataLoadState::Loading;
     m_last_error.clear();
-    m_run_claimed = false;
+    m_run_claimed      = false;
+    m_pending_refresh  = false;
+    return true;
+}
+
+bool SupportDataCatalogStore::consume_pending_refresh()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_pending_refresh) {
+        return false;
+    }
+    m_pending_refresh = false;
     return true;
 }
 

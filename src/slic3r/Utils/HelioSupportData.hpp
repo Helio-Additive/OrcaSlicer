@@ -108,6 +108,12 @@ public:
 
     bool try_begin(bool force_refresh = false);
 
+    // Returns true (and clears the flag) if a force-refresh was requested while a load
+    // was already in flight (see try_begin()). Callers should use this to re-trigger a
+    // fresh load with up-to-date credentials once the in-flight run completes, so a PAT
+    // change that arrives mid-load is not silently dropped.
+    bool consume_pending_refresh();
+
     bool run(const PageFetcher&  fetcher,
              const RetrySleeper& sleeper = RetrySleeper(),
              const Logger&       logger = Logger());
@@ -131,6 +137,7 @@ private:
     Snapshot                     m_snapshot;
     std::string                  m_last_error;
     bool                         m_run_claimed{false};
+    bool                         m_pending_refresh{false};
 };
 
 } // namespace Slic3r
