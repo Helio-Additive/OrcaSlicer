@@ -282,6 +282,12 @@ bool SupportDataCatalogStore::consume_pending_refresh()
     return true;
 }
 
+bool SupportDataCatalogStore::has_pending_refresh() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_pending_refresh;
+}
+
 bool SupportDataCatalogStore::claim_run()
 {
     std::lock_guard<std::mutex> lock(m_mutex);

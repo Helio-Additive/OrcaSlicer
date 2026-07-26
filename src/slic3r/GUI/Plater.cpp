@@ -10795,13 +10795,17 @@ private:
         m_dialog_alive = std::make_shared<std::atomic<bool>>(true);
         auto alive = m_dialog_alive;
 
-        // Wait for stores to finish loading in a background thread
+        // Wait for stores to finish loading in a background thread.
+        // Also wait while a pending refresh exists — a force-refresh queued behind an
+        // in-flight load briefly leaves the Loading state before the worker picks up
+        // the pending flag and re-enters Loading.
         m_refresh_thread = std::make_unique<std::thread>([this, alive]() {
             constexpr int timeout_ms = 60000;
             int elapsed = 0;
             while (*alive && elapsed < timeout_ms &&
                    (HelioQuery::supported_materials_state() == SupportDataLoadState::Loading ||
-                    HelioQuery::supported_printers_state() == SupportDataLoadState::Loading)) {
+                    HelioQuery::supported_printers_state() == SupportDataLoadState::Loading ||
+                    HelioQuery::has_pending_support_data_refresh())) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 elapsed += 100;
             }
@@ -17800,7 +17804,7 @@ void Plater::set_helio_elements_have_been_loaded(bool status)
 
 std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection(size_t extruder_id)
 {
-    if (HelioQuery::supported_materials_state() != SupportDataLoadState::Ready)
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable)
         return std::nullopt;
 
     // Get current filament preset name for the given extruder

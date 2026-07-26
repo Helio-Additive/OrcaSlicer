@@ -297,6 +297,7 @@ public:
     static std::string          supported_printers_last_error();
     static std::string          supported_materials_last_error();
     static SupportDataAvailability supported_data_availability();
+    static bool                 has_pending_support_data_refresh();
     static void                 shutdown_background_requests();
     static void request_pat_token(std::function<void(std::string)> func);
     static void optimization_feedback(const std::string helio_api_url, const std::string helio_api_key, std::string optimization_id, float rating, std::string comment);

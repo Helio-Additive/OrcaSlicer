@@ -113,6 +113,7 @@ public:
     // fresh load with up-to-date credentials once the in-flight run completes, so a PAT
     // change that arrives mid-load is not silently dropped.
     bool consume_pending_refresh();
+    bool has_pending_refresh() const;
 
     bool run(const PageFetcher&  fetcher,
              const RetrySleeper& sleeper = RetrySleeper(),

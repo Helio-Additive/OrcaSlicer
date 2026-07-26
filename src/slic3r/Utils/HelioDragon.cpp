@@ -470,6 +470,11 @@ SupportDataAvailability HelioQuery::supported_data_availability()
     return Slic3r::support_data_availability(helio_printers_store().view(), helio_materials_store().view());
 }
 
+bool HelioQuery::has_pending_support_data_refresh()
+{
+    return helio_printers_store().has_pending_refresh() || helio_materials_store().has_pending_refresh();
+}
+
 void HelioQuery::shutdown_background_requests()
 {
     helio_request_workers().shutdown();
@@ -628,13 +633,22 @@ void HelioQuery::set_helio_pat(std::string pat)
     // function, so the regional helio_pat_china/helio_pat_other key set just above would
     // otherwise remain unsaved in memory only. Persist it now so get_helio_pat() (which
     // reads the regional key) reflects the latest PAT after a restart.
-    GUI::wxGetApp().app_config->save();
+    // AppConfig::save() must run on the main thread — dispatch via CallAfter so callers
+    // from HTTP worker threads (e.g. request_pat_token) don't trigger a CriticalException.
+    if (wxTheApp) {
+        wxTheApp->CallAfter([]() {
+            GUI::wxGetApp().app_config->save();
+        });
+    }
 
     if (!pat.empty() && pat != old_pat) {
         BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";
+        if (!GUI::wxGetApp().app_config->get_bool("enable_helio_processing"))
+            return;
         const std::string url = get_helio_api_url();
         request_all_support_machine(url, pat, true);
         request_all_support_materials(url, pat, true);
+        clear_print_priority_cache();
     }
 }
 
