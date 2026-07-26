@@ -2629,10 +2629,10 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
 
             try {
                 nlohmann::json parsed = nlohmann::json::parse(body);
+                std::string gql_error;
 
                 // Check for GraphQL-level errors (HTTP 200 but query failed)
                 if (parsed.contains("errors") && parsed["errors"].is_array() && !parsed["errors"].empty()) {
-                    std::string gql_error;
                     for (const auto& err : parsed["errors"]) {
                         if (err.contains("message") && err["message"].is_string()) {
                             if (!gql_error.empty()) gql_error += "; ";
@@ -2838,6 +2838,15 @@ HelioQuery::GetRecentRunsResult HelioQuery::get_recent_runs(const std::string& h
                 }
 
                 BOOST_LOG_TRIVIAL(info) << "Total simulations parsed: " << temp_simulations.size();
+
+                // When the response carried GraphQL errors and the surviving branch(es)
+                // yielded no usable results, surface the error instead of showing an
+                // empty "No Recent Runs Found" state that hides a backend failure.
+                if (!gql_error.empty() && temp_optimizations.empty() && temp_simulations.empty()) {
+                    success = false;
+                    error_msg = "API error: " + gql_error;
+                    return;
+                }
 
                 success = true;
 

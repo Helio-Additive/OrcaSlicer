@@ -314,11 +314,10 @@ void HelioHistoryDialog::load_recent_runs()
             show_content();
         }
     } catch (const std::exception& e) {
-        // Catch any errors and show empty state
         BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Exception - " << e.what();
         m_optimizations.clear();
         m_simulations.clear();
-        show_empty_state();
+        show_error_state(e.what());
     }
 }
 
@@ -370,7 +369,9 @@ void HelioHistoryDialog::show_error_state(const std::string& error)
                         label->SetLabel(_L("Failed to Load History"));
                     } else if (label->GetForegroundColour() == HELIO_MUTED) {
                         label->SetLabel(display_error);
-                        label->Wrap(std::max(FromDIP(200), GetClientSize().GetWidth() - FromDIP(80)));
+                        m_empty_state_panel->Layout();
+                        int wrap_width = std::max(FromDIP(200), m_empty_state_panel->GetClientSize().GetWidth() - FromDIP(40));
+                        label->Wrap(wrap_width);
                     }
                 }
             }
