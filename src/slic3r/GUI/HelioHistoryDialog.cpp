@@ -25,6 +25,7 @@
 #include <wx/stdpaths.h>
 #include <wx/file.h>
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <regex>
@@ -284,11 +285,11 @@ void HelioHistoryDialog::load_recent_runs()
         auto result = HelioQuery::get_recent_runs(helio_api_url, helio_pat);
 
         if (!result.success) {
-            // Error occurred - show empty state
-            BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Query failed - " << result.error;
+            BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Query failed - " << result.error
+                                     << " (HTTP " << result.status << ")";
             m_optimizations.clear();
             m_simulations.clear();
-            show_empty_state();
+            show_error_state(result.error);
             return;
         }
 
@@ -313,11 +314,10 @@ void HelioHistoryDialog::load_recent_runs()
             show_content();
         }
     } catch (const std::exception& e) {
-        // Catch any errors and show empty state
         BOOST_LOG_TRIVIAL(error) << "HelioHistoryDialog: Exception - " << e.what();
         m_optimizations.clear();
         m_simulations.clear();
-        show_empty_state();
+        show_error_state(e.what());
     }
 }
 
@@ -332,8 +332,52 @@ void HelioHistoryDialog::show_loading_state()
 void HelioHistoryDialog::show_empty_state()
 {
     if (m_loading_label) m_loading_label->Hide();
-    if (m_empty_state_panel) m_empty_state_panel->Show();
+    if (m_empty_state_panel) {
+        for (auto* child : m_empty_state_panel->GetChildren()) {
+            if (auto* label = dynamic_cast<Label*>(child)) {
+                if (label->GetForegroundColour() == HELIO_TEXT) {
+                    label->SetLabel(_L("No Recent Runs Found"));
+                } else if (label->GetForegroundColour() == HELIO_MUTED) {
+                    label->SetLabel(_L("No completed simulations or optimizations found"));
+                }
+            }
+        }
+        m_empty_state_panel->Show();
+    }
     if (m_content_panel) m_content_panel->Hide();
+    Layout();
+}
+
+void HelioHistoryDialog::show_error_state(const std::string& error)
+{
+    if (m_loading_label) m_loading_label->Hide();
+    if (m_content_panel) m_content_panel->Hide();
+    if (m_empty_state_panel) {
+        auto* sizer = m_empty_state_panel->GetSizer();
+        if (sizer) {
+            // Backend/GraphQL error messages can be arbitrarily long and unbounded; cap the
+            // displayed length and wrap the text so it can't overflow the non-scrolling
+            // empty-state panel (the history scroll window has horizontal scrolling disabled).
+            constexpr size_t max_error_len = 200;
+            wxString display_error = wxString::FromUTF8(error);
+            if (display_error.length() > max_error_len) {
+                display_error = display_error.Left(max_error_len) + "...";
+            }
+            for (auto* child : m_empty_state_panel->GetChildren()) {
+                if (auto* label = dynamic_cast<Label*>(child)) {
+                    if (label->GetForegroundColour() == HELIO_TEXT) {
+                        label->SetLabel(_L("Failed to Load History"));
+                    } else if (label->GetForegroundColour() == HELIO_MUTED) {
+                        label->SetLabel(display_error);
+                        m_empty_state_panel->Layout();
+                        int wrap_width = std::max(FromDIP(200), m_empty_state_panel->GetClientSize().GetWidth() - FromDIP(40));
+                        label->Wrap(wrap_width);
+                    }
+                }
+            }
+        }
+        m_empty_state_panel->Show();
+    }
     Layout();
 }
 
