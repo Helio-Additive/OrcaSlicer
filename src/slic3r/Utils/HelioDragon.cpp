@@ -30,6 +30,9 @@ namespace Slic3r {
 
 std::map<std::string, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::global_print_priority_cache;
 
+// Bumped on every PAT change; see HelioQuery::credential_generation().
+static std::atomic<std::uint64_t> g_helio_credential_generation{0};
+
 std::string HelioQuery::last_simulation_trace_id;
 std::string HelioQuery::last_optimization_trace_id;
 
@@ -515,18 +518,33 @@ void HelioQuery::request_print_priority_options(
 
     // Use shared_ptr to prevent stack corruption in async callbacks
     auto response_headers = std::make_shared<std::string>();
+    // Print priority options are account-scoped. Remember which credentials this request
+    // was issued with so a response that lands after a PAT change is discarded instead of
+    // refilling the cache that the credential change just cleared.
+    const std::uint64_t request_generation = credential_generation();
     http.timeout_connect(10)
         .timeout_max(30)
         .on_header_callback([response_headers](std::string headers) {
             *response_headers += headers;
         })
-        .on_complete([callback, material_id, response_headers](std::string body, unsigned status) {
+        .on_complete([callback, material_id, response_headers, request_generation](std::string body, unsigned status) {
             BOOST_LOG_TRIVIAL(info) << "request_print_priority_options response: " << body;
 
             GetPrintPriorityOptionsResult result;
             result.status = status;
             result.success = false;
             result.trace_id = extract_trace_id(*response_headers);
+
+            if (request_generation != credential_generation()) {
+                // The PAT changed while this request was in flight — these options belong
+                // to the previous account. Report a failure so the caller falls back to
+                // the standard options rather than showing another account's data.
+                result.error = "Helio credentials changed while loading print priority options";
+                BOOST_LOG_TRIVIAL(info) << "request_print_priority_options: discarding response from a "
+                                           "superseded Helio credential";
+                callback(result);
+                return;
+            }
 
             try {
                 nlohmann::json parsed_obj = nlohmann::json::parse(body);
@@ -601,6 +619,16 @@ void HelioQuery::clear_print_priority_cache()
     global_print_priority_cache.clear();
 }
 
+std::uint64_t HelioQuery::credential_generation()
+{
+    return g_helio_credential_generation.load(std::memory_order_acquire);
+}
+
+void HelioQuery::bump_credential_generation()
+{
+    g_helio_credential_generation.fetch_add(1, std::memory_order_acq_rel);
+}
+
 std::string HelioQuery::get_helio_api_url()
 {
     std::string helio_api_url;
@@ -646,6 +674,9 @@ void HelioQuery::set_helio_pat(std::string pat)
 
     if (pat != old_pat) {
         BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — invalidating caches";
+        // Bump before clearing: account-scoped requests already in flight capture the old
+        // generation and will drop their responses instead of refilling the cleared cache.
+        bump_credential_generation();
         clear_print_priority_cache();
 
         if (pat.empty() || !GUI::wxGetApp().app_config->get_bool("enable_helio_processing")) {

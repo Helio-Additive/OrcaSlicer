@@ -2,6 +2,7 @@
 
 #include "HelioRetryPolicy.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -122,6 +123,10 @@ public:
 
     // Clears the snapshot and resets the store to NotLoaded. Use when credentials change
     // but no network refresh should start (e.g. Helio disabled or PAT removed).
+    // Any in-flight load is revoked as well: its run is generation-tagged, so it stops
+    // fetching further pages and can never publish (or fail) into the store afterwards.
+    // The next non-forced request therefore reloads with the current credentials instead
+    // of reusing the previous account's data.
     void invalidate();
 
     bool run(const PageFetcher&  fetcher,
@@ -136,10 +141,14 @@ public:
     SupportDataCatalogView view() const;
 
 private:
-    bool claim_run();
-    bool run_impl(const PageFetcher& fetcher, const RetrySleeper& sleeper, const Logger& logger);
-    void publish(std::vector<HelioSupportedData>&& complete_snapshot);
-    void fail(std::string error);
+    // Claims the pending run and reports the generation it belongs to. Results of a run
+    // whose generation is no longer current (invalidate() bumped it) are discarded.
+    bool claim_run(std::uint64_t& run_generation);
+    bool run_impl(const PageFetcher& fetcher, const RetrySleeper& sleeper, const Logger& logger,
+                  std::uint64_t run_generation);
+    void publish(std::vector<HelioSupportedData>&& complete_snapshot, std::uint64_t run_generation);
+    void fail(std::string error, std::uint64_t run_generation);
+    bool is_run_current(std::uint64_t run_generation) const;
 
     const SupportDataCatalogKind m_kind;
     mutable std::mutex           m_mutex;
@@ -148,6 +157,7 @@ private:
     std::string                  m_last_error;
     bool                         m_run_claimed{false};
     bool                         m_pending_refresh{false};
+    std::uint64_t                m_generation{0};
 };
 
 } // namespace Slic3r

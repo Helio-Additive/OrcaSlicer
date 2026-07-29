@@ -304,10 +304,11 @@ bool SupportDataCatalogStore::begin_pending_refresh()
 void SupportDataCatalogStore::invalidate()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_state == SupportDataLoadState::Loading) {
-        m_pending_refresh = false;
-        return;
-    }
+    // Bumping the generation revokes any in-flight run: it stops fetching at the next
+    // page boundary, and neither publish() nor fail() will touch the store afterwards.
+    // Without this, a load started with the previous PAT could still publish that
+    // account's catalog, and the next non-forced request would accept it as current.
+    ++m_generation;
     m_snapshot.reset();
     m_state           = SupportDataLoadState::NotLoaded;
     m_last_error.clear();
@@ -315,40 +316,49 @@ void SupportDataCatalogStore::invalidate()
     m_pending_refresh = false;
 }
 
-bool SupportDataCatalogStore::claim_run()
+bool SupportDataCatalogStore::claim_run(std::uint64_t& run_generation)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_state != SupportDataLoadState::Loading || m_run_claimed) {
         return false;
     }
-    m_run_claimed = true;
+    m_run_claimed  = true;
+    run_generation = m_generation;
     return true;
+}
+
+bool SupportDataCatalogStore::is_run_current(std::uint64_t run_generation) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return run_generation == m_generation;
 }
 
 bool SupportDataCatalogStore::run(const PageFetcher&   fetcher,
                                   const RetrySleeper& sleeper,
                                   const Logger&       logger)
 {
-    if (!claim_run()) {
+    std::uint64_t run_generation = 0;
+    if (!claim_run(run_generation)) {
         return false;
     }
 
     try {
-        return run_impl(fetcher, sleeper, logger);
+        return run_impl(fetcher, sleeper, logger, run_generation);
     } catch (const std::exception& e) {
-        fail(std::string("Helio support-data load failed: ") + e.what());
+        fail(std::string("Helio support-data load failed: ") + e.what(), run_generation);
     } catch (...) {
-        fail("Helio support-data load failed");
+        fail("Helio support-data load failed", run_generation);
     }
     return false;
 }
 
 bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
                                        const RetrySleeper& sleeper,
-                                       const Logger&       logger)
+                                       const Logger&       logger,
+                                       std::uint64_t       run_generation)
 {
     if (!fetcher) {
-        fail("No Helio support-data page fetcher was provided");
+        fail("No Helio support-data page fetcher was provided", run_generation);
         return false;
     }
 
@@ -357,6 +367,12 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
     int                             expected_total_pages = 0;
 
     while (true) {
+        // The credentials this run started with may have been revoked (PAT change,
+        // logout, Helio disabled). Stop before spending another page request.
+        if (!is_run_current(run_generation)) {
+            return false;
+        }
+
         SupportDataPageResult page_result;
         bool                  page_loaded = false;
         HelioRetryController  retry_controller;
@@ -415,7 +431,8 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
         }
 
         if (!page_loaded) {
-            fail(page_result.error.empty() ? "Helio support-data request failed" : std::move(page_result.error));
+            fail(page_result.error.empty() ? "Helio support-data request failed" : std::move(page_result.error),
+                 run_generation);
             return false;
         }
 
@@ -433,28 +450,37 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
     }
 
     if (staging.empty()) {
-        fail("Helio support-data response contained no supported entries");
+        fail("Helio support-data response contained no supported entries", run_generation);
         return false;
     }
 
-    publish(std::move(staging));
-    return true;
+    publish(std::move(staging), run_generation);
+    return is_run_current(run_generation);
 }
 
-void SupportDataCatalogStore::publish(std::vector<HelioSupportedData>&& complete_snapshot)
+void SupportDataCatalogStore::publish(std::vector<HelioSupportedData>&& complete_snapshot,
+                                      std::uint64_t                    run_generation)
 {
     auto snapshot = std::make_shared<const std::vector<HelioSupportedData>>(std::move(complete_snapshot));
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (run_generation != m_generation) {
+        // The store was invalidated while this run was in flight; its data belongs to
+        // credentials that are no longer current, so drop it and keep the store reset.
+        return;
+    }
     m_snapshot    = std::move(snapshot);
     m_state       = SupportDataLoadState::Ready;
     m_last_error.clear();
     m_run_claimed = false;
 }
 
-void SupportDataCatalogStore::fail(std::string error)
+void SupportDataCatalogStore::fail(std::string error, std::uint64_t run_generation)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (run_generation != m_generation) {
+        return;
+    }
     m_state       = SupportDataLoadState::Failed;
     m_last_error  = std::move(error);
     m_run_claimed = false;

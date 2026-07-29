@@ -337,6 +337,13 @@ public:
 
     static void clear_print_priority_cache();
 
+    // Monotonic counter bumped whenever the stored Helio PAT changes. Account-scoped
+    // requests capture it before they start and drop their result if it no longer
+    // matches, so a response fetched with the previous account's credentials can never
+    // repopulate a cache that was cleared on the credential change.
+    static std::uint64_t credential_generation();
+    static void          bump_credential_generation();
+
     /*for helio simulation*/
     static CreateSimulationResult create_simulation(const std::string  helio_api_url,
                                                     const std::string  helio_api_key,
