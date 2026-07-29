@@ -10800,7 +10800,14 @@ private:
         // in-flight load briefly leaves the Loading state before the worker picks up
         // the pending flag and re-enters Loading.
         m_refresh_thread = std::make_unique<std::thread>([this, alive]() {
-            constexpr int timeout_ms = 60000;
+            // The deadline has to cover the store's whole request budget, not a single
+            // request: helio_fetch_support_data_page() allows 100s per attempt and the
+            // store permits MAX_ATTEMPTS_PER_PAGE attempts plus backoff waits between
+            // them. At 60s this loop exited while a catalog was still Loading, so
+            // on_refresh_complete() reported failure (or re-checked the stale snapshot)
+            // while the original fetch was still running, and re-enabling the button let
+            // repeated clicks queue redundant loads.
+            constexpr int timeout_ms = 480000;
             int elapsed = 0;
             while (*alive && elapsed < timeout_ms &&
                    (HelioQuery::supported_materials_state() == SupportDataLoadState::Loading ||
@@ -10820,7 +10827,17 @@ private:
     }
 
     void on_refresh_complete() {
-        if (HelioQuery::supported_data_availability() == SupportDataAvailability::Usable) {
+        const SupportDataAvailability availability = HelioQuery::supported_data_availability();
+        if (availability == SupportDataAvailability::Synchronizing) {
+            // The deadline elapsed with a load still in flight — don't call that a
+            // failure, the fetch may still succeed.
+            m_refresh_status->SetLabel(_L("Still synchronizing supported materials. Please try again in a moment."));
+            m_refresh_button->Enable(true);
+            Layout();
+            Fit();
+            return;
+        }
+        if (availability == SupportDataAvailability::Usable) {
             // Re-check all unsupported filaments
             bool all_now_supported = true;
             for (const auto& info : m_unsupported_copy) {
@@ -11232,7 +11249,10 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
     }
 
     const auto supported_printers = HelioQuery::supported_printers_snapshot();
-    const auto supported_materials = HelioQuery::supported_materials_snapshot();
+    // Not const: an in-dialog "Refresh & Retry" can publish a newer catalog partway
+    // through the per-slot loop below, and the remaining slots must be matched against
+    // that newer snapshot rather than the one captured here.
+    auto supported_materials = HelioQuery::supported_materials_snapshot();
     if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable ||
         !supported_printers || !supported_materials) {
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Helio support-data snapshot is unavailable";
@@ -11447,7 +11467,14 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
                 materials[i].materialId = unsupported_dialog.get_selected_material_id();
                 helio_using_reference_material = true;
             } else if (choice == 3) {
-                // Refresh succeeded — re-check this filament
+                // Refresh succeeded — adopt the newly published catalog for the
+                // remaining slots too, otherwise they would keep being matched against
+                // the snapshot captured before the refresh and a now-supported material
+                // could still be rejected.
+                if (auto refreshed_materials = HelioQuery::supported_materials_snapshot()) {
+                    supported_materials = std::move(refreshed_materials);
+                }
+                // Re-check this filament
                 FilamentSupportInfo recheck = check_filament_helio_support(used_filament, (int)i);
                 if (recheck.is_supported && !recheck.material_id.empty()) {
                     materials[i].materialId = recheck.material_id;

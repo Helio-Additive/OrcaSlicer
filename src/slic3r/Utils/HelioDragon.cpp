@@ -38,6 +38,10 @@ static std::atomic<std::uint64_t> g_helio_credential_generation{0};
 // read and written off the main thread.
 static std::mutex g_helio_priority_cache_mutex;
 
+// Tag for a request whose credential was already superseded when it was issued. The
+// counter only ever increments from 0, so this value never matches a real generation.
+static constexpr std::uint64_t HELIO_STALE_CREDENTIAL_GENERATION = UINT64_MAX;
+
 std::string HelioQuery::last_simulation_trace_id;
 std::string HelioQuery::last_optimization_trace_id;
 
@@ -526,7 +530,15 @@ void HelioQuery::request_print_priority_options(
     // Print priority options are account-scoped. Remember which credentials this request
     // was issued with so a response that lands after a PAT change is discarded instead of
     // refilling the cache that the credential change just cleared.
-    const std::uint64_t request_generation = credential_generation();
+    //
+    // The generation is read *before* re-reading the configured PAT: if the credential
+    // changed between the caller reading helio_api_key and this point, the comparison
+    // below fails and the request is tagged with a generation that can never match any
+    // real one, so its response is dropped rather than cached under the new account.
+    std::uint64_t request_generation = credential_generation();
+    if (helio_api_key != get_helio_pat()) {
+        request_generation = HELIO_STALE_CREDENTIAL_GENERATION;
+    }
     http.timeout_connect(10)
         .timeout_max(30)
         .on_header_callback([response_headers](std::string headers) {

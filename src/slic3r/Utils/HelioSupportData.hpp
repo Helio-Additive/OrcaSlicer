@@ -101,6 +101,9 @@ public:
     using Logger       = std::function<void(const SupportDataLoadAttempt&)>;
 
     static constexpr int MAX_ATTEMPTS_PER_PAGE = 4;
+    // How many times pagination may restart from page 1 when the backend reports a
+    // different total page count mid-walk (i.e. the catalog changed under us).
+    static constexpr int MAX_PAGINATION_RESTARTS = 2;
 
     explicit SupportDataCatalogStore(SupportDataCatalogKind kind);
 

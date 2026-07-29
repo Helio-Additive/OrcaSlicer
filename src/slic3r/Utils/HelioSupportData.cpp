@@ -365,6 +365,7 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
     std::vector<HelioSupportedData> staging;
     int                             page = 1;
     int                             expected_total_pages = 0;
+    int                             restarts_remaining = MAX_PAGINATION_RESTARTS;
 
     while (true) {
         // The credentials this run started with may have been revoked (PAT change,
@@ -375,6 +376,7 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
 
         SupportDataPageResult page_result;
         bool                  page_loaded = false;
+        bool                  total_pages_changed = false;
         HelioRetryController  retry_controller;
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS_PER_PAGE; ++attempt) {
@@ -399,9 +401,15 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
             page_result = parse_support_data_page(m_kind, page, response);
             if (page_result.success && expected_total_pages != 0 &&
                 page_result.total_pages != expected_total_pages) {
+                // The catalog changed underneath the walk. Retrying *this* page is
+                // futile — every otherwise-valid response would keep failing the same
+                // comparison against the stale expectation until attempts run out.
+                // Restart the walk instead (handled below).
                 page_result.success = false;
                 page_result.retry_kind = HelioRetryKind::Transient;
                 page_result.error = "Helio support-data total page count changed during pagination";
+                total_pages_changed = true;
+                break;
             }
             if (page_result.success) {
                 page_loaded = true;
@@ -437,6 +445,30 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
                     break;
                 }
             }
+        }
+
+        if (total_pages_changed) {
+            SupportDataLoadAttempt log_entry;
+            log_entry.kind         = m_kind;
+            log_entry.page         = page;
+            log_entry.attempt      = MAX_PAGINATION_RESTARTS - restarts_remaining + 1;
+            log_entry.max_attempts = MAX_PAGINATION_RESTARTS;
+            log_entry.status       = page_result.status;
+            log_entry.retry_kind   = page_result.retry_kind;
+            log_entry.will_retry   = restarts_remaining > 0;
+            log_entry.error        = page_result.error;
+            log_entry.trace_id     = page_result.trace_id;
+            log_attempt(logger, log_entry);
+
+            if (restarts_remaining <= 0) {
+                fail("Helio support-data total page count kept changing during pagination", run_generation);
+                return false;
+            }
+            --restarts_remaining;
+            staging.clear();
+            page                 = 1;
+            expected_total_pages = 0;
+            continue;
         }
 
         if (!page_loaded) {
