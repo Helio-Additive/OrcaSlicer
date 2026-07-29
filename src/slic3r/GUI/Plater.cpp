@@ -10800,14 +10800,16 @@ private:
         // in-flight load briefly leaves the Loading state before the worker picks up
         // the pending flag and re-enters Loading.
         m_refresh_thread = std::make_unique<std::thread>([this, alive]() {
-            // The deadline has to cover the store's whole request budget, not a single
-            // request: helio_fetch_support_data_page() allows 100s per attempt and the
-            // store permits MAX_ATTEMPTS_PER_PAGE attempts plus backoff waits between
-            // them. At 60s this loop exited while a catalog was still Loading, so
-            // on_refresh_complete() reported failure (or re-checked the stale snapshot)
-            // while the original fetch was still running, and re-enabling the button let
-            // repeated clicks queue redundant loads.
-            constexpr int timeout_ms = 480000;
+            // Wait for the stores to reach a terminal state rather than for a fixed
+            // budget: MAX_ATTEMPTS_PER_PAGE applies independently to every page, so no
+            // single-page budget bounds a paginated walk. Exiting early re-enabled the
+            // button while the fetch was still running, and another click queued a
+            // redundant force refresh that restarts the whole walk.
+            //
+            // The cap below is only a safety net against a wedged worker leaking this
+            // detached thread; the loop normally ends when the stores settle, and ends
+            // immediately when the dialog is destroyed (alive flag).
+            constexpr int timeout_ms = 1800000;
             int elapsed = 0;
             while (*alive && elapsed < timeout_ms &&
                    (HelioQuery::supported_materials_state() == SupportDataLoadState::Loading ||
@@ -10829,9 +10831,20 @@ private:
     void on_refresh_complete() {
         const SupportDataAvailability availability = HelioQuery::supported_data_availability();
         if (availability == SupportDataAvailability::Synchronizing) {
-            // The deadline elapsed with a load still in flight — don't call that a
+            // The safety cap elapsed with a load still in flight — don't call that a
             // failure, the fetch may still succeed.
             m_refresh_status->SetLabel(_L("Still synchronizing supported materials. Please try again in a moment."));
+            m_refresh_button->Enable(true);
+            Layout();
+            Fit();
+            return;
+        }
+        // A failed refresh keeps the previous snapshot, so availability can still be
+        // Usable here. Report that as a refresh failure rather than re-checking the
+        // unchanged catalog and telling the user the materials are still unsupported.
+        if (HelioQuery::supported_materials_state() == SupportDataLoadState::Failed ||
+            HelioQuery::supported_printers_state() == SupportDataLoadState::Failed) {
+            m_refresh_status->SetLabel(_L("Refresh failed. Please try again later."));
             m_refresh_button->Enable(true);
             Layout();
             Fit();

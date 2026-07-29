@@ -294,6 +294,14 @@ bool SupportDataCatalogStore::begin_pending_refresh()
     if (!m_pending_refresh) {
         return false;
     }
+    if (m_state == SupportDataLoadState::Loading) {
+        // Another run currently owns the store — e.g. invalidate() revoked this caller
+        // and a replacement load was started under the new generation. Only the run that
+        // actually completed (leaving the store Ready/Failed) may start the queued
+        // refresh; clearing m_run_claimed here would let a second worker claim the store
+        // concurrently and race to publish.
+        return false;
+    }
     m_pending_refresh = false;
     m_state           = SupportDataLoadState::Loading;
     m_last_error.clear();

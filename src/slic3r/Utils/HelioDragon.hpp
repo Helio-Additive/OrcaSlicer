@@ -347,6 +347,11 @@ public:
     // so an in-flight response can never land between the two.
     static void invalidate_account_scoped_caches();
 
+    // Call when the Helio endpoint changes without the PAT being re-set (region switch):
+    // drops the account-scoped caches and both catalog snapshots so the next request
+    // reloads from the newly selected endpoint.
+    static void invalidate_support_data_for_endpoint_change();
+
     /*for helio simulation*/
     static CreateSimulationResult create_simulation(const std::string  helio_api_url,
                                                     const std::string  helio_api_key,

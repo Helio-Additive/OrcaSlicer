@@ -664,6 +664,19 @@ void HelioQuery::invalidate_account_scoped_caches()
     global_print_priority_cache.clear();
 }
 
+void HelioQuery::invalidate_support_data_for_endpoint_change()
+{
+    BOOST_LOG_TRIVIAL(info) << "Helio endpoint/region changed — invalidating support data";
+    // Switching region changes both the API endpoint and which regional PAT key is read,
+    // without going through set_helio_pat(). Without this, the snapshots loaded from the
+    // previous endpoint stay in place and an ordinary (non-forced)
+    // request_helio_supported_data() would keep them, letting printer/material IDs from
+    // the old region be used with the newly selected region's credential.
+    invalidate_account_scoped_caches();
+    helio_printers_store().invalidate();
+    helio_materials_store().invalidate();
+}
+
 std::string HelioQuery::get_helio_api_url()
 {
     std::string helio_api_url;
