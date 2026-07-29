@@ -115,6 +115,15 @@ public:
     bool consume_pending_refresh();
     bool has_pending_refresh() const;
 
+    // Atomically consumes a pending refresh AND transitions the store to Loading state.
+    // This avoids the race where consume_pending_refresh() clears the flag but the store
+    // is briefly in Ready/Failed state before the follow-up try_begin() runs.
+    bool begin_pending_refresh();
+
+    // Clears the snapshot and resets the store to NotLoaded. Use when credentials change
+    // but no network refresh should start (e.g. Helio disabled or PAT removed).
+    void invalidate();
+
     bool run(const PageFetcher&  fetcher,
              const RetrySleeper& sleeper = RetrySleeper(),
              const Logger&       logger = Logger());

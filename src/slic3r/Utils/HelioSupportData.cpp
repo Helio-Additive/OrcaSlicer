@@ -288,6 +288,33 @@ bool SupportDataCatalogStore::has_pending_refresh() const
     return m_pending_refresh;
 }
 
+bool SupportDataCatalogStore::begin_pending_refresh()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_pending_refresh) {
+        return false;
+    }
+    m_pending_refresh = false;
+    m_state           = SupportDataLoadState::Loading;
+    m_last_error.clear();
+    m_run_claimed     = false;
+    return true;
+}
+
+void SupportDataCatalogStore::invalidate()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_state == SupportDataLoadState::Loading) {
+        m_pending_refresh = false;
+        return;
+    }
+    m_snapshot.reset();
+    m_state           = SupportDataLoadState::NotLoaded;
+    m_last_error.clear();
+    m_run_claimed     = false;
+    m_pending_refresh = false;
+}
+
 bool SupportDataCatalogStore::claim_run()
 {
     std::lock_guard<std::mutex> lock(m_mutex);

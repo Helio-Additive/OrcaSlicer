@@ -369,9 +369,10 @@ SupportDataCatalogStore& helio_materials_store()
 bool helio_request_support_data(SupportDataCatalogStore& store,
                                 const std::string& helio_api_url,
                                 const std::string& helio_api_key,
-                                bool force_refresh)
+                                bool force_refresh,
+                                bool already_began = false)
 {
-    if (!store.try_begin(force_refresh)) {
+    if (!already_began && !store.try_begin(force_refresh)) {
         return false;
     }
 
@@ -403,8 +404,10 @@ bool helio_request_support_data(SupportDataCatalogStore& store,
             // while this load was already in flight; try_begin() queues it instead of
             // dropping it (see SupportDataCatalogStore::try_begin()). Honor it now with
             // freshly-read credentials, since the ones this run used may already be stale.
-            if (!stopping.load(std::memory_order_acquire) && store.consume_pending_refresh()) {
-                helio_request_support_data(store, HelioQuery::get_helio_api_url(), HelioQuery::get_helio_pat(), true);
+            // begin_pending_refresh() atomically clears the flag AND transitions to Loading
+            // so the GUI never observes Ready/Failed with no pending flag in between.
+            if (!stopping.load(std::memory_order_acquire) && store.begin_pending_refresh()) {
+                helio_request_support_data(store, HelioQuery::get_helio_api_url(), HelioQuery::get_helio_pat(), true, true);
             }
         });
 
@@ -641,14 +644,22 @@ void HelioQuery::set_helio_pat(std::string pat)
         });
     }
 
-    if (!pat.empty() && pat != old_pat) {
-        BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";
-        if (!GUI::wxGetApp().app_config->get_bool("enable_helio_processing"))
+    if (pat != old_pat) {
+        BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — invalidating caches";
+        clear_print_priority_cache();
+
+        if (pat.empty() || !GUI::wxGetApp().app_config->get_bool("enable_helio_processing")) {
+            // PAT removed (logout) or Helio disabled: invalidate snapshots so stale data
+            // from the previous account is never used. When Helio is re-enabled, the
+            // non-forced request_helio_supported_data() will see NotLoaded and reload.
+            helio_printers_store().invalidate();
+            helio_materials_store().invalidate();
             return;
+        }
+        BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";
         const std::string url = get_helio_api_url();
         request_all_support_machine(url, pat, true);
         request_all_support_materials(url, pat, true);
-        clear_print_priority_cache();
     }
 }
 
