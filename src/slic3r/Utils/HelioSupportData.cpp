@@ -378,6 +378,15 @@ bool SupportDataCatalogStore::run_impl(const PageFetcher&   fetcher,
         HelioRetryController  retry_controller;
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS_PER_PAGE; ++attempt) {
+            // Re-checked per attempt (not just per page): with up to 4 attempts and a
+            // 100s HTTP timeout, a revoked run would otherwise keep issuing requests
+            // under the old credential for minutes after a logout. The retry wait
+            // happens at the end of the previous iteration, so this also covers the
+            // "invalidated while sleeping" case.
+            if (!is_run_current(run_generation)) {
+                return false;
+            }
+
             SupportDataHttpResponse response;
             try {
                 response = fetcher(m_kind, page);

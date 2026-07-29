@@ -342,7 +342,10 @@ public:
     // matches, so a response fetched with the previous account's credentials can never
     // repopulate a cache that was cleared on the credential change.
     static std::uint64_t credential_generation();
-    static void          bump_credential_generation();
+
+    // Bumps the credential generation and clears the print-priority cache atomically,
+    // so an in-flight response can never land between the two.
+    static void invalidate_account_scoped_caches();
 
     /*for helio simulation*/
     static CreateSimulationResult create_simulation(const std::string  helio_api_url,

@@ -33,6 +33,11 @@ std::map<std::string, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::
 // Bumped on every PAT change; see HelioQuery::credential_generation().
 static std::atomic<std::uint64_t> g_helio_credential_generation{0};
 
+// Guards global_print_priority_cache and serializes it with the generation bump.
+// Http::perform() runs completion callbacks on an I/O thread, so the cache is both
+// read and written off the main thread.
+static std::mutex g_helio_priority_cache_mutex;
+
 std::string HelioQuery::last_simulation_trace_id;
 std::string HelioQuery::last_optimization_trace_id;
 
@@ -536,9 +541,11 @@ void HelioQuery::request_print_priority_options(
             result.trace_id = extract_trace_id(*response_headers);
 
             if (request_generation != credential_generation()) {
-                // The PAT changed while this request was in flight — these options belong
-                // to the previous account. Report a failure so the caller falls back to
-                // the standard options rather than showing another account's data.
+                // Cheap early-out; the authoritative check happens under the cache lock
+                // at insertion time. The PAT changed while this request was in flight —
+                // these options belong to the previous account. Report a failure so the
+                // caller falls back to the standard options rather than showing another
+                // account's data.
                 result.error = "Helio credentials changed while loading print priority options";
                 BOOST_LOG_TRIVIAL(info) << "request_print_priority_options: discarding response from a "
                                            "superseded Helio credential";
@@ -572,8 +579,20 @@ void HelioQuery::request_print_priority_options(
                         }
                         result.success = true;
 
-                        // Cache the results
-                        global_print_priority_cache[material_id] = result.options;
+                        // Cache the results. The generation re-check and the insertion
+                        // share the lock that set_helio_pat() uses to bump the generation
+                        // and clear the cache, so a PAT change can't slip between them and
+                        // let this response repopulate the cache it just cleared.
+                        std::lock_guard<std::mutex> lock(g_helio_priority_cache_mutex);
+                        if (request_generation != g_helio_credential_generation.load(std::memory_order_acquire)) {
+                            result.success = false;
+                            result.options.clear();
+                            result.error = "Helio credentials changed while loading print priority options";
+                            BOOST_LOG_TRIVIAL(info) << "request_print_priority_options: discarding response from a "
+                                                       "superseded Helio credential";
+                        } else {
+                            global_print_priority_cache[material_id] = result.options;
+                        }
                     }
                 } else if (parsed_obj.contains("errors")) {
                     // GraphQL errors
@@ -607,6 +626,7 @@ std::vector<HelioQuery::PrintPriorityOption> HelioQuery::get_cached_print_priori
     const std::string& material_id
 )
 {
+    std::lock_guard<std::mutex> lock(g_helio_priority_cache_mutex);
     auto it = global_print_priority_cache.find(material_id);
     if (it != global_print_priority_cache.end()) {
         return it->second;
@@ -616,6 +636,7 @@ std::vector<HelioQuery::PrintPriorityOption> HelioQuery::get_cached_print_priori
 
 void HelioQuery::clear_print_priority_cache()
 {
+    std::lock_guard<std::mutex> lock(g_helio_priority_cache_mutex);
     global_print_priority_cache.clear();
 }
 
@@ -624,9 +645,11 @@ std::uint64_t HelioQuery::credential_generation()
     return g_helio_credential_generation.load(std::memory_order_acquire);
 }
 
-void HelioQuery::bump_credential_generation()
+void HelioQuery::invalidate_account_scoped_caches()
 {
+    std::lock_guard<std::mutex> lock(g_helio_priority_cache_mutex);
     g_helio_credential_generation.fetch_add(1, std::memory_order_acq_rel);
+    global_print_priority_cache.clear();
 }
 
 std::string HelioQuery::get_helio_api_url()
@@ -674,17 +697,23 @@ void HelioQuery::set_helio_pat(std::string pat)
 
     if (pat != old_pat) {
         BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — invalidating caches";
-        // Bump before clearing: account-scoped requests already in flight capture the old
-        // generation and will drop their responses instead of refilling the cleared cache.
-        bump_credential_generation();
-        clear_print_priority_cache();
+        // Bumps the credential generation and clears the print-priority cache under one
+        // lock, so account-scoped requests already in flight drop their responses instead
+        // of refilling the cleared cache.
+        invalidate_account_scoped_caches();
+
+        // Invalidate the catalogs unconditionally, before deciding whether to reload.
+        // This revokes any run started with the previous PAT (so it can't publish) and
+        // drops its snapshot, rather than leaving the old account's catalog Usable until
+        // a replacement load finishes. A force-refresh alone would not do this: against
+        // an in-flight load try_begin(true) only queues a pending refresh.
+        helio_printers_store().invalidate();
+        helio_materials_store().invalidate();
 
         if (pat.empty() || !GUI::wxGetApp().app_config->get_bool("enable_helio_processing")) {
-            // PAT removed (logout) or Helio disabled: invalidate snapshots so stale data
-            // from the previous account is never used. When Helio is re-enabled, the
-            // non-forced request_helio_supported_data() will see NotLoaded and reload.
-            helio_printers_store().invalidate();
-            helio_materials_store().invalidate();
+            // PAT removed (logout) or Helio disabled: leave the stores NotLoaded. When
+            // Helio is re-enabled, the non-forced request_helio_supported_data() sees no
+            // snapshot and reloads with the current credentials.
             return;
         }
         BOOST_LOG_TRIVIAL(info) << "Helio PAT changed — force-refreshing support data";
