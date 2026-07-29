@@ -174,7 +174,12 @@ SupportDataPageResult parse_support_data_page(SupportDataCatalogKind        kind
             }
 
             if (kind == SupportDataCatalogKind::Printers) {
-                if (object.contains("heatedChamber")) {
+                // An explicit null means "capability unspecified", not "malformed": treat
+                // it as unknown and keep the default (false), matching how the previous
+                // loader and the alternativeNames handling below deal with nulls. Failing
+                // the page here would reject it identically on every retry and could leave
+                // the whole printer catalog Failed over one unspecified printer.
+                if (object.contains("heatedChamber") && !object["heatedChamber"].is_null()) {
                     if (!object["heatedChamber"].is_boolean()) {
                         return incomplete_page(response, "Helio printers page contains an invalid heatedChamber value");
                     }

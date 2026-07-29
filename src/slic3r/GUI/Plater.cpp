@@ -10783,12 +10783,15 @@ private:
         // Store a copy for the background thread callback
         m_unsupported_copy = unsupported_filaments;
 
-        // Kick off the refresh from the main thread (safe wxWidgets access)
+        // Kick off the refresh from the main thread (safe wxWidgets access).
+        // Materials only: both the V2 and V3 callers resolve printer_id *before* opening
+        // this dialog and never revisit it, so refreshing the printer catalog here could
+        // leave them submitting an ID that the new snapshot no longer matches. This
+        // dialog is scoped to unsupported materials, and it is only reachable when both
+        // catalogs are already usable, so the printer snapshot needs no repair here.
         std::string url = HelioQuery::get_helio_api_url();
         std::string key = HelioQuery::get_helio_pat();
-        bool printers_started  = HelioQuery::request_all_support_machine(url, key, true);
-        bool materials_started = HelioQuery::request_all_support_materials(url, key, true);
-        if (printers_started || materials_started) {
+        if (HelioQuery::request_all_support_materials(url, key, true)) {
             HelioQuery::clear_print_priority_cache();
         }
 
@@ -10842,8 +10845,9 @@ private:
         // A failed refresh keeps the previous snapshot, so availability can still be
         // Usable here. Report that as a refresh failure rather than re-checking the
         // unchanged catalog and telling the user the materials are still unsupported.
-        if (HelioQuery::supported_materials_state() == SupportDataLoadState::Failed ||
-            HelioQuery::supported_printers_state() == SupportDataLoadState::Failed) {
+        // Only the materials store is refreshed by this dialog, so a pre-existing
+        // printer-store failure must not be reported as this refresh failing.
+        if (HelioQuery::supported_materials_state() == SupportDataLoadState::Failed) {
             m_refresh_status->SetLabel(_L("Refresh failed. Please try again later."));
             m_refresh_button->Enable(true);
             Layout();
