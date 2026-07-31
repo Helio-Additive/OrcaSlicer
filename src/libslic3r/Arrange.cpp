@@ -821,14 +821,12 @@ public:
 
         m_pck.configure(m_pconf);
     }
-
     template<class It> inline void operator()(It from, It to) {
         m_rtree.clear();
         m_item_count += size_t(to - from);
         m_pck.execute(from, to);
         m_item_count = 0;
     }
-
     PConfig& config() { return m_pconf; }
     const PConfig& config() const { return m_pconf; }
 
@@ -1010,7 +1008,6 @@ void _arrange(
     arranger(inp.begin(), inp.end());
     for (Item &itm : inp) itm.inflation(0);
 }
-
 inline Box to_nestbin(const BoundingBox &bb) { return Box{{bb.min(X), bb.min(Y)}, {bb.max(X), bb.max(Y)}};}
 inline Circle to_nestbin(const CircleBed &c) { return Circle({c.center()(0), c.center()(1)}, c.radius()); }
 inline ExPolygon to_nestbin(const Polygon &p) { return ExPolygon{p}; }
@@ -1067,9 +1064,9 @@ static void process_arrangeable(const ArrangePolygon &arrpoly,
 
     outp.emplace_back(std::move(p));
     Item& item = outp.back();
+    if (arrpoly.bed_idx >= 0) item.binId(arrpoly.bed_idx);
     item.rotation(rotation);
     item.translation({offs.x(), offs.y()});
-    item.binId(arrpoly.bed_idx);
     item.priority(arrpoly.priority);
     item.itemId(arrpoly.itemid);
     item.extrude_ids = arrpoly.extrude_ids;
