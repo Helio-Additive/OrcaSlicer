@@ -12,6 +12,7 @@
 #include "libslic3r/PresetBundle.hpp"
 #include "slic3r/GUI/wxExtensions.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
+#include "slic3r/Utils/HelioDragon.hpp"
 #include "libslic3r_version.h"
 
 #include <wx/sizer.h>
@@ -665,7 +666,13 @@ int GuideFrame::SaveProfile()
     // } else
     //     m_MainPtr->app_config->set(std::string(m_SectionName.mb_str()), "privacyuse", "0");
 
+    const bool region_changed = m_MainPtr->app_config->get("region") != m_Region;
     m_MainPtr->app_config->set("region", m_Region);
+    if (region_changed) {
+        // Region selects both the Helio endpoint and which regional PAT key is read,
+        // so catalogs loaded from the previous endpoint must not survive the switch.
+        Slic3r::HelioQuery::invalidate_support_data_for_endpoint_change();
+    }
     m_MainPtr->app_config->set_bool("stealth_mode", StealthMode);
 
     //finish

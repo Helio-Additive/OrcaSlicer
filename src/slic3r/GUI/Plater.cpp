@@ -11,6 +11,7 @@
 #include <regex>
 #include <future>
 #include <thread>
+#include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <boost/nowide/cstdio.hpp>
 #include <boost/iterator/counting_iterator.hpp>
@@ -9965,8 +9966,15 @@ static FilamentSupportInfo check_filament_helio_support(const std::string& filam
     std::string target_name = (atPos != std::string::npos) ? filament_preset_name.substr(0, atPos) : filament_preset_name;
     boost::trim(target_name);
 
+    const auto supported_materials = HelioQuery::supported_materials_snapshot();
+    if (!supported_materials) {
+        BOOST_LOG_TRIVIAL(warning) << "check_filament_helio_support: snapshot is null for '"
+                                   << filament_preset_name << "'";
+        return info;
+    }
+
     size_t best_match_length = 0;
-    for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_materials) {
+    for (const HelioQuery::SupportedData& pdata : *supported_materials) {
         if (pdata.native_name.empty()) continue;
 
         std::string native_name = pdata.native_name;
@@ -10000,6 +10008,13 @@ static FilamentSupportInfo check_filament_helio_support(const std::string& filam
             info.is_supported = true;
         }
     }
+
+    if (!info.is_supported) {
+        BOOST_LOG_TRIVIAL(warning) << "check_filament_helio_support: no match for '"
+                                   << target_name << "' (preset: '" << filament_preset_name
+                                   << "') among " << supported_materials->size() << " materials";
+    }
+
     return info;
 }
 
@@ -10027,9 +10042,10 @@ static std::vector<HelioQuery::SupportedData> find_similar_materials(
     const std::vector<std::string>& keywords)
 {
     std::vector<HelioQuery::SupportedData> similar_materials;
-    if (keywords.empty()) return similar_materials;
+    const auto supported_materials = HelioQuery::supported_materials_snapshot();
+    if (keywords.empty() || !supported_materials) return similar_materials;
 
-    for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_materials) {
+    for (const HelioQuery::SupportedData& pdata : *supported_materials) {
         if (pdata.native_name.empty()) continue;
         std::string lower_native = pdata.native_name;
         boost::algorithm::to_lower(lower_native);
@@ -10067,15 +10083,18 @@ static std::vector<HelioQuery::SupportedData> find_similar_printers(
     const std::vector<std::string>& keywords)
 {
     std::vector<HelioQuery::SupportedData> similar_printers;
+    const auto supported_printers = HelioQuery::supported_printers_snapshot();
+    if (!supported_printers) return similar_printers;
+
     if (keywords.empty()) {
-        for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_printers) {
+        for (const HelioQuery::SupportedData& pdata : *supported_printers) {
             if (!pdata.native_name.empty())
                 similar_printers.push_back(pdata);
         }
         return similar_printers;
     }
 
-    for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_printers) {
+    for (const HelioQuery::SupportedData& pdata : *supported_printers) {
         if (pdata.native_name.empty()) continue;
         std::string lower_native = pdata.native_name;
         boost::algorithm::to_lower(lower_native);
@@ -10749,6 +10768,10 @@ public:
     int get_user_choice() const { return m_user_choice; }
     std::string get_selected_material_id() const { return m_selected_material_id; }
 
+    ~HelioUnsupportedFilamentsDialog() {
+        if (m_dialog_alive) *m_dialog_alive = false;
+    }
+
 private:
     void on_refresh_and_retry(const std::vector<FilamentSupportInfo>& unsupported_filaments) {
         m_refresh_button->Enable(false);
@@ -10760,32 +10783,78 @@ private:
         // Store a copy for the background thread callback
         m_unsupported_copy = unsupported_filaments;
 
-        // Run refresh in background thread to avoid blocking UI
-        m_refresh_thread = std::make_unique<std::thread>([this]() {
-            std::string helio_api_url = HelioQuery::get_helio_api_url();
-            std::string helio_api_key = HelioQuery::get_helio_pat();
-            HelioQuery::request_all_support_materials(helio_api_url, helio_api_key);
-            HelioQuery::request_all_support_machine(helio_api_url, helio_api_key);
+        // Kick off the refresh from the main thread (safe wxWidgets access).
+        // Materials only: both the V2 and V3 callers resolve printer_id *before* opening
+        // this dialog and never revisit it, so refreshing the printer catalog here could
+        // leave them submitting an ID that the new snapshot no longer matches. This
+        // dialog is scoped to unsupported materials, and it is only reachable when both
+        // catalogs are already usable, so the printer snapshot needs no repair here.
+        std::string url = HelioQuery::get_helio_api_url();
+        std::string key = HelioQuery::get_helio_pat();
+        if (HelioQuery::request_all_support_materials(url, key, true)) {
+            HelioQuery::clear_print_priority_cache();
+        }
 
-            // Wait for async HTTP requests to complete (Http::perform() is async)
-            constexpr int timeout_ms = 60000;
+        m_dialog_alive = std::make_shared<std::atomic<bool>>(true);
+        auto alive = m_dialog_alive;
+
+        // Wait for stores to finish loading in a background thread.
+        // Also wait while a pending refresh exists — a force-refresh queued behind an
+        // in-flight load briefly leaves the Loading state before the worker picks up
+        // the pending flag and re-enters Loading.
+        m_refresh_thread = std::make_unique<std::thread>([this, alive]() {
+            // Wait for the stores to reach a terminal state rather than for a fixed
+            // budget: MAX_ATTEMPTS_PER_PAGE applies independently to every page, so no
+            // single-page budget bounds a paginated walk. Exiting early re-enabled the
+            // button while the fetch was still running, and another click queued a
+            // redundant force refresh that restarts the whole walk.
+            //
+            // The cap below is only a safety net against a wedged worker leaking this
+            // detached thread; the loop normally ends when the stores settle, and ends
+            // immediately when the dialog is destroyed (alive flag).
+            constexpr int timeout_ms = 1800000;
             int elapsed = 0;
-            while (elapsed < timeout_ms &&
-                   (!HelioQuery::global_materials_fully_loaded || !HelioQuery::global_printers_fully_loaded)) {
+            while (*alive && elapsed < timeout_ms &&
+                   (HelioQuery::supported_materials_state() == SupportDataLoadState::Loading ||
+                    HelioQuery::supported_printers_state() == SupportDataLoadState::Loading ||
+                    HelioQuery::has_pending_support_data_refresh())) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 elapsed += 100;
             }
 
-            // Post result back to GUI thread
-            wxTheApp->CallAfter([this]() {
-                on_refresh_complete();
-            });
+            if (*alive) {
+                wxTheApp->CallAfter([this, alive]() {
+                    if (*alive) on_refresh_complete();
+                });
+            }
         });
         m_refresh_thread->detach();
     }
 
     void on_refresh_complete() {
-        if (HelioQuery::global_materials_fully_loaded) {
+        const SupportDataAvailability availability = HelioQuery::supported_data_availability();
+        if (availability == SupportDataAvailability::Synchronizing) {
+            // The safety cap elapsed with a load still in flight — don't call that a
+            // failure, the fetch may still succeed.
+            m_refresh_status->SetLabel(_L("Still synchronizing supported materials. Please try again in a moment."));
+            m_refresh_button->Enable(true);
+            Layout();
+            Fit();
+            return;
+        }
+        // A failed refresh keeps the previous snapshot, so availability can still be
+        // Usable here. Report that as a refresh failure rather than re-checking the
+        // unchanged catalog and telling the user the materials are still unsupported.
+        // Only the materials store is refreshed by this dialog, so a pre-existing
+        // printer-store failure must not be reported as this refresh failing.
+        if (HelioQuery::supported_materials_state() == SupportDataLoadState::Failed) {
+            m_refresh_status->SetLabel(_L("Refresh failed. Please try again later."));
+            m_refresh_button->Enable(true);
+            Layout();
+            Fit();
+            return;
+        }
+        if (availability == SupportDataAvailability::Usable) {
             // Re-check all unsupported filaments
             bool all_now_supported = true;
             for (const auto& info : m_unsupported_copy) {
@@ -10819,6 +10888,7 @@ private:
     Label* m_refresh_status{nullptr};
     std::vector<FilamentSupportInfo> m_unsupported_copy;
     std::unique_ptr<std::thread> m_refresh_thread;
+    std::shared_ptr<std::atomic<bool>> m_dialog_alive;
 };
 
 // ===========================================================================
@@ -10839,8 +10909,16 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
         return -1;
     }
 
+    const auto supported_printers = HelioQuery::supported_printers_snapshot();
+    const auto supported_materials = HelioQuery::supported_materials_snapshot();
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable ||
+        !supported_printers || !supported_materials) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Helio support-data snapshot is unavailable";
+        return -1;
+    }
+
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": preset_name = '" << preset_name << "'";
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": global_supported_printers.size() = " << HelioQuery::global_supported_printers.size();
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": supported_printers.size() = " << supported_printers->size();
 
     std::string printer_target_name = strip_nozzle_suffix(preset_name, preset_bundle->printers.get_edited_preset());
     boost::trim(printer_target_name);
@@ -10856,7 +10934,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
 
     // Step 1: Try word-boundary matching
     auto [best_match_id, best_match_length] = match_printer_with_boundaries(
-        printer_target_name, HelioQuery::global_supported_printers);
+        printer_target_name, *supported_printers);
 
     if (!best_match_id.empty()) {
         helio_support = true;
@@ -10867,7 +10945,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     // Step 2: Token-based matching
     if (!helio_support) {
         auto [token_printer_id, token_native_name] = match_printer_tokens(
-            printer_target_name, HelioQuery::global_supported_printers);
+            printer_target_name, *supported_printers);
 
         if (!token_printer_id.empty()) {
             wxString message = wxString::Format(
@@ -10989,7 +11067,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
         size_t best_mat_match_length = 0;
         std::string best_mat_id;
 
-        for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_materials) {
+        for (const HelioQuery::SupportedData& pdata : *supported_materials) {
             if (!pdata.native_name.empty()) {
                 std::string native_name = pdata.native_name;
                 size_t atPos = used_filament.find('@');
@@ -11032,7 +11110,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
             std::string best_token_material_id;
             std::string best_token_native_name;
 
-            for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_materials) {
+            for (const HelioQuery::SupportedData& pdata : *supported_materials) {
                 if (!pdata.native_name.empty()) {
                     std::string native_name = pdata.native_name;
                     boost::algorithm::to_lower(native_name);
@@ -11187,6 +11265,17 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
         return -1;
     }
 
+    const auto supported_printers = HelioQuery::supported_printers_snapshot();
+    // Not const: an in-dialog "Refresh & Retry" can publish a newer catalog partway
+    // through the per-slot loop below, and the remaining slots must be matched against
+    // that newer snapshot rather than the one captured here.
+    auto supported_materials = HelioQuery::supported_materials_snapshot();
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable ||
+        !supported_printers || !supported_materials) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": Helio support-data snapshot is unavailable";
+        return -1;
+    }
+
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": preset_name = '" << preset_name << "'";
 
     std::string printer_target_name = strip_nozzle_suffix(preset_name, preset_bundle->printers.get_edited_preset());
@@ -11203,7 +11292,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
 
     // Step 1: Word-boundary matching
     auto [best_match_id, best_match_length] = match_printer_with_boundaries(
-        printer_target_name, HelioQuery::global_supported_printers);
+        printer_target_name, *supported_printers);
 
     if (!best_match_id.empty()) {
         helio_support = true;
@@ -11214,7 +11303,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
     // Step 2: Token-based matching
     if (!helio_support) {
         auto [token_printer_id, token_native_name] = match_printer_tokens(
-            printer_target_name, HelioQuery::global_supported_printers);
+            printer_target_name, *supported_printers);
 
         if (!token_printer_id.empty()) {
             wxString message = wxString::Format(
@@ -11328,7 +11417,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
         std::string best_token_material_id;
         std::string best_token_native_name;
 
-        for (const HelioQuery::SupportedData& pdata : HelioQuery::global_supported_materials) {
+        for (const HelioQuery::SupportedData& pdata : *supported_materials) {
             if (pdata.native_name.empty()) continue;
             std::string native_name = pdata.native_name;
             boost::algorithm::to_lower(native_name);
@@ -11395,7 +11484,14 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
                 materials[i].materialId = unsupported_dialog.get_selected_material_id();
                 helio_using_reference_material = true;
             } else if (choice == 3) {
-                // Refresh succeeded — re-check this filament
+                // Refresh succeeded — adopt the newly published catalog for the
+                // remaining slots too, otherwise they would keep being matched against
+                // the snapshot captured before the refresh and a now-supported material
+                // could still be rejected.
+                if (auto refreshed_materials = HelioQuery::supported_materials_snapshot()) {
+                    supported_materials = std::move(refreshed_materials);
+                }
+                // Re-check this filament
                 FilamentSupportInfo recheck = check_filament_helio_support(used_filament, (int)i);
                 if (recheck.is_supported && !recheck.material_id.empty()) {
                     materials[i].materialId = recheck.material_id;
@@ -11566,13 +11662,19 @@ void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
         }
     }
     else {
-        if (!HelioQuery::global_printers_fully_loaded || !HelioQuery::global_materials_fully_loaded) {
+        const SupportDataAvailability availability = HelioQuery::supported_data_availability();
+        if (availability == SupportDataAvailability::Usable) {
+            on_helio_process();
+        }
+        else if (availability == SupportDataAvailability::Synchronizing) {
             wxGetApp().request_helio_supported_data();
             auto dlg = MessageDialog(nullptr, _L("The printer list and material list are being synchronized. Please try again later."), _L("Synchronizing Helio"), wxOK | wxICON_WARNING);
             dlg.ShowModal();
         }
         else {
-            on_helio_process();
+            wxGetApp().request_helio_supported_data(true);
+            auto dlg = MessageDialog(nullptr, _L("Helio could not load the supported printer and material lists. Please check your network connection and API settings, then try again."), _L("Helio Data Load Failed"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
         }
     }
 }
@@ -17719,7 +17821,9 @@ int Plater::get_helio_process_status() const
 
 void Plater::set_materials_from_helio()
 {
-    p->helio_elements_fetched = HelioQuery::global_materials_fully_loaded;
+    p->helio_elements_fetched =
+        (HelioQuery::supported_materials_state() == SupportDataLoadState::Ready) &&
+        (HelioQuery::supported_printers_state() == SupportDataLoadState::Ready);
 }
 
 void Plater::set_materials_invalid_from_helio()
@@ -17729,7 +17833,8 @@ void Plater::set_materials_invalid_from_helio()
 
 void Plater::set_printers_from_helio()
 {
-    p->helio_elements_fetched = p->helio_elements_fetched && HelioQuery::global_printers_fully_loaded;
+    p->helio_elements_fetched = p->helio_elements_fetched &&
+        (HelioQuery::supported_printers_state() == SupportDataLoadState::Ready);
 }
 
 void Plater::set_printers_invalid_from_helio()
@@ -17749,7 +17854,7 @@ void Plater::set_helio_elements_have_been_loaded(bool status)
 
 std::optional<std::string> Plater::get_helio_material_id_for_the_current_selection(size_t extruder_id)
 {
-    if (!HelioQuery::global_materials_fully_loaded)
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable)
         return std::nullopt;
 
     // Get current filament preset name for the given extruder
@@ -17763,7 +17868,11 @@ std::optional<std::string> Plater::get_helio_material_id_for_the_current_selecti
 
 std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selection()
 {
-    if (!HelioQuery::global_printers_fully_loaded)
+    // Use the aggregate availability check (rather than a strict Ready state check) so
+    // that a still-usable last-good snapshot is accepted even after a force refresh has
+    // failed (SupportDataCatalogStore::fail() keeps the previous snapshot around, and
+    // supported_data_availability() reports it as Usable in that case).
+    if (HelioQuery::supported_data_availability() != SupportDataAvailability::Usable)
         return std::nullopt;
 
     // First check printer config for explicit helio_printer_id
@@ -17781,6 +17890,9 @@ std::optional<std::string> Plater::get_helio_printer_id_for_the_current_selectio
 
 std::optional<std::string> Plater::get_material_id_from_name(std::string name)
 {
+    const auto supported_materials = HelioQuery::supported_materials_snapshot();
+    if (!supported_materials) return std::nullopt;
+
     // Split at '@' and trim (filament presets are often "PLA @Printer")
     auto at_pos = name.find('@');
     std::string search_name = (at_pos != std::string::npos) ? name.substr(0, at_pos) : name;
@@ -17788,7 +17900,7 @@ std::optional<std::string> Plater::get_material_id_from_name(std::string name)
     while (!search_name.empty() && search_name.back() == ' ')
         search_name.pop_back();
 
-    for (auto& mat : HelioQuery::global_supported_materials) {
+    for (auto& mat : *supported_materials) {
         if (boost::algorithm::iequals(mat.name, search_name) ||
             (!mat.native_name.empty() && boost::algorithm::iequals(mat.native_name, search_name)))
             return mat.id;
@@ -17798,7 +17910,10 @@ std::optional<std::string> Plater::get_material_id_from_name(std::string name)
 
 std::optional<std::string> Plater::get_printer_id_from_name(std::string name)
 {
-    for (auto& pr : HelioQuery::global_supported_printers) {
+    const auto supported_printers = HelioQuery::supported_printers_snapshot();
+    if (!supported_printers) return std::nullopt;
+
+    for (auto& pr : *supported_printers) {
         if (boost::algorithm::icontains(name, pr.name) ||
             (!pr.native_name.empty() && boost::algorithm::icontains(name, pr.native_name)))
             return pr.id;
