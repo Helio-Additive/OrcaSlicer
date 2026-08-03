@@ -13,8 +13,11 @@
 > `render_position_window()` — the Helio TI rows/cases live there now.
 
 ## Stats
-- **64 files changed**: 32 new, 32 modified, 0 deleted
-- **+13,363 lines added, -195 lines removed**
+- **70 files changed**: 36 new, 34 modified, 0 deleted
+- **+13,363 lines added, -195 lines removed** — measured at the v2.4.0-beta sync.
+  The support-data catalog work (#95) adds ~1,000 further lines in the four new
+  `HelioSupportData` / `HelioRetryPolicy` files, plus the region-change hook in
+  `WebGuideDialog.cpp`.
 
 ## Architecture
 
@@ -38,15 +41,36 @@ Key data flow:
 - `HelioCompletionEvent` — carries result path + quality metrics to UI thread
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
 
-## Helio-Only Files (32 files — NEVER exist upstream, always preserve)
+## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
 
 ### Core API Client
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/Utils/HelioDragon.hpp` | API client declarations: `HelioQuery`, `HelioBackgroundProcess`, `HelioPlateResult`, GraphQL types |
 | `src/slic3r/Utils/HelioDragon.cpp` | Full API implementation: auth, job dispatch, polling, gcode download, supported data cache |
 
+### Support Data Catalog
+Added by #95 (port of BambuStudio #63) — replaces the old thread-unsafe static
+vector/bool cache that produced false "Unsupported Materials" errors.
+
+| File | Purpose |
+|-|-|
+| `src/slic3r/Utils/HelioSupportData.hpp` | `SupportDataCatalogStore` declaration: snapshot-based catalog, `SupportDataLoadState` / `SupportDataAvailability` state machine, generation tagging, pending-refresh handoff |
+| `src/slic3r/Utils/HelioSupportData.cpp` | Store implementation: paginated loading with per-page retries, bounded pagination restarts, `invalidate()` revoking in-flight runs, publish/fail guarded by run generation |
+| `src/slic3r/Utils/HelioRetryPolicy.hpp` | Retry classification declarations for Helio HTTP/GraphQL responses |
+| `src/slic3r/Utils/HelioRetryPolicy.cpp` | `helio_classify_retry` / `helio_classify_graphql_response`: transient vs terminal failure classification |
+
+Readers must go through `HelioQuery::supported_printers_snapshot()` /
+`HelioQuery::supported_materials_snapshot()` and gate on
+`HelioQuery::supported_data_availability()` — never on a bare "fetched" bool.
+Credential and endpoint changes must call
+`HelioQuery::invalidate_support_data_for_endpoint_change()` (region) or go
+through `HelioQuery::set_helio_pat()` (PAT), both of which bump the credential
+generation so work started under the old credential can never land.
+
 ### UI Dialogs
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/GUI/HelioReleaseNote.hpp` | All Helio dialog declarations: `HelioInputDialog`, `HelioResultDialog`, `HelioStatusNotification` |
@@ -55,12 +79,14 @@ Key data flow:
 | `src/slic3r/GUI/HelioHistoryDialog.cpp` | History dialog: lists past Helio jobs, re-download results |
 
 ### Widgets
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/GUI/Widgets/LinkLabel.hpp` | Clickable hyperlink label widget declaration |
 | `src/slic3r/GUI/Widgets/LinkLabel.cpp` | LinkLabel implementation |
 
 ### Resources
+
 | File | Purpose |
 |-|-|
 | `resources/images/expand_helio.png` | Helio button icon (toolbar) |
@@ -86,13 +112,14 @@ Key data flow:
 | `resources/data/helio_hints.ini` | First-time tutorial hint text |
 
 ### CI/CD Workflows (Helio-only)
+
 | File | Purpose |
 |-|-|
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
 | `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
 
-## Modified Files (32 files — conflict risk, detailed per-file guide)
+## Modified Files (34 files — conflict risk, detailed per-file guide)
 
 ### CRITICAL RISK
 
@@ -183,14 +210,17 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - Added `#include "../Utils/HelioDragon.hpp"`
 - **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material toggle, API URL display
 - **Toggle listener**: `enable_helio_processing` toggle immediately shows/hides the Helio button in MainFrame via `ShowExpandButton()` + `Layout()` (no restart required)
+- **Region combobox**: both region-write paths call `HelioQuery::invalidate_support_data_for_endpoint_change()` — region selects both the Helio endpoint and which regional PAT key is read, so the previous endpoint's catalogs must be dropped
 
 #### `src/slic3r/GUI/GUI_App.cpp` (+28)
 - Added `#include "../Utils/HelioDragon.hpp"`
-- Startup initialization block: always requests Helio supported data on startup (no "already loaded" guard)
-- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data()`
+- The startup block always requests the Helio supported-data catalogs (no "already loaded" guard)
+- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
+- `OnExit()` calls `HelioQuery::shutdown_background_requests()` so support-data
+  workers are torn down cleanly — keep this line when upstream reworks `OnExit()`
 
 #### `src/slic3r/GUI/GUI_App.hpp` (+4)
-- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data()`
+- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
 
 #### `src/slic3r/GUI/PartPlate.cpp` (+27)
 - Added `#include "../Utils/HelioDragon.hpp"`
@@ -247,8 +277,16 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 #### `src/libvgcode/include/Types.hpp` (+2)
 - Appended 3 enum values to `EViewType`: `ThermalIndexMean`, `ThermalIndexMin`, `ThermalIndexMax`
 
-#### `src/slic3r/CMakeLists.txt` (+8)
-- Appended 8 source file entries (4 hpp + 4 cpp for Helio files)
+#### `src/slic3r/CMakeLists.txt` (+12)
+- Appended 12 source file entries (6 hpp + 6 cpp for Helio files), including
+  `Utils/HelioSupportData.{cpp,hpp}` and `Utils/HelioRetryPolicy.{cpp,hpp}`
+
+#### `src/slic3r/GUI/WebGuideDialog.cpp` (+7)
+- Added `#include "slic3r/Utils/HelioDragon.hpp"`
+- `GuideFrame::SaveProfile()` writes `region` directly (a second setter alongside
+  Preferences), so it calls `HelioQuery::invalidate_support_data_for_endpoint_change()`
+  when the region actually changed — otherwise catalogs from the previous endpoint
+  survive a wizard-driven region switch
 
 #### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
 - Null-guard fix: added `get_notification_manager()` null check in existing condition
@@ -327,7 +365,7 @@ Helio includes go after the last upstream include in the same category:
 
 ### Rule 9: Never Remove
 Any line containing these identifiers must be preserved:
-`helio`, `Helio`, `HELIO`, `thermal_index`, `ThermalIndex`, `HelioPlateResult`, `HelioQuery`, `HelioBackgroundProcess`, `HelioCompletionEvent`, `helioadditive`, `EVT_HELIO`, `EVT_GLTOOLBAR_ACTION_HELIO`
+`helio`, `Helio`, `HELIO`, `thermal_index`, `ThermalIndex`, `HelioPlateResult`, `HelioQuery`, `HelioBackgroundProcess`, `HelioCompletionEvent`, `helioadditive`, `EVT_HELIO`, `EVT_GLTOOLBAR_ACTION_HELIO`, `SupportDataCatalogStore`, `SupportDataAvailability`, `SupportDataLoadState`
 
 ### Rule 10: API Renames
 If upstream renames functions that Helio calls, update Helio code to use the new name:
