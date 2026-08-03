@@ -44,6 +44,7 @@ Key data flow:
 ## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
 
 ### Core API Client
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/Utils/HelioDragon.hpp` | API client declarations: `HelioQuery`, `HelioBackgroundProcess`, `HelioPlateResult`, GraphQL types |
@@ -52,6 +53,7 @@ Key data flow:
 ### Support Data Catalog
 Added by #95 (port of BambuStudio #63) — replaces the old thread-unsafe static
 vector/bool cache that produced false "Unsupported Materials" errors.
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/Utils/HelioSupportData.hpp` | `SupportDataCatalogStore` declaration: snapshot-based catalog, `SupportDataLoadState` / `SupportDataAvailability` state machine, generation tagging, pending-refresh handoff |
@@ -60,14 +62,15 @@ vector/bool cache that produced false "Unsupported Materials" errors.
 | `src/slic3r/Utils/HelioRetryPolicy.cpp` | `helio_classify_retry` / `helio_classify_graphql_response`: transient vs terminal failure classification |
 
 Readers must go through `HelioQuery::supported_printers_snapshot()` /
-`supported_materials_snapshot()` and gate on
+`HelioQuery::supported_materials_snapshot()` and gate on
 `HelioQuery::supported_data_availability()` — never on a bare "fetched" bool.
 Credential and endpoint changes must call
 `HelioQuery::invalidate_support_data_for_endpoint_change()` (region) or go
-through `set_helio_pat()` (PAT), both of which bump the credential generation so
-work started under the old credential can never land.
+through `HelioQuery::set_helio_pat()` (PAT), both of which bump the credential
+generation so work started under the old credential can never land.
 
 ### UI Dialogs
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/GUI/HelioReleaseNote.hpp` | All Helio dialog declarations: `HelioInputDialog`, `HelioResultDialog`, `HelioStatusNotification` |
@@ -76,12 +79,14 @@ work started under the old credential can never land.
 | `src/slic3r/GUI/HelioHistoryDialog.cpp` | History dialog: lists past Helio jobs, re-download results |
 
 ### Widgets
+
 | File | Purpose |
 |-|-|
 | `src/slic3r/GUI/Widgets/LinkLabel.hpp` | Clickable hyperlink label widget declaration |
 | `src/slic3r/GUI/Widgets/LinkLabel.cpp` | LinkLabel implementation |
 
 ### Resources
+
 | File | Purpose |
 |-|-|
 | `resources/images/expand_helio.png` | Helio button icon (toolbar) |
@@ -107,6 +112,7 @@ work started under the old credential can never land.
 | `resources/data/helio_hints.ini` | First-time tutorial hint text |
 
 ### CI/CD Workflows (Helio-only)
+
 | File | Purpose |
 |-|-|
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
@@ -208,7 +214,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/slic3r/GUI/GUI_App.cpp` (+28)
 - Added `#include "../Utils/HelioDragon.hpp"`
-- Startup initialization block: always requests Helio supported data on startup (no "already loaded" guard)
+- The startup block always requests the Helio supported-data catalogs (no "already loaded" guard)
 - New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
 - `OnExit()` calls `HelioQuery::shutdown_background_requests()` so support-data
   workers are torn down cleanly — keep this line when upstream reworks `OnExit()`
