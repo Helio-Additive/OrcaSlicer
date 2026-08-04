@@ -533,9 +533,22 @@ jobs:
                   `> Start from \`${target}\` and redo the merge rather than trusting the branch as-is.`,
                   '',
                 ];
-            const checkoutStep = branchPushed
-              ? '1. Check out the sync branch (already pushed by CI) and fetch upstream:'
-              : `1. Check out the sync branch (**not** updated by this run — see the warning above) and fetch upstream:`;
+            // When the branch was not updated, checking it out would redo the merge
+            // on top of stale or in-progress work — recreate it from the target
+            // branch instead, so the commands match the warning above.
+            const checkoutBlock = branchPushed
+              ? [
+                  '1. Check out the sync branch (already pushed by CI) and fetch upstream:',
+                  '   ```bash',
+                  `   git fetch origin && git checkout ${branch}`,
+                ]
+              : [
+                  `1. Recreate the sync branch from \`${target}\` — do **not** build on the existing`,
+                  '   remote branch, it does not carry this run\'s conflict state (see the warning above):',
+                  '   ```bash',
+                  `   git fetch origin`,
+                  `   git checkout -B ${branch} origin/${target}`,
+                ];
 
             let body = [
               `## Merge conflicts detected syncing ${syncLabel}`,
@@ -552,9 +565,7 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              checkoutStep,
-              '   ```bash',
-              `   git fetch origin && git checkout ${branch}`,
+              ...checkoutBlock,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
               '   git fetch upstream --tags',
               '   ```',
