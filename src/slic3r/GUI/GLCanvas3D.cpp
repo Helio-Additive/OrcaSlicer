@@ -2326,7 +2326,9 @@ void GLCanvas3D::remove_curr_plate_all()
 
 void GLCanvas3D::update_plate_thumbnails()
 {
-    _update_imgui_select_plate_toolbar();
+    // Explicit refresh: the caller has just re-rendered the plate thumbnails, so
+    // rebuild the toolbar items even if it was already rendered once.
+    _update_imgui_select_plate_toolbar(true);
 }
 
 void GLCanvas3D::select_all()
@@ -4822,7 +4824,7 @@ void GLCanvas3D::on_set_focus(wxFocusEvent& evt)
     if (m_canvas_type == ECanvasType::CanvasPreview) {
         // update thumbnails and update plate toolbar
         wxGetApp().plater()->update_all_plate_thumbnails();
-        _update_imgui_select_plate_toolbar();
+        _update_imgui_select_plate_toolbar(true);
     }
     _refresh_if_shown_on_screen();
     m_tooltip_enabled = true;
@@ -6903,10 +6905,15 @@ void GLCanvas3D::_update_select_plate_toolbar_stats_item(bool force_selected) {
         m_sel_plate_toolbar.m_all_plates_stats_item->selected = true;
 }
 
-bool GLCanvas3D::_update_imgui_select_plate_toolbar()
+bool GLCanvas3D::_update_imgui_select_plate_toolbar(bool force)
 {
     bool result = true;
-    if (!m_sel_plate_toolbar.is_enabled() || m_sel_plate_toolbar.is_render_finish) return false;
+    if (!m_sel_plate_toolbar.is_enabled()) return false;
+    // is_render_finish is only cleared by set_enabled(false), i.e. when the preview
+    // panel is left.  Without the force flag a refresh requested while the preview
+    // is already showing would be dropped, leaving the plate items stuck with the
+    // textures (or lack of them) they had when the toolbar was first built.
+    if (!force && m_sel_plate_toolbar.is_render_finish) return false;
 
     _update_select_plate_toolbar_stats_item();
 

@@ -371,6 +371,8 @@ jobs:
 
       - name: Push unmerged branch for conflict resolution
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git merge --abort
           BRANCH="${{ steps.sync_branch.outputs.branch }}"
@@ -382,6 +384,16 @@ jobs:
               echo "Remote branch '$BRANCH' already at same commit — skipping push."
               exit 0
             fi
+            # An open PR means resolution work is in flight on this branch.  Check
+            # this before the ancestor test below: resolvers squash their branch
+            # (required by `require-squashed-sync`), which rewrites history and
+            # makes LOCAL_TIP a non-ancestor even though the work is very much live.
+            OPEN_PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
+                        --state open --json number --jq '.[0].number' 2>/dev/null || true)
+            if [ -n "$OPEN_PR" ]; then
+              echo "::warning::Remote branch '$BRANCH' has open PR #${OPEN_PR} — resolution is in progress. Skipping push to avoid losing work."
+              exit 0
+            fi
             # If someone pushed conflict-resolution commits on top, don't clobber them.
             if git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP"; then
               echo "::warning::Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipping to avoid losing work."
@@ -390,7 +402,12 @@ jobs:
             # Remote is at a stale commit from a previous run — force-push to
             # replace it.  Using --force avoids the need to delete the branch
             # first, which fails when branch protection rules block deletion.
-            git push origin "$BRANCH" --force
+            # A repository ruleset may still forbid force-pushes to this ref; that
+            # is not a sync failure, so warn and carry on rather than failing the run.
+            if ! git push origin "$BRANCH" --force; then
+              echo "::warning::Could not force-push '$BRANCH' (likely blocked by a repository ruleset). Leaving the existing branch untouched; resolve the conflict there or delete the branch to let the next run recreate it."
+              exit 0
+            fi
           else
             git push origin "$BRANCH"
           fi
