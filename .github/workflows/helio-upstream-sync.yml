@@ -370,6 +370,7 @@ jobs:
           echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
 
       - name: Push unmerged branch for conflict resolution
+        id: push_branch
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -379,9 +380,24 @@ jobs:
           LOCAL_TIP=$(git rev-parse HEAD)
           REMOTE_TIP=$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')
 
+          # Whether the remote branch now holds *this* run's conflict state.  The
+          # conflict issue tells resolvers to check the branch out, so it has to say
+          # something different when we left the remote branch as it was.
+          skipped() {
+            echo "::warning::$1"
+            {
+              echo "pushed=false"
+              echo "skip_reason<<EOF"
+              echo "$1"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
           if [ -n "$REMOTE_TIP" ]; then
             if [ "$REMOTE_TIP" = "$LOCAL_TIP" ]; then
               echo "Remote branch '$BRANCH' already at same commit — skipping push."
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             # An open PR means resolution work is in flight on this branch.  Check
@@ -391,13 +407,11 @@ jobs:
             OPEN_PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
                         --state open --json number --jq '.[0].number' 2>/dev/null || true)
             if [ -n "$OPEN_PR" ]; then
-              echo "::warning::Remote branch '$BRANCH' has open PR #${OPEN_PR} — resolution is in progress. Skipping push to avoid losing work."
-              exit 0
+              skipped "Remote branch '$BRANCH' has open PR #${OPEN_PR} — resolution is in progress. Skipped the push to avoid losing that work, so the branch does not carry this run's conflict state."
             fi
             # If someone pushed conflict-resolution commits on top, don't clobber them.
             if git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP"; then
-              echo "::warning::Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipping to avoid losing work."
-              exit 0
+              skipped "Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipped the push to avoid losing that work, so the branch does not carry this run's conflict state."
             fi
             # Remote is at a stale commit from a previous run — force-push to
             # replace it.  Using --force avoids the need to delete the branch
@@ -405,12 +419,12 @@ jobs:
             # A repository ruleset may still forbid force-pushes to this ref; that
             # is not a sync failure, so warn and carry on rather than failing the run.
             if ! git push origin "$BRANCH" --force; then
-              echo "::warning::Could not force-push '$BRANCH' (likely blocked by a repository ruleset). Leaving the existing branch untouched; resolve the conflict there or delete the branch to let the next run recreate it."
-              exit 0
+              skipped "Could not force-push '$BRANCH' (likely blocked by a repository ruleset). The branch is still at its previous commit and does not carry this run's conflict state — delete it to let the next run recreate it, or resolve the conflict from scratch."
             fi
           else
             git push origin "$BRANCH"
           fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       - name: Handle merge conflicts
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
@@ -424,6 +438,8 @@ jobs:
           GRAFTED: ${{ steps.graft.outputs.grafted }}
           GRAFT_COMMIT: ${{ steps.graft.outputs.graft_commit }}
           PREV_UPSTREAM: ${{ steps.graft.outputs.prev_upstream }}
+          BRANCH_PUSHED: ${{ steps.push_branch.outputs.pushed }}
+          PUSH_SKIP_REASON: ${{ steps.push_branch.outputs.skip_reason }}
         with:
           script: |
             const fs = require('fs');
@@ -483,9 +499,28 @@ jobs:
               conflictBlock = conflicts;
             }
 
+            // The push step may have deliberately left the remote branch alone
+            // (open PR, resolution commits on top, or a ruleset-blocked force-push).
+            // Say so, otherwise step 1 sends resolvers to a branch that does not
+            // hold this run's conflict state.
+            const branchPushed = process.env.BRANCH_PUSHED !== 'false';
+            const pushSkipReason = (process.env.PUSH_SKIP_REASON || '').trim();
+            const staleBranchNote = branchPushed
+              ? []
+              : [
+                  `> [!WARNING]`,
+                  `> **CI did not update \`${branch}\`.** ${pushSkipReason}`,
+                  `> Start from \`${target}\` and redo the merge rather than trusting the branch as-is.`,
+                  '',
+                ];
+            const checkoutStep = branchPushed
+              ? '1. Check out the sync branch (already pushed by CI) and fetch upstream:'
+              : `1. Check out the sync branch (**not** updated by this run — see the warning above) and fetch upstream:`;
+
             let body = [
               `## Merge conflicts detected syncing ${syncLabel}`,
               '',
+              ...staleBranchNote,
               `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts in **${conflictLines.length} files**.`,
               '',
               '### Conflicted files',
@@ -497,7 +532,7 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Check out the sync branch (already pushed by CI) and fetch upstream:',
+              checkoutStep,
               '   ```bash',
               `   git fetch origin && git checkout ${branch}`,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
