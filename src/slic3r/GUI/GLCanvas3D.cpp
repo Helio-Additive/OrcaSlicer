@@ -2327,7 +2327,10 @@ void GLCanvas3D::remove_curr_plate_all()
 void GLCanvas3D::update_plate_thumbnails()
 {
     // Explicit refresh: the caller has just re-rendered the plate thumbnails, so
-    // rebuild the toolbar items even if it was already rendered once.
+    // rebuild the toolbar items even if it was already rendered once. Those
+    // thumbnails are rendered on the view3D canvas, so make this one current
+    // again before generate_texture() uploads the plate textures.
+    _set_current();
     _update_imgui_select_plate_toolbar(true);
 }
 
@@ -4824,6 +4827,9 @@ void GLCanvas3D::on_set_focus(wxFocusEvent& evt)
     if (m_canvas_type == ECanvasType::CanvasPreview) {
         // update thumbnails and update plate toolbar
         wxGetApp().plater()->update_all_plate_thumbnails();
+        // update_all_plate_thumbnails() renders on the view3D canvas, so make this
+        // canvas current again before generate_texture() uploads the plate textures.
+        _set_current();
         _update_imgui_select_plate_toolbar(true);
     }
     _refresh_if_shown_on_screen();
