@@ -10,7 +10,7 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 
 ### Upstream Sync (`helio-upstream-sync.yml`)
 - Scheduled workflow that syncs upstream OrcaSlicer changes into `orca-latest-parity-bambu`
-- Auto-creates merge conflict issues (labeled `upstream-sync`, `claude-work`) when conflicts occur
+- Auto-creates merge conflict issues (labeled `upstream-sync`, `claude-work`) when conflicts occur. Deduped by title: a repeat run with the same unresolved conflict refreshes the existing open `upstream-sync` issue's body rather than opening another one
 - Auto-creates sync PRs with changelog and Helio-relevant change reports
 - Uses `claude-work` label to flag items for automated triage
 - Detects out-of-band merges (e.g. manual PRs) via ancestor check and auto-updates the tracking tag
