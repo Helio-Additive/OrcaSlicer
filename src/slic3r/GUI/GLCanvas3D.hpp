@@ -1221,7 +1221,10 @@ private:
     bool _init_toolbars();
     bool _init_main_toolbar();
     bool _init_select_plate_toolbar();
-    bool _update_imgui_select_plate_toolbar();
+    // force == true rebuilds the plate items even when the toolbar has already
+    // been rendered once this session (is_render_finish).  Used by the explicit
+    // refresh entry points, which run after the plate thumbnails were re-rendered.
+    bool _update_imgui_select_plate_toolbar(bool force = false);
     bool _init_assemble_view_toolbar();
     bool _init_return_toolbar();
     bool _init_separator_toolbar();

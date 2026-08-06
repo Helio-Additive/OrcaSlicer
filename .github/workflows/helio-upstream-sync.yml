@@ -370,30 +370,81 @@ jobs:
           echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
 
       - name: Push unmerged branch for conflict resolution
+        id: push_branch
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git merge --abort
           BRANCH="${{ steps.sync_branch.outputs.branch }}"
           LOCAL_TIP=$(git rev-parse HEAD)
           REMOTE_TIP=$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')
 
+          # Whether the remote branch now holds *this* run's conflict state.  The
+          # conflict issue tells resolvers to check the branch out, so it has to say
+          # something different when we left the remote branch as it was.
+          skipped() {
+            echo "::warning::$1"
+            {
+              echo "pushed=false"
+              echo "skip_reason<<EOF"
+              echo "$1"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
           if [ -n "$REMOTE_TIP" ]; then
             if [ "$REMOTE_TIP" = "$LOCAL_TIP" ]; then
               echo "Remote branch '$BRANCH' already at same commit — skipping push."
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
               exit 0
+            fi
+            # An open PR means resolution work is in flight on this branch.  Check
+            # this before the ancestor test below: resolvers squash their branch
+            # (required by `require-squashed-sync`), which rewrites history and
+            # makes LOCAL_TIP a non-ancestor even though the work is very much live.
+            # `.[0].number` on an empty result prints the literal `null`, which is
+            # a non-empty string — use `// empty` so "no open PR" is really empty.
+            # A failed lookup must not read as "no PR": that would let the force-push
+            # below clobber live resolution work, so fail the run instead.
+            if ! OPEN_PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
+                             --state open --json number --jq '.[0].number // empty'); then
+              echo "::error::Could not determine whether '$BRANCH' has an open PR. Refusing to force-push without that evidence."
+              exit 1
+            fi
+            if [ -n "$OPEN_PR" ]; then
+              skipped "Remote branch '$BRANCH' has open PR #${OPEN_PR} — resolution is in progress. Skipped the push to avoid losing that work, so the branch does not carry this run's conflict state."
             fi
             # If someone pushed conflict-resolution commits on top, don't clobber them.
             if git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP"; then
-              echo "::warning::Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipping to avoid losing work."
-              exit 0
+              skipped "Remote branch '$BRANCH' has commits beyond our base — someone may be resolving conflicts. Skipped the push to avoid losing that work, so the branch does not carry this run's conflict state."
             fi
-            # Remote is at a stale commit from a previous run — force-push to
-            # replace it.  Using --force avoids the need to delete the branch
-            # first, which fails when branch protection rules block deletion.
-            git push origin "$BRANCH" --force
+            # Remote is at a stale commit from a previous run — replace it.  A
+            # force push avoids deleting the branch first, which fails when branch
+            # protection blocks deletion; --force-with-lease pins the replacement to
+            # the tip inspected above, so a push that landed since the ls-remote is
+            # never overwritten.  Neither a lost lease nor a ruleset that forbids
+            # force-pushes is a sync failure — but anything else (auth, network,
+            # remote outage) is, and must not be swallowed.
+            PUSH_STATUS=0
+            PUSH_ERR=$(git push origin "$BRANCH" --force-with-lease="$BRANCH:$REMOTE_TIP" 2>&1) || PUSH_STATUS=$?
+            printf '%s\n' "$PUSH_ERR"
+            if [ "$PUSH_STATUS" -ne 0 ]; then
+              case "$PUSH_ERR" in
+                *"stale info"*|*"fetch first"*|*"non-fast-forward"*)
+                  skipped "'$BRANCH' moved after this run inspected it (${REMOTE_TIP}), so the replacement push lost its lease. The branch does not carry this run's conflict state." ;;
+                *"repository rule violations"*|*"Cannot force-push"*|*"protected branch"*|*"pre-receive hook declined"*)
+                  skipped "Could not force-push '$BRANCH' — blocked by a repository ruleset. The branch is still at its previous commit and does not carry this run's conflict state; delete it to let the next run recreate it, or resolve the conflict from scratch." ;;
+                *)
+                  echo "::error::Unexpected failure pushing '$BRANCH' (exit ${PUSH_STATUS}) — not a ruleset rejection. See the push output above."
+                  exit 1 ;;
+              esac
+            fi
           else
             git push origin "$BRANCH"
           fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       - name: Handle merge conflicts
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
@@ -407,6 +458,8 @@ jobs:
           GRAFTED: ${{ steps.graft.outputs.grafted }}
           GRAFT_COMMIT: ${{ steps.graft.outputs.graft_commit }}
           PREV_UPSTREAM: ${{ steps.graft.outputs.prev_upstream }}
+          BRANCH_PUSHED: ${{ steps.push_branch.outputs.pushed }}
+          PUSH_SKIP_REASON: ${{ steps.push_branch.outputs.skip_reason }}
         with:
           script: |
             const fs = require('fs');
@@ -466,9 +519,41 @@ jobs:
               conflictBlock = conflicts;
             }
 
+            // The push step may have deliberately left the remote branch alone
+            // (open PR, resolution commits on top, or a ruleset-blocked force-push).
+            // Say so, otherwise step 1 sends resolvers to a branch that does not
+            // hold this run's conflict state.
+            const branchPushed = process.env.BRANCH_PUSHED !== 'false';
+            const pushSkipReason = (process.env.PUSH_SKIP_REASON || '').trim();
+            const staleBranchNote = branchPushed
+              ? []
+              : [
+                  `> [!WARNING]`,
+                  `> **CI did not update \`${branch}\`.** ${pushSkipReason}`,
+                  `> Start from \`${target}\` and redo the merge rather than trusting the branch as-is.`,
+                  '',
+                ];
+            // When the branch was not updated, checking it out would redo the merge
+            // on top of stale or in-progress work — recreate it from the target
+            // branch instead, so the commands match the warning above.
+            const checkoutBlock = branchPushed
+              ? [
+                  '1. Check out the sync branch (already pushed by CI) and fetch upstream:',
+                  '   ```bash',
+                  `   git fetch origin && git checkout ${branch}`,
+                ]
+              : [
+                  `1. Recreate the sync branch from \`${target}\` — do **not** build on the existing`,
+                  '   remote branch, it does not carry this run\'s conflict state (see the warning above):',
+                  '   ```bash',
+                  `   git fetch origin`,
+                  `   git checkout -B ${branch} origin/${target}`,
+                ];
+
             let body = [
               `## Merge conflicts detected syncing ${syncLabel}`,
               '',
+              ...staleBranchNote,
               `The automatic merge of upstream \`${syncLabel}\` into \`${target}\` produced conflicts in **${conflictLines.length} files**.`,
               '',
               '### Conflicted files',
@@ -480,9 +565,7 @@ jobs:
               helioReport,
               '',
               '### Resolution steps',
-              '1. Check out the sync branch (already pushed by CI) and fetch upstream:',
-              '   ```bash',
-              `   git fetch origin && git checkout ${branch}`,
+              ...checkoutBlock,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
               '   git fetch upstream --tags',
               '   ```',
@@ -558,14 +641,38 @@ jobs:
             await ensureLabel('upstream-sync', '0075ca', 'Upstream synchronisation tracking');
             await ensureLabel('claude-work',   'e4e669', 'Work item for Claude / Copilot');
 
-            await github.rest.issues.create({
+            const title = `Upstream sync failed: ${syncLabel} (merge conflicts)`;
+
+            // This step runs on every scheduled sync that still conflicts, so
+            // without a dedupe each run opens another identical issue. Reuse the
+            // open one and refresh its body instead — the conflict set (and the
+            // "did CI update the branch" warning) can change between runs.
+            const existing = (await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Upstream sync failed: ${syncLabel} (merge conflicts)`,
-              labels: ['upstream-sync', 'claude-work'],
-              body: body
-            });
-            console.log('Created merge conflict issue');
+              state: 'open',
+              labels: 'upstream-sync',
+              per_page: 100,
+            })).data.find(i => i.title === title && !i.pull_request);
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: body,
+              });
+              console.log(`Refreshed existing merge conflict issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels: ['upstream-sync', 'claude-work'],
+                body: body
+              });
+              console.log(`Created merge conflict issue #${created.data.number}`);
+            }
 
       # Collapse the clean merge into a single commit BEFORE pushing. The merge
       # commit created above has upstream's full history as its second parent

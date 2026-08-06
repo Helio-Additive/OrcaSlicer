@@ -290,6 +290,18 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
 - Null-guard fix: added `get_notification_manager()` null check in existing condition
+- `_update_imgui_select_plate_toolbar()` takes a `force` flag. `IMToolbar::is_render_finish`
+  is set at the end of every plate-toolbar render and is only cleared by
+  `set_enabled(false)` (i.e. when the preview panel is left), so any refresh
+  requested while the preview is already showing was silently dropped. The Helio
+  completion path never leaves the preview panel — `select_tab_silent()` uses
+  `ChangeSelection` and `set_current_panel(preview, true)` re-enables the toolbar
+  without resetting the flag — so the plate items stayed stuck with whatever
+  textures they had when `on_idle` first built them (none, if that happened before
+  the thumbnails were rendered) and the plate preview rendered black forever.
+  The explicit refresh entry points (`update_plate_thumbnails()`, `on_set_focus()`
+  on the preview canvas) now pass `force = true`; the idle path still uses the
+  cache, so textures are not regenerated every frame.
 
 #### `src/slic3r/GUI/GLToolbar.cpp` (+1)
 - Added `wxDEFINE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
