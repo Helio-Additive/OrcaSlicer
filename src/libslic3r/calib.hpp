@@ -315,12 +315,7 @@ protected:
     double speed_first_layer() const { return m_config.option<ConfigOptionFloat>("initial_layer_speed")->value; };
     double speed_perimeter() const { return m_config.option<ConfigOptionFloat>("outer_wall_speed")->value; };
     double accel_perimeter() const { return m_config.option<ConfigOptionFloat>("outer_wall_acceleration")->value; }
-    double line_width_first_layer() const
-    {
-        // TODO: FIXME: find out current filament/extruder?
-        const double nozzle_diameter = m_config.opt_float("nozzle_diameter", 0);
-        return m_config.get_abs_value("initial_layer_line_width", nozzle_diameter);
-    };
+    double line_width_first_layer() const;
     double line_width() const;
     int    wall_count() const { return m_config.option<ConfigOptionInt>("wall_loops")->value; };
 
