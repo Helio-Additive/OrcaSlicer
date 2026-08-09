@@ -77,9 +77,20 @@ jobs:
 
           # `tonumber` aborts jq on anything non-numeric, which would fail the
           # step over a telemetry payload. Validate before we get there.
+          #
+          # Zero is rejected as well as empty/non-digit: there is no issue #0, so
+          # a dispatch with issue_number=0 fails the Claude step but would still
+          # reach here (the step is `always()`) and log an event for a
+          # nonexistent issue. First arm catches empty/non-digits, second accepts
+          # anything with a non-zero digit, third rejects all-zero forms.
           case "$ISSUE_NUMBER" in
             ''|*[!0-9]*)
               echo "ISSUE_NUMBER '${ISSUE_NUMBER}' is not a positive integer, skipping Statsig logging"
+              exit 0
+              ;;
+            *[!0]*) ;;
+            *)
+              echo "ISSUE_NUMBER '${ISSUE_NUMBER}' is zero, which is not a valid issue number, skipping Statsig logging"
               exit 0
               ;;
           esac
