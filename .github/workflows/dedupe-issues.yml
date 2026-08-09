@@ -19,10 +19,31 @@ jobs:
       issues: write
 
     steps:
+      - name: Check Claude credentials
+        id: creds
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Issue dedupe skipped::CLAUDE_CODE_OAUTH_TOKEN is not configured for this repository, so duplicate detection did not run. Add the secret in Settings -> Secrets and variables -> Actions, then re-run this workflow via workflow_dispatch with the issue number."
+            {
+              echo "### Issue dedupe skipped"
+              echo
+              echo "\`CLAUDE_CODE_OAUTH_TOKEN\` is not configured, so \`/dedupe\` did not run for issue #${{ github.event.issue.number || inputs.issue_number }}."
+              echo
+              echo "Add the secret under **Settings -> Secrets and variables -> Actions**, then re-run this workflow with \`workflow_dispatch\` and the issue number."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
+        if: steps.creds.outputs.configured == 'true'
         uses: actions/checkout@v6
 
       - name: Run Claude Code slash command
+        if: steps.creds.outputs.configured == 'true'
         uses: anthropics/claude-code-base-action@beta
         with:
           prompt: "/dedupe ${{ github.repository }}/issues/${{ github.event.issue.number || inputs.issue_number }}"
@@ -32,7 +53,7 @@ jobs:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log duplicate comment event to Statsig
-        if: always()
+        if: always() && steps.creds.outputs.configured == 'true'
         env:
           STATSIG_API_KEY: ${{ secrets.STATSIG_API_KEY }}
         run: |
