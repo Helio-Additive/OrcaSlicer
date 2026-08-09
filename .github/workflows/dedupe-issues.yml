@@ -23,6 +23,9 @@ jobs:
         id: creds
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Passed through the environment, never interpolated into the script body:
+          # `inputs.issue_number` is a free-form workflow_dispatch string.
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
         run: |
           if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -30,7 +33,7 @@ jobs:
             {
               echo "### Issue dedupe skipped"
               echo
-              echo "\`CLAUDE_CODE_OAUTH_TOKEN\` is not configured, so \`/dedupe\` did not run for issue #${{ github.event.issue.number || inputs.issue_number }}."
+              echo "\`CLAUDE_CODE_OAUTH_TOKEN\` is not configured, so \`/dedupe\` did not run for issue #${ISSUE_NUMBER}."
               echo
               echo "Add the secret under **Settings -> Secrets and variables -> Actions**, then re-run this workflow with \`workflow_dispatch\` and the issue number."
             } >> "$GITHUB_STEP_SUMMARY"
@@ -41,6 +44,10 @@ jobs:
       - name: Checkout repository
         if: steps.creds.outputs.configured == 'true'
         uses: actions/checkout@v6
+        with:
+          # Nothing here pushes; don't leave the token in .git/config for the
+          # Claude step (and any tooling it shells out to) to pick up.
+          persist-credentials: false
 
       - name: Run Claude Code slash command
         if: steps.creds.outputs.configured == 'true'
@@ -56,20 +63,33 @@ jobs:
         if: always() && steps.creds.outputs.configured == 'true'
         env:
           STATSIG_API_KEY: ${{ secrets.STATSIG_API_KEY }}
+          # Same reasoning as the credentials step: keep untrusted-ish values out
+          # of the script text so they can never be command-substituted.
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          REPO: ${{ github.repository }}
+          TRIGGERED_BY: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || inputs.issue_number }}
-          REPO=${{ github.repository }}
-          
           if [ -z "$STATSIG_API_KEY" ]; then
             echo "STATSIG_API_KEY not found, skipping Statsig logging"
             exit 0
           fi
-          
+
+          # `tonumber` aborts jq on anything non-numeric, which would fail the
+          # step over a telemetry payload. Validate before we get there.
+          case "$ISSUE_NUMBER" in
+            ''|*[!0-9]*)
+              echo "ISSUE_NUMBER '${ISSUE_NUMBER}' is not a positive integer, skipping Statsig logging"
+              exit 0
+              ;;
+          esac
+
           # Prepare the event payload
           EVENT_PAYLOAD=$(jq -n \
             --arg issue_number "$ISSUE_NUMBER" \
             --arg repo "$REPO" \
-            --arg triggered_by "${{ github.event_name }}" \
+            --arg triggered_by "$TRIGGERED_BY" \
+            --arg workflow_run_id "$RUN_ID" \
             '{
               events: [{
                 eventName: "github_duplicate_comment_added",
@@ -78,7 +98,7 @@ jobs:
                   repository: $repo,
                   issue_number: ($issue_number | tonumber),
                   triggered_by: $triggered_by,
-                  workflow_run_id: "${{ github.run_id }}"
+                  workflow_run_id: $workflow_run_id
                 },
                 time: (now | floor | tostring)
               }]
