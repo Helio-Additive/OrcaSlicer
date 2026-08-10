@@ -102,18 +102,27 @@ workflows:
       probably be `disabled`. Needs an owner decision.
 
   winget_updater.yml:
-    status: undecided
+    status: disabled
     owner: upstream
     requires_secrets: [WINGET_TOKEN]
     reason: >-
-      ACTION NEEDED — this is a live misfire, not dead code. Triggers on
-      `release: [released]` with NO repository guard, and publishes to
-      `identifier: SoftFever.OrcaSlicer` (upstream's public WinGet package).
-      helio-release.yml creates releases with draft:false / prerelease:false for
-      stable versions, so cutting a stable Helio release fires this workflow and
-      it attempts to push a Helio build to upstream's WinGet entry under a
-      helio-v* tag. The only thing preventing that today is WINGET_TOKEN being
-      unset. Strong candidate for `disabled`.
+      Publishes to `identifier: SoftFever.OrcaSlicer` — UPSTREAM's public WinGet
+      package — and triggers on `release: [released]` with NO repository guard.
+      helio-release.yml creates stable releases with draft:false /
+      prerelease:false, so cutting one fires this workflow and it attempts to
+      push a Helio build to upstream's WinGet entry under a helio-v* tag. The
+      only thing preventing that today is WINGET_TOKEN being unset, which is
+      luck rather than design: setting that secret for any other reason would
+      arm it.
+
+      Helio does not publish to WinGet, so there is no version of this workflow
+      that is correct on this fork.
+
+      NOTE: this entry records the intent. It does NOT stop the workflow running
+      — the manifest is not yet enforced at the repo level (the Actions-API
+      reconciler is not built). Until someone disables it in
+      Settings -> Actions, the only thing standing between a stable Helio
+      release and upstream's WinGet package is an unset secret.
 
   # ---------------------------------------------------------------- checks / CI
   check_locale.yml:
