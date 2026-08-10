@@ -27,6 +27,13 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - Logs events to Statsig (optional, skips if `STATSIG_API_KEY` not set)
 - **Missing-credential handling**: a preflight `Check Claude credentials` step gates the checkout, the Claude run, and the Statsig log. When `CLAUDE_CODE_OAUTH_TOKEN` is empty the job skips those steps and finishes green, emitting a `::warning::` annotation and a job-summary note instead. Without this the `anthropics/claude-code-base-action` step aborts with `Environment variable validation failed`, so every newly-opened issue leaves a red X on the release branch's run history and masks real CI failures. The dedupe still does not run — the secret is the fix; the guard only stops the misconfiguration from looking like a build break. Re-run with `workflow_dispatch` + issue number once the secret is added.
 
+### Backfill Duplicate Comments (`backfill-duplicate-comments.yml` / `scripts/backfill-duplicate-comments.ts`)
+- Manual `workflow_dispatch` only. Walks existing issues and dispatches the dedupe workflow for any that lack a duplicate-detection comment
+- `DRY_RUN` defaults to `true`; it must be explicitly set to `"false"` to actually dispatch
+- **Owner/repo and ref come from the runner** (`GITHUB_REPOSITORY`, `GITHUB_REF_NAME`), not hardcoded. Inherited upstream values pinned this to `OrcaSlicer/OrcaSlicer` on `main`, so a run from this fork read *upstream's* issue list and tried to dispatch into *upstream's* repo. Fallbacks are `Helio-Additive/OrcaSlicer` and `orca-latest-parity-bambu`
+- The dispatch target is `dedupe-issues.yml`. Upstream's name for it, `claude-dedupe-issues.yml`, has never existed in this fork — every dispatch 404'd
+- **Known gap**: the workflow accepts a `days_back` input and passes it as `DAYS_BACK`, but the script filters by issue number (`MIN_ISSUE_NUMBER` / `MAX_ISSUE_NUMBER`) and never reads it. The input currently does nothing. The `MAX_ISSUE_NUMBER` default in the script's usage text (`4050`) also disagrees with the code (`11000`)
+
 ### Upstream Watch (`helio-upstream-watch.yml`)
 - Monitors upstream for new tags/releases and creates tracking issues
 

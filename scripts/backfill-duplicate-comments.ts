@@ -56,12 +56,15 @@ async function triggerDedupeWorkflow(
     return;
   }
 
+  // The dedupe workflow in this fork is `dedupe-issues.yml`; `claude-dedupe-issues.yml`
+  // never existed here and every dispatch 404'd. Default the ref to the release branch
+  // rather than `main` — that is where the fork's workflows are maintained.
   await githubRequest(
-    `/repos/${owner}/${repo}/actions/workflows/claude-dedupe-issues.yml/dispatches`,
+    `/repos/${owner}/${repo}/actions/workflows/dedupe-issues.yml/dispatches`,
     token,
     'POST',
     {
-      ref: 'main',
+      ref: process.env.GITHUB_REF_NAME || 'orca-latest-parity-bambu',
       inputs: {
         issue_number: issueNumber.toString()
       }
@@ -86,8 +89,16 @@ Environment Variables:
   }
   console.log("[DEBUG] GitHub token found");
 
-  const owner = "OrcaSlicer";
-  const repo = "OrcaSlicer";
+  // Derived from the runner, not hardcoded. These were pinned to upstream
+  // `OrcaSlicer/OrcaSlicer`, so a run from this fork read upstream's issues and
+  // tried to dispatch into upstream's repo with this repo's token.
+  const repository = process.env.GITHUB_REPOSITORY || "Helio-Additive/OrcaSlicer";
+  const [owner, repo] = repository.split("/");
+  if (!owner || !repo || repository.split("/").length !== 2) {
+    throw new Error(
+      `GITHUB_REPOSITORY is malformed: "${repository}" (expected "owner/repo")`
+    );
+  }
   const dryRun = process.env.DRY_RUN !== "false";
   const maxIssueNumber = parseInt(process.env.MAX_ISSUE_NUMBER || "11000", 10);
   const minIssueNumber = parseInt(process.env.MIN_ISSUE_NUMBER || "1", 10);
