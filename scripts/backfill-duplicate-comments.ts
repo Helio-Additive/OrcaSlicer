@@ -14,6 +14,9 @@ interface GitHubIssue {
   user: { id: number };
   created_at: string;
   closed_at?: string;
+  // Present only on pull requests. `/issues` returns PRs alongside issues, and
+  // this is the documented way to tell them apart.
+  pull_request?: { url: string };
 }
 
 interface GitHubComment {
@@ -120,8 +123,15 @@ Environment Variables:
     
     if (pageIssues.length === 0) break;
     
-    // Filter to only include issues within the specified range
-    const filteredIssues = pageIssues.filter(issue => 
+    // Filter to only include issues within the specified range.
+    // `/issues` returns pull requests too, and dedupe is issue-only — dispatching
+    // for a PR burns a run and logs a Statsig event for work that cannot apply.
+    const pullRequestsSkipped = pageIssues.filter(issue => issue.pull_request).length;
+    if (pullRequestsSkipped > 0) {
+      console.log(`[DEBUG] Skipping ${pullRequestsSkipped} pull request(s) in page #${page}`);
+    }
+    const filteredIssues = pageIssues.filter(issue =>
+      !issue.pull_request &&
       issue.number >= minIssueNumber && issue.number < maxIssueNumber
     );
     allIssues.push(...filteredIssues);

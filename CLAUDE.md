@@ -32,6 +32,7 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - `DRY_RUN` defaults to `true`; it must be explicitly set to `"false"` to actually dispatch
 - **Owner/repo and ref come from the runner** (`GITHUB_REPOSITORY`, `GITHUB_REF_NAME`), not hardcoded. Inherited upstream values pinned this to `OrcaSlicer/OrcaSlicer` on `main`, so a run from this fork read *upstream's* issue list and tried to dispatch into *upstream's* repo. Fallbacks are `Helio-Additive/OrcaSlicer` and `orca-latest-parity-bambu`
 - The dispatch target is `dedupe-issues.yml`. Upstream's name for it, `claude-dedupe-issues.yml`, has never existed in this fork — every dispatch 404'd
+- **Pull requests are filtered out.** `GET /issues` returns PRs alongside issues; entries carrying a `pull_request` field are skipped. This only started to matter once the dispatch worked — while it 404'd, dispatching for a PR was harmless
 - **Known gap**: the workflow accepts a `days_back` input and passes it as `DAYS_BACK`, but the script filters by issue number (`MIN_ISSUE_NUMBER` / `MAX_ISSUE_NUMBER`) and never reads it. The input currently does nothing. The `MAX_ISSUE_NUMBER` default in the script's usage text (`4050`) also disagrees with the code (`11000`)
 
 ### Upstream Watch (`helio-upstream-watch.yml`)
