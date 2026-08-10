@@ -26,6 +26,14 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - Model: `claude-sonnet-4-6`
 - Logs events to Statsig (optional, skips if `STATSIG_API_KEY` not set)
 
+### Workflow Inventory (`helio-workflow-inventory.yml`)
+- Enforces `.github/helio-workflows.yml`, the fork's decision record for which upstream-inherited workflows run here. Validator: `scripts/helio/check_workflow_inventory.py`
+- **Fails** a PR when a workflow file has no manifest entry (`E1`), when an entry has no file (`E2`), when a `deleted` file is resurrected by a sync (`E3`), when a workflow references a secret/var it does not declare (`E4`), or on a malformed manifest (`E5`)
+- **Warns** on `undecided` entries (`W1`), manifest drift (`W2`), and a `run` workflow needing a secret this repo lacks (`W3`). `--strict-secrets` escalates `W3` to an error once the manifest is clean
+- Secret presence is checked from `toJSON(secrets)` passed through `env`; only key names are read, values are never logged
+- Statuses: `run` / `disabled` / `undecided` / `deleted`. To stop an inherited workflow, set `disabled` and disable it via the Actions API — **do not edit or delete the upstream file**, which would create a merge conflict on every future sync. See `HELIO_INTEGRATION.md` → Rule 12
+- Why it exists: upstream ships repo infrastructure along with slicer code, and syncs pull it in wholesale. `dedupe-issues.yml` failed on every opened issue from March to August 2026 because it needs a credential this fork never had, and nothing forced anyone to notice
+
 ### Upstream Watch (`helio-upstream-watch.yml`)
 - Monitors upstream for new tags/releases and creates tracking issues
 

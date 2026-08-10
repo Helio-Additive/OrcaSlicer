@@ -118,6 +118,9 @@ generation so work started under the old credential can never land.
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
 | `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
+| `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
+| `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
+| `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
 
@@ -402,6 +405,43 @@ So for `README.md` conflicts (and any other branding/distribution/marketing copy
 Do **not** blanket "take upstream" on docs the way you would for upstream-owned
 data files (e.g. `resources/profiles/*.json`). If upstream adds a genuinely useful
 branding-neutral note, port just that note into the Helio wording by hand.
+
+### Rule 12: Inherited Workflows (classify, don't edit or delete)
+
+Upstream ships **repo infrastructure**, not just slicer code — workflows, bot
+integrations, and dependencies on external services (Claude, Statsig, Cloudflare
+R2, WinGet). Every sync pulls all of it in. Some of it cannot work here (it needs
+credentials only upstream has); some of it should not run here (it targets
+**upstream's** distribution channels). Rule 11 is the README-shaped instance of
+this; Rule 12 is the general case.
+
+`.github/helio-workflows.yml` records a decision for **every** workflow in the
+repo, and `helio-workflow-inventory.yml` fails a PR that introduces one nobody
+has classified, or that adds an undeclared dependency on a secret or repo
+variable. So a sync that brings in new infrastructure cannot merge silently.
+
+**When a sync adds or changes a workflow:**
+1. The inventory check fails with `E1` (unclassified) or `E4` (undeclared
+   dependency). That is working as intended — it is asking for a decision.
+2. Add or update the entry. Fill in `reason` properly; it is the decision record
+   the next person reviewing a sync will read.
+3. If the workflow should **not** run here, set `status: disabled` and disable it
+   at the repo level via the Actions API. **Do not edit or delete the file.**
+
+**Why not just delete it.** Deleting an upstream-owned file means a
+`modify/delete` conflict on every future sync that touches it; editing it means a
+content conflict. Disabling via the API leaves the file byte-identical to upstream
+forever and carries zero conflict surface. Encode fork policy in Helio-owned
+files, never inside files upstream owns.
+
+**Known live hazard — `winget_updater.yml`.** It triggers on
+`release: [released]` with **no repository guard** and publishes to
+`identifier: SoftFever.OrcaSlicer`, upstream's public WinGet package.
+`helio-release.yml` creates stable releases with `draft: false` and
+`prerelease: false`, so cutting one fires this workflow and it attempts to push a
+Helio build to upstream's WinGet entry under a `helio-v*` tag. The only thing
+preventing that today is `WINGET_TOKEN` being unset — which is a reason **not** to
+treat "missing secret" as a harmless condition to paper over.
 
 ## Upstream Sync: squash merges & the merge-base graft
 

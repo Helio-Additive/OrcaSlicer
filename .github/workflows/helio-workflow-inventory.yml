@@ -1,0 +1,62 @@
+name: Workflow inventory
+
+# Enforces .github/helio-workflows.yml — this fork's decision record for which
+# upstream-inherited workflows run here.
+#
+# Upstream ships repo infrastructure along with slicer code, and every sync pulls
+# it in wholesale. Without a forcing function, inherited workflows accumulate
+# unnoticed: some fail forever on credentials this fork has never had, some run
+# against upstream's distribution channels. This check fails a PR that introduces
+# a workflow nobody has classified, or that adds an undeclared dependency on an
+# external secret.
+#
+# Helio-owned file: upstream will never touch it, so it carries no sync conflict
+# surface. That is deliberate — see the header of .github/helio-workflows.yml.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/helio-workflows.yml'
+      - 'scripts/helio/check_workflow_inventory.py'
+  push:
+    branches:
+      - orca-latest-parity-bambu
+    paths:
+      - '.github/workflows/**'
+      - '.github/helio-workflows.yml'
+      - 'scripts/helio/check_workflow_inventory.py'
+  schedule:
+    # Weekly, so manifest drift and newly-missing credentials surface even when
+    # nobody is touching workflow files.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    name: Check workflow inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check workflow inventory
+        env:
+          # Only the KEYS of this object are read, to answer "is this secret
+          # configured on the repo?". Values are never logged, and Actions masks
+          # them regardless. Passed via env rather than interpolated into the
+          # script body so it can never be command-substituted.
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: python3 scripts/helio/check_workflow_inventory.py
