@@ -62,14 +62,23 @@ jobs:
   # must never be answered by handing credentials to PR-controlled code.
   #
   # Two properties make this safe:
-  #   1. `if:` excludes pull_request, so the checked-out validator is always
-  #      code that has already been reviewed and merged.
+  #   1. The `if:` gates on the REF, not just the event. The property that
+  #      matters is "is the code this job checks out already reviewed?", and
+  #      excluding pull_request alone does not establish it: workflow_dispatch
+  #      accepts any branch, so a collaborator could dispatch this job against
+  #      an unreviewed branch and run branch-controlled code while it holds the
+  #      token. Restricting to the release branch covers every trusted entry
+  #      point — push is already limited to it, schedule runs on it (it is the
+  #      default branch), and manual dispatch stays available there — while
+  #      skipping feature-branch dispatches.
   #   2. The runner only ever sees secret NAMES, read from the Actions secrets
   #      REST API, which does not return values. `toJSON(secrets)` — which
   #      serialises every name AND value into the environment — is not used.
   secret-presence:
     name: Check declared secrets exist
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/orca-latest-parity-bambu'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
