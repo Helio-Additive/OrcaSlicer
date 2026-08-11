@@ -27,15 +27,21 @@ Usage:
     check_workflow_inventory.py [--workflows-dir DIR] [--manifest FILE]
                                 [--strict-secrets] [--summary FILE]
 
-Secret presence (W3) is only evaluated when the SECRETS_JSON environment variable
-is set, which the calling workflow populates from `toJSON(secrets)`. Only the KEYS
-are ever read; values are never logged.
+Secret presence (W3) is only evaluated when SECRET_NAMES_FILE points at a file of
+newline-separated secret NAMES, which the calling workflow populates from the
+Actions secrets REST API. Secret *values* are never passed to this script: the
+earlier `toJSON(secrets)` plumbing put every name and value into the environment
+of a process running checked-out code, which is unsafe on pull_request runs. See
+the header of .github/workflows/helio-workflow-inventory.yml.
+
+Under --strict-secrets, unavailable or unreadable secret metadata is an error
+rather than a warning: a strict run that silently checks nothing is worse than a
+strict run that fails loudly.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -50,11 +56,38 @@ VALID_STATUSES = {"run", "disabled", "undecided", "deleted"}
 VALID_OWNERS = {"upstream", "helio"}
 REQUIRED_FIELDS = ("status", "owner", "reason")
 
-# `secrets: inherit` has no dot, so it is not matched. GITHUB_TOKEN is always
-# provided by Actions and would be noise in every entry.
-SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
-VARS_RE = re.compile(r"vars\.([A-Za-z_][A-Za-z0-9_]*)")
+# `secrets: inherit` has no dot or bracket, so it is not matched. GITHUB_TOKEN is
+# always provided by Actions and would be noise in every entry.
+#
+# Both access forms have to be recognised. `${{ secrets.X }}` and
+# `${{ secrets['X'] }}` are equivalent to Actions, so matching only the dot form
+# is a false negative in the dangerous direction: an undeclared credential would
+# produce no E4 and merge unnoticed, which is the exact failure this check exists
+# to prevent.
+SECRET_DOT_RE = re.compile(r"\bsecrets\.([A-Za-z_][A-Za-z0-9_-]*)")
+VARS_DOT_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_-]*)")
+SECRET_INDEX_RE = re.compile(r"\bsecrets\[([^\]]*)\]")
+VARS_INDEX_RE = re.compile(r"\bvars\[([^\]]*)\]")
+# A bracket subscript that is a plain quoted literal resolves to a known name.
+# Anything else (`secrets[matrix.token]`, `secrets[format('{0}_KEY', x)]`) cannot
+# be resolved statically and is reported rather than ignored.
+QUOTED_LITERAL_RE = re.compile(r"""^\s*(?:'([^']*)'|"([^"]*)")\s*$""")
 IMPLICIT_SECRETS = {"GITHUB_TOKEN"}
+
+# Only look inside places Actions actually evaluates expressions. Scanning raw
+# file text matches prose and filenames too — a step handling `/tmp/secrets.json`
+# was read as a secret named `json`.
+#
+# `if:` needs its own pattern because the `${{ }}` wrapper is optional there:
+# `if: secrets.FOO != ''` is a real reference. Omitting it would trade a false
+# positive for a false negative, which is the worse direction for this check.
+EXPRESSION_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+IF_CONDITION_RE = re.compile(r"^[ \t-]*if\s*:\s*(.+)$", re.MULTILINE)
+
+
+def expression_regions(text: str) -> str:
+    """The parts of a workflow file where Actions evaluates contexts."""
+    return "\n".join(EXPRESSION_RE.findall(text) + IF_CONDITION_RE.findall(text))
 
 
 class Report:
@@ -122,6 +155,15 @@ def load_manifest(path: Path, report: Report) -> dict:
         report.error("E5", f"manifest is not valid YAML: {exc}")
         return {}
 
+    # A YAML document root that is not a mapping (a bare list, a scalar) would
+    # otherwise reach .get() and raise AttributeError. Every type below is
+    # checked before use so a malformed manifest produces E5 rather than a
+    # traceback — a validator that crashes on bad input teaches people to
+    # distrust it.
+    if not isinstance(data, dict):
+        report.error("E5", "manifest root must be a mapping")
+        return {}
+
     entries = data.get("workflows")
     if not isinstance(entries, dict):
         report.error("E5", "manifest has no `workflows:` mapping")
@@ -132,44 +174,102 @@ def load_manifest(path: Path, report: Report) -> dict:
         if not isinstance(entry, dict):
             report.error("E5", f"`{name}`: entry must be a mapping")
             continue
+
+        valid = True
         for field in REQUIRED_FIELDS:
             if not entry.get(field):
                 report.error("E5", f"`{name}`: missing required field `{field}`")
-        status = entry.get("status")
-        if status is not None and status not in VALID_STATUSES:
-            report.error(
-                "E5",
-                f"`{name}`: status `{status}` is not one of "
-                f"{', '.join(sorted(VALID_STATUSES))}",
-            )
-        owner = entry.get("owner")
-        if owner is not None and owner not in VALID_OWNERS:
-            report.error(
-                "E5",
-                f"`{name}`: owner `{owner}` is not one of {', '.join(sorted(VALID_OWNERS))}",
-            )
-        cleaned[name] = entry
+                valid = False
+
+        for field, allowed in (("status", VALID_STATUSES), ("owner", VALID_OWNERS)):
+            value = entry.get(field)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                report.error(
+                    "E5",
+                    f"`{name}`: {field} must be a string, got "
+                    f"{type(value).__name__}",
+                )
+                valid = False
+            elif value not in allowed:
+                report.error(
+                    "E5",
+                    f"`{name}`: {field} `{value}` is not one of "
+                    f"{', '.join(sorted(allowed))}",
+                )
+                valid = False
+
+        # A scalar string here is valid YAML but would be turned into a set of
+        # single characters by set(), silently corrupting E4/W2/W3.
+        for field in ("requires_secrets", "requires_vars"):
+            value = entry.get(field)
+            if value is None:
+                continue
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                report.error(
+                    "E5",
+                    f"`{name}`: {field} must be a list of strings, got "
+                    f"{type(value).__name__}",
+                )
+                valid = False
+
+        if valid:
+            cleaned[name] = entry
     return cleaned
 
 
-def referenced(text: str) -> tuple[set[str], set[str]]:
-    secrets = set(SECRET_RE.findall(text)) - IMPLICIT_SECRETS
-    return secrets, set(VARS_RE.findall(text))
+def _resolve_index(subscripts: list[str]) -> tuple[set[str], set[str]]:
+    """Split bracket subscripts into statically-known names and dynamic ones."""
+    static: set[str] = set()
+    dynamic: set[str] = set()
+    for raw in subscripts:
+        match = QUOTED_LITERAL_RE.match(raw)
+        if match:
+            name = match.group(1) if match.group(1) is not None else match.group(2)
+            if name:
+                static.add(name)
+            else:
+                dynamic.add(raw.strip())
+        else:
+            dynamic.add(raw.strip())
+    return static, dynamic
+
+
+def referenced(raw_text: str) -> tuple[set[str], set[str], set[str]]:
+    """Secrets, vars, and unresolvable dynamic references found in a workflow."""
+    text = expression_regions(raw_text)
+    secrets = set(SECRET_DOT_RE.findall(text))
+    static, dyn_secrets = _resolve_index(SECRET_INDEX_RE.findall(text))
+    secrets |= static
+    secrets -= IMPLICIT_SECRETS
+
+    variables = set(VARS_DOT_RE.findall(text))
+    static, dyn_vars = _resolve_index(VARS_INDEX_RE.findall(text))
+    variables |= static
+
+    dynamic = {f"secrets[{d}]" for d in dyn_secrets} | {f"vars[{d}]" for d in dyn_vars}
+    return secrets, variables, dynamic
 
 
 def configured_secret_names() -> set[str] | None:
-    """Keys of the repo's secrets context, or None when not supplied.
+    """Names of the repo's configured secrets, or None when not supplied.
 
-    The caller passes `toJSON(secrets)` through the environment. Only keys are
-    read; values are never logged or returned.
+    Read from a file of newline-separated names written by the calling workflow
+    from the Actions secrets REST API, which returns names and metadata only.
+    Secret values are never available to this process.
     """
-    raw = os.environ.get("SECRETS_JSON")
-    if not raw:
+    path = os.environ.get("SECRET_NAMES_FILE")
+    if not path:
         return None
     try:
-        return set(json.loads(raw).keys())
-    except (json.JSONDecodeError, AttributeError):
+        raw = Path(path).read_text(encoding="utf-8")
+    except OSError:
         return None
+    names = {line.strip() for line in raw.splitlines() if line.strip()}
+    return names or None
 
 
 def main() -> int:
@@ -205,7 +305,8 @@ def main() -> int:
 
     for name, entry in sorted(manifest.items()):
         status = entry.get("status")
-        counts[status] = counts.get(status, 0) + 1
+        if isinstance(status, str):
+            counts[status] = counts.get(status, 0) + 1
         path = on_disk.get(name)
 
         if status == "deleted":
@@ -228,9 +329,20 @@ def main() -> int:
             continue
 
         text = path.read_text(encoding="utf-8")
-        used_secrets, used_vars = referenced(text)
+        used_secrets, used_vars, dynamic_refs = referenced(text)
         declared_secrets = set(entry.get("requires_secrets") or [])
         declared_vars = set(entry.get("requires_vars") or [])
+
+        # A subscript this script cannot resolve is not the same as no
+        # dependency. Reporting it keeps the check honest about its own blind
+        # spot instead of passing silently.
+        for ref in sorted(dynamic_refs):
+            report.error(
+                "E4",
+                f"`{name}` references `{ref}`, a dynamic lookup whose name cannot be "
+                "resolved statically. Declare the possible names explicitly or "
+                "rewrite the reference to a literal so the inventory can verify it.",
+            )
 
         # E4 — a new external dependency arrived without being declared. This is
         # what catches "the sync added a dependency on a credential we don't have"
@@ -276,10 +388,21 @@ def main() -> int:
                     report.warn("W3", message)
 
     if secrets_present is None:
-        report.warn(
-            "W3",
-            "SECRETS_JSON not supplied, so secret-presence was not checked.",
+        message = (
+            "SECRET_NAMES_FILE not supplied or unreadable, so secret-presence was "
+            "not checked."
         )
+        if args.strict_secrets:
+            # --strict-secrets promises enforcement. Degrading to a warning here
+            # means a misconfigured strict run exits 0 having verified nothing,
+            # which reads as a pass.
+            report.error(
+                "W3",
+                message + " --strict-secrets was requested, so this is an error "
+                "rather than a silent skip.",
+            )
+        else:
+            report.warn("W3", message)
 
     report.write_summary(args.summary, counts)
 

@@ -14,18 +14,16 @@ name: Workflow inventory
 # surface. That is deliberate — see the header of .github/helio-workflows.yml.
 
 on:
+  # Deliberately NO `paths:` filter. GitHub evaluates path filters against only
+  # the first 300 changed files, and an upstream sync routinely changes far more
+  # (v2.4.2 changed 894). A sync that adds a workflow outside that truncated
+  # window would skip the check entirely — precisely the case E1 exists to catch.
+  # The job is a few seconds of Python, so running it on every PR is the cheap
+  # side of that trade.
   pull_request:
-    paths:
-      - '.github/workflows/**'
-      - '.github/helio-workflows.yml'
-      - 'scripts/helio/check_workflow_inventory.py'
   push:
     branches:
       - orca-latest-parity-bambu
-    paths:
-      - '.github/workflows/**'
-      - '.github/helio-workflows.yml'
-      - 'scripts/helio/check_workflow_inventory.py'
   schedule:
     # Weekly, so manifest drift and newly-missing credentials surface even when
     # nobody is touching workflow files.
@@ -36,6 +34,9 @@ permissions:
   contents: read
 
 jobs:
+  # Runs on every event, including pull_request. Holds NO credentials of any
+  # kind, so it is safe for this job to execute the PR's own copy of the
+  # validator.
   inventory:
     name: Check workflow inventory
     runs-on: ubuntu-latest
@@ -53,10 +54,72 @@ jobs:
         run: pip install --quiet pyyaml
 
       - name: Check workflow inventory
+        run: python3 scripts/helio/check_workflow_inventory.py
+
+  # W3 ("a `run` workflow needs a secret this repo does not have") is the check
+  # that would have caught the dedupe-issues.yml breakage five months early, so
+  # it is worth keeping — but it needs to know which secrets exist, and that
+  # must never be answered by handing credentials to PR-controlled code.
+  #
+  # Two properties make this safe:
+  #   1. `if:` excludes pull_request, so the checked-out validator is always
+  #      code that has already been reviewed and merged.
+  #   2. The runner only ever sees secret NAMES, read from the Actions secrets
+  #      REST API, which does not return values. `toJSON(secrets)` — which
+  #      serialises every name AND value into the environment — is not used.
+  secret-presence:
+    name: Check declared secrets exist
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Read configured secret names
+        id: names
         env:
-          # Only the KEYS of this object are read, to answer "is this secret
-          # configured on the repo?". Values are never logged, and Actions masks
-          # them regardless. Passed via env rather than interpolated into the
-          # script body so it can never be command-substituted.
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          # A dedicated fine-grained token with read-only "Secrets" repository
+          # permission. The default GITHUB_TOKEN cannot list secrets. When this
+          # is unset the step degrades to a skip rather than failing — W3 is an
+          # advisory check and must not gate the release branch on a token
+          # nobody has configured yet.
+          INVENTORY_TOKEN: ${{ secrets.WORKFLOW_INVENTORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${INVENTORY_TOKEN}" ]; then
+            echo "::notice::WORKFLOW_INVENTORY_TOKEN is not configured; skipping secret-presence (W3)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # /actions/secrets returns names and metadata only — never values.
+          status=$(curl -sS -o /tmp/secret-list.json -w '%{http_code}' \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${INVENTORY_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/secrets?per_page=100")
+          if [ "$status" != "200" ]; then
+            echo "::warning::Actions secrets API returned HTTP ${status}; skipping secret-presence (W3)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -c "import json,sys; print('\n'.join(s['name'] for s in json.load(open('/tmp/secret-list.json'))['secrets']))" \
+            > /tmp/secret-names.txt
+          rm -f /tmp/secret-list.json
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "Read $(wc -l < /tmp/secret-names.txt) configured secret name(s)."
+
+      - name: Check declared secrets exist
+        if: steps.names.outputs.available == 'true'
+        env:
+          # Names only. No values are present in this environment.
+          SECRET_NAMES_FILE: /tmp/secret-names.txt
         run: python3 scripts/helio/check_workflow_inventory.py

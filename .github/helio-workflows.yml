@@ -178,7 +178,15 @@ workflows:
   helio-workflow-inventory.yml:
     status: run
     owner: helio
-    reason: Enforces this manifest. See scripts/helio/check_workflow_inventory.py.
+    requires_secrets: [WORKFLOW_INVENTORY_TOKEN]
+    reason: >-
+      Enforces this manifest. See scripts/helio/check_workflow_inventory.py.
+      WORKFLOW_INVENTORY_TOKEN is optional: a fine-grained token with read-only
+      "Secrets" permission, used ONLY to list secret NAMES for the W3 check (the
+      Actions secrets API never returns values, and the default GITHUB_TOKEN
+      cannot list them). When it is unset the secret-presence job skips and W3 is
+      simply not evaluated — so this workflow expects a W3 warning about its own
+      token until someone configures one.
 
   # ---------------------------------------------------------------- issue triage
   assign.yml:

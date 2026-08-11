@@ -443,6 +443,26 @@ Helio build to upstream's WinGet entry under a `helio-v*` tag. The only thing
 preventing that today is `WINGET_TOKEN` being unset — which is a reason **not** to
 treat "missing secret" as a harmless condition to paper over.
 
+Its manifest entry is `disabled`: Helio does not publish to WinGet, and there is
+no configuration of this workflow that is correct on this fork. **That entry
+records the intent but does not enforce it** — the Actions-API reconciler does not
+exist yet, so the workflow is still enabled at the repo level. Until someone turns
+it off under **Settings → Actions**, an unset secret is the only control, and
+setting `WINGET_TOKEN` for any unrelated reason would arm the publish path without
+a code change. Do this by hand before cutting the next stable release.
+
+**Secret-presence (`W3`) reads names, never values.** The check needs to know
+which secrets exist on the repo, and the obvious way to answer that —
+`${{ toJSON(secrets) }}` — serialises every secret name *and value* into the
+runner environment. On a `pull_request` run that environment belongs to a job
+executing the PR's own copy of the validator, so anyone who can open a branch
+could rewrite the script to exfiltrate the lot. Instead the workflow splits in
+two: the `inventory` job holds no credentials and runs on every event, and a
+separate `secret-presence` job — excluded from `pull_request` — reads secret
+**names** from the Actions secrets REST API, which never returns values. Apply the
+same rule to anything added here later: never hand a credential to a job that
+executes pull-request-controlled code.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
