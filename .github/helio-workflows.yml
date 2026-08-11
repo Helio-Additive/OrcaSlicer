@@ -91,15 +91,15 @@ workflows:
       helio-v{version} tags. Replaces upstream's publish_release.yml.
 
   publish_release.yml:
-    status: undecided
+    status: disabled
     owner: upstream
     requires_vars: [RELEASE_PUBLISHER]
     reason: >-
       Upstream's draft-release publisher, superseded here by helio-release.yml.
       Self-limiting for now: workflow_dispatch only, and the first step aborts
       unless the actor matches the RELEASE_PUBLISHER variable (upstream sets it
-      to "SoftFever"). Low risk, but it is redundant on this fork and should
-      probably be `disabled`. Needs an owner decision.
+      to "SoftFever"). DECISION (2026-08-11): `disabled` — redundant on this fork
+      and disabled at the repo level the same day via `gh workflow disable`.
 
   winget_updater.yml:
     status: disabled
@@ -118,29 +118,42 @@ workflows:
       Helio does not publish to WinGet, so there is no version of this workflow
       that is correct on this fork.
 
-      NOTE: this entry records the intent. It does NOT stop the workflow running
-      — the manifest is not yet enforced at the repo level (the Actions-API
-      reconciler is not built). Until someone disables it in
-      Settings -> Actions, the only thing standing between a stable Helio
-      release and upstream's WinGet package is an unset secret.
+      DECISION (2026-08-11): `disabled`, and disabled at the repo level the same
+      day via `gh workflow disable winget_updater.yml`. Note the repo-level state
+      is not tracked in git and can be undone by anyone clicking "Enable
+      workflow" — until the Actions-API reconciler exists, this entry and reality
+      can drift apart with nothing to catch it.
 
   # ---------------------------------------------------------------- checks / CI
   check_locale.yml:
     status: run
     owner: upstream
-    reason: Localisation sanity check; cheap and fork-agnostic.
+    reason: >-
+      Validates .po catalogue format. SILENTLY INERT ON THIS FORK: its
+      pull_request trigger is filtered to `branches: [main]`, and this fork's
+      base branch is orca-latest-parity-bambu, so it has never fired on a Helio
+      PR. Left `run` because it is harmless, but do not count it as coverage.
+      To actually get it, add orca-latest-parity-bambu to its branches list —
+      which means editing an upstream-owned file, so weigh that against Rule 12.
 
   check_profiles.yml:
     status: run
     owner: upstream
     reason: >-
-      Validates printer/filament profile JSON. Directly relevant — profile data
-      is the bulk of every upstream sync diff.
+      Validates printer/filament profile JSON. SILENTLY INERT ON THIS FORK for
+      the same reason as check_locale.yml — `pull_request: branches: [main]`
+      never matches a PR targeting orca-latest-parity-bambu.
+      This one matters: profile data is the bulk of every upstream sync diff, so
+      the fork currently has NO automated profile validation on sync PRs. That is
+      a real coverage gap, not just dead config. It still has workflow_dispatch,
+      so it can be run by hand against a sync branch in the meantime.
 
   check_profiles_comment.yml:
     status: run
     owner: upstream
-    reason: Posts check_profiles results back onto the PR. Paired with the above.
+    reason: >-
+      Posts check_profiles results back onto the PR via workflow_run. Inert as
+      long as check_profiles.yml never fires here — it has nothing to report on.
 
   shellcheck.yml:
     status: run
@@ -200,32 +213,41 @@ workflows:
     reason: Applies PR labels. Fork-agnostic; observed passing.
 
   dedupe-issues.yml:
-    status: undecided
+    status: disabled
     owner: upstream
     requires_secrets: [CLAUDE_CODE_OAUTH_TOKEN, STATSIG_API_KEY]
     reason: >-
       Inherited from upstream in the v2.3 merge (2026-03-06). Upstream runs
       Claude-based issue dedup and has the credential; this fork never has, so
       the job has failed on every `issues: opened` event since March. Diagnosed
-      in PR #49 (2026-04-02) and left. Either add CLAUDE_CODE_OAUTH_TOKEN and
-      set `run`, or set `disabled`. See PR #105.
+      in PR #49 (2026-04-02) and left. DECISION (2026-08-11): Helio does not want
+      Claude-based issue dedup here, so this is `disabled` rather than having the
+      credential added. Turning it on would also activate auto-close-duplicates,
+      which auto-closes issues after 3 days — a behaviour nobody asked for.
+      PR #105 (which made the missing-credential failure quiet) is closed as
+      moot: a workflow that does not run needs no failure posture. All three of
+      the dedup family were disabled at the repo level on 2026-08-11.
 
   auto-close-duplicates.yml:
-    status: undecided
+    status: disabled
     owner: upstream
     requires_secrets: [STATSIG_API_KEY]
     reason: >-
       Downstream of dedupe-issues.yml — scripts/auto-close-duplicates.ts scans
       for bot comments containing "Found ... possible duplicate", which only the
       dedupe run produces. Since dedupe has never run, this wakes daily, finds
-      nothing and reports success. Inert. Decide together with dedupe-issues.yml.
+      nothing and reports success. DECISION (2026-08-11): `disabled` alongside
+      dedupe-issues.yml. Note this job CLOSES ISSUES automatically once a dedupe
+      comment is 3 days old — it has only ever been harmless because dedupe never
+      ran. Do not re-enable it independently of a deliberate choice to auto-close.
 
   backfill-duplicate-comments.yml:
-    status: undecided
+    status: disabled
     owner: upstream
     reason: >-
       Same family as dedupe-issues.yml; workflow_dispatch only, so it is not
-      firing on its own. Decide together with dedupe-issues.yml.
+      firing on its own. DECISION (2026-08-11): `disabled` alongside the rest of
+      the dedup family.
 
   # ---------------------------------------------------------------- upstream-only
   doxygen-docs.yml:

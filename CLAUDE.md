@@ -19,12 +19,11 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - **Merge-base graft**: upstream-sync PRs are squash-merged (required by the release branch's "verified signatures" rule — a squash yields one signed commit instead of hundreds of unsigned upstream ones). Squashing discards upstream ancestry, so before each merge the workflow ephemerally grafts the last-synced upstream commit (derived from `version.inc` for tag-release syncs, or the `helio-last-synced-main` tracking tag for `main` syncs) via `git replace --graft` to keep the merge-base correct. Without it, conflicts balloon (a ~5-file delta once exploded to 7,876). The graft is local-only and removed before any push. **Always squash-merge upstream-sync PRs, never a merge commit.** See `HELIO_INTEGRATION.md` → "Upstream Sync: squash merges & the merge-base graft".
 - **Squash the sync branch *before* opening the PR** (not just at merge time): after a clean merge the workflow collapses the merge commit into a single internally-authored commit (`git commit-tree` on the merge tree with the target-branch tip as sole parent) before pushing. Reason: GitHub auto-subscribes the author of every commit in a PR to that PR's notifications; a merge commit drags in upstream's hundreds of individual commits, which spams ~100+ external upstream contributors with every comment on the fork's sync PR. A single squashed commit has no external authors. Conflict-resolution instructions in the auto-created issue tell human/Claude resolvers to squash the same way before pushing.
 
-### Issue Dedupe (`dedupe-issues.yml`)
-- Triggers on new issue opened or manual `workflow_dispatch` with issue number
-- Uses `anthropics/claude-code-base-action@beta` with `/dedupe` slash command
-- Requires `CLAUDE_CODE_OAUTH_TOKEN` secret configured in repo settings
-- Model: `claude-sonnet-4-6`
-- Logs events to Statsig (optional, skips if `STATSIG_API_KEY` not set)
+### Issue Dedupe (`dedupe-issues.yml`) — **DISABLED**
+- **Disabled on this fork as of 2026-08-11**, along with `auto-close-duplicates.yml` and `backfill-duplicate-comments.yml`. Marked `disabled` in `.github/helio-workflows.yml` and disabled at the repo level. The files are left byte-identical to upstream — do not edit or delete them (Rule 12)
+- Upstream runs Claude-based issue dedup and has `CLAUDE_CODE_OAUTH_TOKEN`; this fork never did, so the job failed on every `issues: opened` event from the v2.3 merge (2026-03-06) until it was disabled. Diagnosed in PR #49 (2026-04-02) and left running for four more months
+- **Do not re-enable `auto-close-duplicates.yml` on its own.** It *closes issues automatically* once a dedupe comment is 3 days old; it has only ever been harmless because dedupe never produced those comments
+- If Helio ever does want dedup: add the secret, flip all three entries to `run`, and re-enable them in Settings → Actions
 
 ### Workflow Inventory (`helio-workflow-inventory.yml`)
 - Enforces `.github/helio-workflows.yml`, the fork's decision record for which upstream-inherited workflows run here. Validator: `scripts/helio/check_workflow_inventory.py`
