@@ -132,21 +132,34 @@ workflows:
       Validates .po catalogue format. SILENTLY INERT ON THIS FORK: its
       pull_request trigger is filtered to `branches: [main]`, and this fork's
       base branch is orca-latest-parity-bambu, so it has never fired on a Helio
-      PR. Left `run` because it is harmless, but do not count it as coverage.
-      To actually get it, add orca-latest-parity-bambu to its branches list —
-      which means editing an upstream-owned file, so weigh that against Rule 12.
+      PR. DECISION (2026-08-11): leave it inert. Wiring it up means adding a
+      branch name to an upstream-owned file, and build_all.yml shows the cost of
+      that pattern — Helio added its branch there and it now appears in the
+      conflict list of 8 of 13 sync issues. Translation work is not active here
+      yet (see #108); revisit if it starts. workflow_dispatch still works for a
+      one-off run. Do NOT count this as coverage.
 
   check_profiles.yml:
     status: run
     owner: upstream
     reason: >-
-      Validates printer/filament profile JSON. SILENTLY INERT ON THIS FORK for
-      the same reason as check_locale.yml — `pull_request: branches: [main]`
-      never matches a PR targeting orca-latest-parity-bambu.
-      This one matters: profile data is the bulk of every upstream sync diff, so
-      the fork currently has NO automated profile validation on sync PRs. That is
-      a real coverage gap, not just dead config. It still has workflow_dispatch,
-      so it can be run by hand against a sync branch in the meantime.
+      Validates printer/filament profile JSON. SILENTLY INERT ON THIS FORK —
+      `pull_request: branches: [main]` never matches a PR targeting
+      orca-latest-parity-bambu.
+
+      DECISION (2026-08-11): leave it inert, because Rule 13 removes the thing it
+      would protect against. The value of profile validation on a fork is
+      catching damage introduced BY THE MERGE; the sync workflow now takes
+      resources/profiles verbatim from upstream instead of merging it, so the
+      tree Helio ships is byte-identical to one upstream's own CI already
+      validated. Wiring this up would mean editing an upstream-owned file to add
+      a branch name, and build_all.yml shows what that costs (present in the
+      conflict list of 8 of 13 sync issues).
+
+      This calculus depends entirely on Rule 13 holding. If Helio ever adds a
+      fork-specific profile, verbatim-copy stops being safe and THIS CHECK
+      BECOMES NECESSARY — revisit both together. workflow_dispatch still works
+      for a one-off run against a sync branch.
 
   check_profiles_comment.yml:
     status: run

@@ -463,6 +463,64 @@ separate `secret-presence` job — excluded from `pull_request` — reads secret
 same rule to anything added here later: never hand a credential to a job that
 executes pull-request-controlled code.
 
+### Rule 13: Profiles are taken verbatim from upstream (never merged)
+
+`resources/profiles/**` is **upstream data**. Helio has never customised it —
+every commit that has ever touched that tree is an upstream sync. So the sync
+workflow does not merge profiles at all; after each merge it overwrites the whole
+tree with upstream's:
+
+```bash
+rm -rf resources/profiles
+git checkout "$SYNC_REF" -- resources/profiles
+git add -A resources/profiles
+```
+
+**Do not hand-resolve a conflict under `resources/profiles/`.** If you are
+resolving a sync by hand, run the three lines above instead. A conflict there can
+only produce damage, because there is no Helio content to preserve.
+
+**Why, concretely.** Both known profile divergences were created by resolution,
+not by intent:
+
+- `Anycubic.json` was hand-resolved and came out with its JSON keys **reordered**.
+  The content was semantically identical to upstream — verified by parsing both
+  and comparing — but the 2468-line textual diff then conflicted again on *every*
+  subsequent sync. It appears in the conflict list of issues #88, #92 and #94:
+  three resolutions, each one creating the next.
+- A resolution failed to propagate an upstream **deletion**, leaving three
+  `Anet A8 Plus` files that Helio shipped and upstream did not — a genuine
+  product-level parity break.
+
+Overwriting makes profile conflicts structurally impossible and guarantees
+profile parity by construction. It also means upstream's own CI has already
+validated the exact tree Helio ships, which is why `check_profiles.yml` is left
+inert here rather than being wired to the parity branch (see below).
+
+**The `rm -rf` is load-bearing.** `git checkout <ref> -- <path>` adds and updates
+files but never deletes them, which is exactly how the stale Anet files survived
+several syncs.
+
+**If Helio ever needs a fork-specific profile**, this step must grow an exception
+path first — as written it will silently discard such a change. That is the one
+assumption Rule 13 depends on, and it is worth re-checking before adding any
+Helio printer or filament definition.
+
+#### Why `check_profiles.yml` / `check_locale.yml` stay inert
+
+Both are upstream workflows whose `pull_request` triggers are filtered to
+`branches: [main]`. This fork's base is `orca-latest-parity-bambu`, so **neither
+has ever run here** — a branch rename silently disabled them.
+
+They are deliberately left that way. The value of profile validation on a fork is
+catching damage introduced *by the merge*; Rule 13 removes the merge, so upstream's
+own CI already covers the exact tree. Wiring them up means adding a branch name to
+an upstream-owned file, and `build_all.yml` shows what that costs: Helio added its
+branch there, and it now appears in the conflict list of **8 of 13** sync issues.
+
+Both still have `workflow_dispatch`, so either can be run by hand against a sync
+branch if a specific sync warrants it.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
