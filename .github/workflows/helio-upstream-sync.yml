@@ -989,5 +989,12 @@ jobs:
           # Move the tracking tag to the upstream target commit that was synced.
           # Note: build_all is fire-and-forget (dispatch only), so we track the
           # upstream commit. Build failures will show up on the PR via status checks.
+          #
+          # A refused push warns rather than failing: by this point the sync PR
+          # has been opened and the work is done. Failing the job here would mark
+          # a successful sync as failed over a tag the workflow can survive
+          # without — the same permission gap that produced #110.
           git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-          git push origin "$TRACKING_TAG" --force
+          if ! git push origin "refs/tags/$TRACKING_TAG" --force; then
+            echo "::warning title=Tracking tag not updated::The sync PR was created, but \`$TRACKING_TAG\` could not be advanced to $SYNC_SHA (the token appears to lack permission to update tags). A maintainer can heal it with: git push origin +$SYNC_SHA:refs/tags/$TRACKING_TAG"
+          fi
