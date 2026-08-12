@@ -11,7 +11,8 @@ Checks (errors fail the build, warnings do not):
   E1  a workflow file exists with no manifest entry        -> unclassified
   E2  a manifest entry has no workflow file                -> stale entry
   E3  a `deleted` entry's file is back on disk             -> resurrected by a sync
-  E4  a workflow references a secret/var not declared      -> new external dependency
+  E4  a workflow references a secret/var not declared,     -> new external dependency
+      or grants all of them to an external workflow
   E5  the manifest is malformed                            -> schema error
 
   W1  an entry is `undecided`                              -> backlog
@@ -29,10 +30,13 @@ Usage:
 
 Secret presence (W3) is only evaluated when SECRET_NAMES_FILE points at a file of
 newline-separated secret NAMES, which the calling workflow populates from the
-Actions secrets REST API. Secret *values* are never passed to this script: the
-earlier `toJSON(secrets)` plumbing put every name and value into the environment
-of a process running checked-out code, which is unsafe on pull_request runs. See
-the header of .github/workflows/helio-workflow-inventory.yml.
+Actions secrets REST API — repository-scoped and organization-scoped, unioned,
+since an org-level grant is present at runtime and omitting it makes W3 call a
+configured secret absent. Environment-scoped secrets are not covered; a workflow
+that targets an environment gets a warning saying so. Secret *values* are never
+passed to this script: the earlier `toJSON(secrets)` plumbing put every name and
+value into the environment of a process running checked-out code, which is unsafe
+on pull_request runs. See .github/workflows/helio-workflow-inventory.yml.
 
 Under --strict-secrets, unavailable or unreadable secret metadata is an error
 rather than a warning: a strict run that silently checks nothing is worse than a
@@ -56,8 +60,7 @@ VALID_STATUSES = {"run", "disabled", "undecided", "deleted"}
 VALID_OWNERS = {"upstream", "helio"}
 REQUIRED_FIELDS = ("status", "owner", "reason")
 
-# `secrets: inherit` has no dot or bracket, so it is not matched. GITHUB_TOKEN is
-# always provided by Actions and would be noise in every entry.
+# GITHUB_TOKEN is always provided by Actions and would be noise in every entry.
 #
 # Both access forms have to be recognised. `${{ secrets.X }}` and
 # `${{ secrets['X'] }}` are equivalent to Actions, so matching only the dot form
@@ -68,26 +71,71 @@ SECRET_DOT_RE = re.compile(r"\bsecrets\.([A-Za-z_][A-Za-z0-9_-]*)")
 VARS_DOT_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_-]*)")
 SECRET_INDEX_RE = re.compile(r"\bsecrets\[([^\]]*)\]")
 VARS_INDEX_RE = re.compile(r"\bvars\[([^\]]*)\]")
+# The whole context used as a value — `toJSON(secrets)`, `format(..., secrets)`.
+# That consumes *every* available secret, so treating it as "no reference found"
+# is the worst possible reading: a workflow with the broadest dependency there is
+# would pass E4 declaring nothing. It cannot be resolved to names, so it is
+# reported as a dynamic reference, the same as an unresolvable subscript.
+WHOLE_CONTEXT_RE = re.compile(r"(?<![.\w'\"])(secrets|vars)\b(?!\s*[.\[])")
 # A bracket subscript that is a plain quoted literal resolves to a known name.
 # Anything else (`secrets[matrix.token]`, `secrets[format('{0}_KEY', x)]`) cannot
 # be resolved statically and is reported rather than ignored.
 QUOTED_LITERAL_RE = re.compile(r"""^\s*(?:'([^']*)'|"([^"]*)")\s*$""")
 IMPLICIT_SECRETS = {"GITHUB_TOKEN"}
+# Text fallback for `secrets: inherit`, used only when the YAML will not parse.
+INHERIT_RE = re.compile(r"^\s*secrets\s*:\s*inherit\s*$", re.MULTILINE)
 
 # Only look inside places Actions actually evaluates expressions. Scanning raw
 # file text matches prose and filenames too — a step handling `/tmp/secrets.json`
 # was read as a secret named `json`.
 #
-# `if:` needs its own pattern because the `${{ }}` wrapper is optional there:
+# `if:` needs its own handling because the `${{ }}` wrapper is optional there:
 # `if: secrets.FOO != ''` is a real reference. Omitting it would trade a false
 # positive for a false negative, which is the worse direction for this check.
 EXPRESSION_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+# Line-oriented fallback only. A folded condition (`if: >-` and the expression on
+# the following lines) leaves this matching the `>-` marker and nothing else, so
+# the YAML walk below is the primary source; this stays as a backstop for files
+# PyYAML cannot load.
 IF_CONDITION_RE = re.compile(r"^[ \t-]*if\s*:\s*(.+)$", re.MULTILINE)
 
 
+def _walk_if_values(node: object, found: list[str]) -> None:
+    """Every `if:` value in a parsed workflow, at any nesting depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "if" and isinstance(value, (str, bool, int, float)):
+                found.append(str(value))
+            _walk_if_values(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            _walk_if_values(item, found)
+
+
 def expression_regions(text: str) -> str:
-    """The parts of a workflow file where Actions evaluates contexts."""
-    return "\n".join(EXPRESSION_RE.findall(text) + IF_CONDITION_RE.findall(text))
+    """The parts of a workflow file where Actions evaluates contexts.
+
+    `${{ }}` spans are read from the raw text, which handles multi-line
+    expressions regardless of how the YAML wraps them. `if:` values are read
+    from the parsed document instead: a folded scalar
+
+        if: >-
+          secrets.NEW_TOKEN != ''
+
+    is a valid unwrapped condition whose expression lives on the *following*
+    lines, so a line-oriented regex sees only the `>-` marker and reports no
+    dependency at all. Both sources are unioned — the regex fallback costs
+    nothing and keeps this working on a file PyYAML refuses to load.
+    """
+    regions = EXPRESSION_RE.findall(text)
+    regions += IF_CONDITION_RE.findall(text)
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError:
+        document = None
+    if document is not None:
+        _walk_if_values(document, regions)
+    return "\n".join(regions)
 
 
 class Report:
@@ -251,7 +299,70 @@ def referenced(raw_text: str) -> tuple[set[str], set[str], set[str]]:
     variables |= static
 
     dynamic = {f"secrets[{d}]" for d in dyn_secrets} | {f"vars[{d}]" for d in dyn_vars}
+    dynamic |= {f"the whole `{context}` context" for context in WHOLE_CONTEXT_RE.findall(text)}
     return secrets, variables, dynamic
+
+
+def inherited_secret_grants(raw_text: str) -> set[str]:
+    """Reusable-workflow calls that hand every secret to code we do not scan.
+
+    `secrets: inherit` is not an expression, so none of the reference patterns
+    see it — yet it grants the callee every secret available to this repository.
+    A *local* callee (`./.github/workflows/x.yml`) is fine: it is a file in this
+    directory, so its own references are checked against its own manifest entry.
+    An external callee is an undeclared all-secrets dependency on a repository
+    this check cannot read, which is exactly the class of thing a sync can
+    introduce silently.
+    """
+    try:
+        document = yaml.safe_load(raw_text)
+    except yaml.YAMLError:
+        document = None
+
+    if not isinstance(document, dict):
+        # Better a vague finding than none: an unparseable file must not be a
+        # way to smuggle the grant past the check.
+        return {"`secrets: inherit` (file could not be parsed to find the callee)"} \
+            if INHERIT_RE.search(raw_text) else set()
+
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return set()
+
+    grants: set[str] = set()
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict) or job.get("secrets") != "inherit":
+            continue
+        target = job.get("uses")
+        if isinstance(target, str) and target.startswith("./"):
+            continue
+        grants.add(f"job `{job_name}` calls `{target}`")
+    return grants
+
+
+def uses_environments(raw_text: str) -> bool:
+    """Whether any job targets a deployment environment.
+
+    W3 is answered from repository- and organization-scoped secret names.
+    Environment-scoped secrets live behind a third endpoint keyed by
+    environment name, so a workflow that uses one would have a perfectly
+    configured secret reported as absent. Nothing here uses environments today;
+    this exists so that the day one arrives, the gap says so instead of
+    producing a confident wrong answer.
+    """
+    try:
+        document = yaml.safe_load(raw_text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(document, dict):
+        return False
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return False
+    return any(
+        isinstance(job, dict) and job.get("environment") is not None
+        for job in jobs.values()
+    )
 
 
 def configured_secret_names() -> set[str] | None:
@@ -344,6 +455,16 @@ def main() -> int:
                 "rewrite the reference to a literal so the inventory can verify it.",
             )
 
+        # E4 — `secrets: inherit` into a repository this check cannot read.
+        for grant in sorted(inherited_secret_grants(text)):
+            report.error(
+                "E4",
+                f"`{name}`: {grant} with `secrets: inherit`, granting every secret on "
+                "this repository to a workflow outside it. The inventory cannot see "
+                "what the callee uses. Pass named secrets explicitly, or call a local "
+                "`./.github/workflows/…` workflow that is itself in this manifest.",
+            )
+
         # E4 — a new external dependency arrived without being declared. This is
         # what catches "the sync added a dependency on a credential we don't have"
         # at review time instead of at runtime months later.
@@ -377,6 +498,13 @@ def main() -> int:
 
         # W3 — a workflow we want, needing a credential we do not have.
         if status == "run" and secrets_present is not None:
+            if declared_secrets and uses_environments(text):
+                report.warn(
+                    "W3",
+                    f"`{name}` targets a deployment environment. Secret presence is "
+                    "checked against repository- and organization-scoped names only, "
+                    "so an environment-scoped secret here may be reported as absent.",
+                )
             for absent in sorted(declared_secrets - secrets_present):
                 message = (
                     f"`{name}` is `run` but `{absent}` is not configured on this "
