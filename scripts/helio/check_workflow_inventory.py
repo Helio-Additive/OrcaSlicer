@@ -219,6 +219,19 @@ def load_manifest(path: Path, report: Report) -> dict:
 
     cleaned: dict[str, dict] = {}
     for name, entry in entries.items():
+        # YAML keys are not necessarily strings — `2024: {...}` parses to an int,
+        # `on: {...}` to a bool. One of those alongside a normal entry makes
+        # sorted(manifest.items()) raise TypeError comparing str to int, which
+        # crashes the validator on input it exists to reject.
+        if not isinstance(name, str):
+            report.error(
+                "E5",
+                f"workflow entry name must be a string, got {type(name).__name__} "
+                f"({name!r}). Quote it if the file name looks like a number or a "
+                "YAML keyword.",
+            )
+            continue
+
         if not isinstance(entry, dict):
             report.error("E5", f"`{name}`: entry must be a mapping")
             continue
