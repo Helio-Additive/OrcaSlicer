@@ -112,6 +112,52 @@ jobs:
           SYNC_LABEL="${{ steps.target.outputs.sync_label }}"
           TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
 
+          # Moving the tracking tag requires force-updating a tag on this repo,
+          # which the workflow token is not always permitted to do (observed:
+          # HTTP 403). That must not fail a sync run — the tag is a convenience,
+          # and every decision below has a fallback that does not need it. It
+          # does need to be LOUD, because a tag that silently never moves is how
+          # this workflow came to re-propose an already-merged release (#110).
+          update_tracking_tag() {
+            git tag -f "$TRACKING_TAG" "$1"
+            if git push origin "refs/tags/$TRACKING_TAG" --force; then
+              echo "Updated $TRACKING_TAG -> $1"
+            else
+              echo "::warning title=Tracking tag not updated::Could not force-update \`$TRACKING_TAG\` to $1 (the token appears to lack permission to update tags). The sync itself is unaffected — version.inc is used as the authoritative baseline — but the tag will keep pointing at a stale commit until a maintainer runs: git push origin +$1:refs/tags/$TRACKING_TAG"
+            fi
+          }
+
+          # version.inc records which upstream release this tree actually holds.
+          # For tag-mode syncs it is authoritative and the tracking tag is not:
+          # the tag is only advanced by a successful push at the end of a run, so
+          # an out-of-band merge, or a run whose tag push was refused, leaves it
+          # behind while the tree moves on. `helio-last-synced` sat at v2.3.2-rc2
+          # through three releases for exactly that reason.
+          VERSION_COMMIT=""
+          VERSION_TAG=""
+          if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
+            if [ -n "$VER" ]; then
+              for cand in "v$VER" "$VER"; do
+                if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
+                  VERSION_COMMIT=$(git rev-parse "refs/tags/$cand^{commit}")
+                  VERSION_TAG="$cand"
+                  break
+                fi
+              done
+            fi
+          fi
+
+          # The tree already holds the release being proposed. This is a direct
+          # statement about content and needs no tag, no ancestry and no trial
+          # merge, so it holds even when the history was flattened by a squash.
+          if [ -n "$VERSION_COMMIT" ] && [ "$VERSION_COMMIT" = "$SYNC_SHA" ]; then
+            echo "version.inc reports $VERSION_TAG, which is the sync target ($SYNC_LABEL) — already synced"
+            update_tracking_tag "$SYNC_SHA"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Determine baseline
           LAST_SYNCED=""
           if git rev-parse "$TRACKING_TAG" >/dev/null 2>&1; then
@@ -121,16 +167,31 @@ jobs:
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+            # Prefer version.inc when it names a NEWER upstream release than the
+            # tag does. The baseline feeds the changelog and the Helio-relevant
+            # change report, so a stale one does not just add noise — it reports
+            # changes that were reviewed and merged one or more syncs ago.
+            if [ -n "$VERSION_COMMIT" ] && \
+               git merge-base --is-ancestor "$SYNCED_COMMIT" "$VERSION_COMMIT" && \
+               [ "$SYNCED_COMMIT" != "$VERSION_COMMIT" ]; then
+              echo "Tracking tag ($TRACKING_TAG -> $SYNCED_COMMIT) is behind version.inc ($VERSION_TAG); using version.inc as the baseline"
+              LAST_SYNCED="$VERSION_TAG"
+            fi
             # For tag mode, try to find the v* tag at that commit
-            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            if [ -z "$LAST_SYNCED" ] && [ "$TRACKING_TAG" = "helio-last-synced" ]; then
               LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
             fi
             if [ -z "$LAST_SYNCED" ]; then
               LAST_SYNCED="$TRACKING_TAG"
             fi
           else
-            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
-              echo "No previous sync tag found, using v2.3.2-rc2 as baseline"
+            if [ -n "$VERSION_TAG" ]; then
+              echo "No previous sync tag found, using version.inc ($VERSION_TAG) as baseline"
+              LAST_SYNCED="$VERSION_TAG"
+            elif [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+              # Bootstrap baseline, only reachable when version.inc names no tag
+              # upstream has (a local version bump, say).
+              echo "No previous sync tag and no usable version.inc, using v2.3.2-rc2 as baseline"
               LAST_SYNCED="v2.3.2-rc2"
             else
               # First main sync — capture current HEAD SHA as baseline (before merge moves it)
@@ -156,8 +217,7 @@ jobs:
           # done out-of-band (e.g. a manual PR).  Update the tracking tag and skip.
           if git merge-base --is-ancestor "$SYNC_SHA" HEAD; then
             echo "Target $SYNC_LABEL ($SYNC_SHA) is already merged into HEAD — updating tracking tag and skipping"
-            git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-            git push origin "$TRACKING_TAG" --force
+            update_tracking_tag "$SYNC_SHA"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -166,12 +226,19 @@ jobs:
           # squash-merged because the original upstream commit is not in the
           # history.  Try a trial merge — if it succeeds with no diff, the
           # content is already incorporated.
+          #
+          # Note this runs BEFORE the merge-base graft, so on a squash-flattened
+          # history the trial merge is computed against the same wrong base the
+          # graft exists to correct, and usually conflicts rather than reporting
+          # "no diff". It is kept because it is cheap and catches the easy cases,
+          # but it cannot be relied on: the authoritative no-op detection is the
+          # version.inc check above (before any merge) and the tree comparison
+          # after the real, grafted merge. See #110.
           if git merge --no-commit --no-ff "$SYNC_SHA" 2>/dev/null; then
             if git diff --cached --quiet 2>/dev/null; then
               echo "Target $SYNC_LABEL already incorporated (squash merge detected) — updating tracking tag and skipping"
               git merge --abort 2>/dev/null || git reset --hard HEAD
-              git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-              git push origin "$TRACKING_TAG" --force
+              update_tracking_tag "$SYNC_SHA"
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -291,6 +358,53 @@ jobs:
       - name: Remove ephemeral graft
         if: always() && steps.graft.outputs.grafted == 'true'
         run: git replace -d "${{ steps.graft.outputs.graft_commit }}" || true
+
+      # Last line of defence against proposing a sync that changes nothing (#110,
+      # which opened #107 re-proposing v2.4.2 three and a half hours after #96
+      # merged it).
+      #
+      # Every earlier guard reasons about ANCESTRY — is the target already an
+      # ancestor, does a trial merge apply cleanly — and ancestry is exactly what
+      # squash-merging this fork's sync PRs destroys. This one compares the
+      # merged TREE with the tree of the target branch tip. If they are equal the
+      # merge produced no change, whatever the history says, and there is nothing
+      # to open a PR about.
+      - name: Detect no-op merge
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        id: noop
+        env:
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
+        run: |
+          MERGED_TREE=$(git rev-parse 'HEAD^{tree}')
+          BASE_TREE=$(git rev-parse "${PRE_MERGE}^{tree}")
+
+          if [ "$MERGED_TREE" != "$BASE_TREE" ]; then
+            echo "noop=false" >> "$GITHUB_OUTPUT"
+            echo "Merge changed the tree — continuing."
+            exit 0
+          fi
+
+          echo "noop=true" >> "$GITHUB_OUTPUT"
+          echo "The merge of $SYNC_LABEL produced a tree identical to the target branch — its content is already incorporated. Not opening a PR."
+
+          git tag -f "$TRACKING_TAG" "$SYNC_SHA"
+          if git push origin "refs/tags/$TRACKING_TAG" --force; then
+            TAG_NOTE="Tracking tag \`$TRACKING_TAG\` advanced to \`$SYNC_SHA\`."
+          else
+            TAG_NOTE=":warning: Could not update \`$TRACKING_TAG\` (push refused). Until a maintainer runs \`git push origin +$SYNC_SHA:refs/tags/$TRACKING_TAG\`, every run will redo this merge to reach the same conclusion."
+            echo "::warning title=Tracking tag not updated::Could not force-update $TRACKING_TAG to $SYNC_SHA."
+          fi
+
+          {
+            echo "### Upstream sync: nothing to do"
+            echo ""
+            echo "\`$SYNC_LABEL\` merges into the release branch with **no change to the tree**, so its content is already present — most likely merged by a squashed PR, which leaves no ancestry for the earlier checks to find."
+            echo ""
+            echo "$TAG_NOTE"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Identify Helio-relevant upstream changes
         if: steps.check.outputs.skip != 'true'
@@ -683,7 +797,7 @@ jobs:
       # only parent is our target branch tip — no upstream parents, no external
       # commit authors. The PR is squash-merged anyway, so nothing is lost.
       - name: Squash clean merge into a single commit
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         # Pass tag-derived values through env vars, never interpolated directly into
         # the run: body — git ref names can contain shell metacharacters (`, $, (, ))
         # that GitHub template expansion does not escape (template-injection).
@@ -704,13 +818,13 @@ jobs:
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
 
       - name: Push clean merge branch
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         run: |
           # force-with-lease so retries (same branch name) overwrite the previous attempt
           git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
 
       - name: Trigger build check
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         id: build
         continue-on-error: true
         uses: actions/github-script@v7
@@ -725,7 +839,7 @@ jobs:
             });
 
       - name: Create pull request
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         id: pr
         uses: actions/github-script@v7
         env:
@@ -867,7 +981,7 @@ jobs:
             }
 
       - name: Update tracking tag
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'success'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true' && steps.build.outcome == 'success'
         run: |
           SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
           TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"

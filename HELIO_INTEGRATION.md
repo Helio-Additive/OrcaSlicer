@@ -441,6 +441,38 @@ first, or you will face the full (inflated) conflict set instead of the real del
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.
 
+**The other side effect: "already synced" becomes hard to detect.** Every cheap
+test for "have we got this release already?" reasons about **ancestry** — is the
+target an ancestor of `HEAD`, does a trial merge apply cleanly — and ancestry is
+precisely what the squash destroyed. In August 2026 that produced #107: an empty
+PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
+have recurred every Monday (#110). The workflow now answers the question three
+ways, cheapest first, none of which depend on ancestry:
+
+| guard | when | basis |
+| --- | --- | --- |
+| `version.inc` equals the target | before any merge | the tree's own record of which release it holds |
+| ancestor / trial merge | before the graft | ancestry — works only when history was not flattened |
+| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" |
+
+The last one is the backstop and cannot be fooled: if the merge produces a tree
+identical to the release branch's, there is nothing to propose, whatever the
+history says. It skips the PR, records why in the job summary, and advances the
+tracking tag.
+
+**The tracking tag is a convenience, not a source of truth.** `helio-last-synced`
+is only advanced by a successful push at the end of a run, so an out-of-band merge
+— or a run whose tag push was refused — leaves it behind while the tree moves on.
+It sat at `v2.3.2-rc2` through three releases that way. Two consequences are baked
+into the workflow: for tag-release syncs `version.inc` is preferred over the tag
+as the baseline whenever it names a newer release, and a **refused tag push warns
+rather than failing the run** (the token cannot always force-update tags; observed
+`HTTP 403`). If you see that warning, a maintainer can heal it with:
+
+```bash
+git push origin +<upstream_commit>:refs/tags/helio-last-synced
+```
+
 **Squash the sync branch *before* the PR is opened, too.** GitHub auto-subscribes
 the author of every commit in a PR to that PR's notification thread. A sync branch
 that still carries upstream's hundreds of individual commits therefore subscribes
