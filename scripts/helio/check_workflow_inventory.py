@@ -92,31 +92,130 @@ INHERIT_RE = re.compile(r"^\s*secrets\s*:\s*inherit\s*$", re.MULTILINE)
 # `if:` needs its own handling because the `${{ }}` wrapper is optional there:
 # `if: secrets.FOO != ''` is a real reference. Omitting it would trade a false
 # positive for a false negative, which is the worse direction for this check.
-EXPRESSION_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
-# Line-oriented fallback only. A folded condition (`if: >-` and the expression on
-# the following lines) leaves this matching the `>-` marker and nothing else, so
-# the YAML walk below is the primary source; this stays as a backstop for files
-# PyYAML cannot load.
+# Line-oriented fallback only, used when PyYAML cannot load the file. It also
+# matches `if:` keys that are not conditions (an action input named `if`), which
+# is why the parsed-YAML walk below is preferred whenever it is available.
 IF_CONDITION_RE = re.compile(r"^[ \t-]*if\s*:\s*(.+)$", re.MULTILINE)
 
+EXPRESSION_OPEN = "${{"
 
-def _walk_if_values(node: object, found: list[str]) -> None:
-    """Every `if:` value in a parsed workflow, at any nesting depth."""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "if" and isinstance(value, (str, bool, int, float)):
-                found.append(str(value))
-            _walk_if_values(value, found)
-    elif isinstance(node, list):
-        for item in node:
-            _walk_if_values(item, found)
+
+def _scan_string_aware(text: str, start: int, stop_at_expression_end: bool):
+    """Walk expression text from `start`, tracking single-quoted strings.
+
+    Actions expressions quote with `'`, escaping a literal quote by doubling it.
+    Both of this function's callers need the same walk: one to find where an
+    expression really ends, the other to blank out the string literals inside
+    it. Doing it by regex is what produced the two bugs this replaces.
+
+    Returns (index, spans) where spans lists the (open, close) offsets of each
+    string literal encountered.
+    """
+    i, n = start, len(text)
+    spans: list[tuple[int, int]] = []
+    quote_start = -1
+    in_string = False
+    while i < n:
+        char = text[i]
+        if in_string:
+            if char == "'":
+                if i + 1 < n and text[i + 1] == "'":  # '' is an escaped quote
+                    i += 2
+                    continue
+                in_string = False
+                spans.append((quote_start, i))
+        elif char == "'":
+            in_string = True
+            quote_start = i
+        elif (
+            stop_at_expression_end
+            and char == "}"
+            and i + 1 < n
+            and text[i + 1] == "}"
+        ):
+            return i, spans
+        i += 1
+    return n, spans
+
+
+def expression_spans(text: str) -> list[str]:
+    """The `${{ ... }}` spans in a file, respecting quoted strings.
+
+    A non-greedy `\\$\\{\\{(.*?)\\}\\}` terminates at the first `}}` it sees,
+    including one inside a string:
+
+        ${{ format('{{{0}}}', secrets.NEW_TOKEN) }}
+
+    There the regex stops inside the format string, before the secret, and E4
+    reports nothing — a false negative in the direction that matters.
+    """
+    spans: list[str] = []
+    index = 0
+    while True:
+        start = text.find(EXPRESSION_OPEN, index)
+        if start < 0:
+            return spans
+        body_start = start + len(EXPRESSION_OPEN)
+        end, _ = _scan_string_aware(text, body_start, stop_at_expression_end=True)
+        spans.append(text[body_start:end])
+        # An unterminated expression consumes the rest; nothing follows it.
+        if end >= len(text):
+            return spans
+        index = end + 2
+
+
+def without_string_literals(expression: str) -> str:
+    """`expression` with the contents of quoted strings blanked out.
+
+    Prose inside a string is not a context access: `contains('no secrets here',
+    x)` must not read as a use of the `secrets` context. Blanking rather than
+    deleting keeps offsets, so nothing accidentally joins across a removed span.
+    """
+    _, spans = _scan_string_aware(expression, 0, stop_at_expression_end=False)
+    if not spans:
+        return expression
+    chars = list(expression)
+    for open_index, close_index in spans:
+        for i in range(open_index, close_index + 1):
+            chars[i] = " "
+    return "".join(chars)
+
+
+def _condition_values(document: object) -> list[str]:
+    """Values of the `if:` keys Actions actually evaluates as conditions.
+
+    Only two exist in a workflow file: `jobs.<id>.if` and
+    `jobs.<id>.steps[].if`. A recursive walk for any key named `if` also picks
+    up inputs that merely happen to be called `if` (`with: {if: ...}`), whose
+    values are plain strings Actions never evaluates — reporting a credential
+    dependency there is a fatal E4 on a workflow that has none.
+    """
+    values: list[str] = []
+    if not isinstance(document, dict):
+        return values
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return values
+
+    def take(container: object) -> None:
+        if isinstance(container, dict):
+            value = container.get("if")
+            if isinstance(value, (str, bool, int, float)):
+                values.append(str(value))
+
+    for job in jobs.values():
+        take(job)
+        if isinstance(job, dict) and isinstance(job.get("steps"), list):
+            for step in job["steps"]:
+                take(step)
+    return values
 
 
 def expression_regions(text: str) -> str:
     """The parts of a workflow file where Actions evaluates contexts.
 
     `${{ }}` spans are read from the raw text, which handles multi-line
-    expressions regardless of how the YAML wraps them. `if:` values are read
+    expressions regardless of how the YAML wraps them. Condition values are read
     from the parsed document instead: a folded scalar
 
         if: >-
@@ -124,17 +223,20 @@ def expression_regions(text: str) -> str:
 
     is a valid unwrapped condition whose expression lives on the *following*
     lines, so a line-oriented regex sees only the `>-` marker and reports no
-    dependency at all. Both sources are unioned — the regex fallback costs
-    nothing and keeps this working on a file PyYAML refuses to load.
+    dependency at all.
     """
-    regions = EXPRESSION_RE.findall(text)
-    regions += IF_CONDITION_RE.findall(text)
+    regions = expression_spans(text)
     try:
         document = yaml.safe_load(text)
     except yaml.YAMLError:
         document = None
-    if document is not None:
-        _walk_if_values(document, regions)
+
+    if document is None:
+        # Unparseable: fall back to the line regex. It over-matches, but a file
+        # this check cannot read must not become a silent hole.
+        regions += IF_CONDITION_RE.findall(text)
+    else:
+        regions += _condition_values(document)
     return "\n".join(regions)
 
 
@@ -302,17 +404,22 @@ def _resolve_index(subscripts: list[str]) -> tuple[set[str], set[str]]:
 def referenced(raw_text: str) -> tuple[set[str], set[str], set[str]]:
     """Secrets, vars, and unresolvable dynamic references found in a workflow."""
     text = expression_regions(raw_text)
-    secrets = set(SECRET_DOT_RE.findall(text))
-    static, dyn_secrets = _resolve_index(SECRET_INDEX_RE.findall(text))
-    secrets |= static
-    secrets -= IMPLICIT_SECRETS
 
-    variables = set(VARS_DOT_RE.findall(text))
-    static, dyn_vars = _resolve_index(VARS_INDEX_RE.findall(text))
-    variables |= static
+    # Bracket subscripts are read from the text WITH strings intact — the name
+    # in `secrets['X']` is itself a string literal. Everything else is read from
+    # the blanked text, so a word inside a string cannot be mistaken for a
+    # context access.
+    static_secrets, dyn_secrets = _resolve_index(SECRET_INDEX_RE.findall(text))
+    static_vars, dyn_vars = _resolve_index(VARS_INDEX_RE.findall(text))
+
+    bare = without_string_literals(text)
+
+    secrets = set(SECRET_DOT_RE.findall(bare)) | static_secrets
+    secrets -= IMPLICIT_SECRETS
+    variables = set(VARS_DOT_RE.findall(bare)) | static_vars
 
     dynamic = {f"secrets[{d}]" for d in dyn_secrets} | {f"vars[{d}]" for d in dyn_vars}
-    dynamic |= {f"the whole `{context}` context" for context in WHOLE_CONTEXT_RE.findall(text)}
+    dynamic |= {f"the whole `{context}` context" for context in WHOLE_CONTEXT_RE.findall(bare)}
     return secrets, variables, dynamic
 
 
@@ -511,14 +618,28 @@ def main() -> int:
 
         # W3 — a workflow we want, needing a credential we do not have.
         if status == "run" and secrets_present is not None:
-            if declared_secrets and uses_environments(text):
+            # An environment-scoped secret is real at runtime but invisible
+            # here, so "it will fail at runtime" would be exactly the confident
+            # wrong answer this check is supposed to avoid. Say what is actually
+            # known instead, and never escalate it under --strict-secrets.
+            environment_scoped = uses_environments(text)
+            if declared_secrets and environment_scoped:
                 report.warn(
                     "W3",
                     f"`{name}` targets a deployment environment. Secret presence is "
                     "checked against repository- and organization-scoped names only, "
-                    "so an environment-scoped secret here may be reported as absent.",
+                    "so any absence reported below may be an environment secret this "
+                    "check cannot see.",
                 )
             for absent in sorted(declared_secrets - secrets_present):
+                if environment_scoped:
+                    report.warn(
+                        "W3",
+                        f"`{name}` declares `{absent}`, which is not a repository or "
+                        "organization secret. If the job's environment provides it, "
+                        "this is expected; otherwise the workflow will fail at runtime.",
+                    )
+                    continue
                 message = (
                     f"`{name}` is `run` but `{absent}` is not configured on this "
                     "repository, so it will fail at runtime."

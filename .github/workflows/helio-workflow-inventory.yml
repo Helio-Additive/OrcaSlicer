@@ -126,6 +126,12 @@ jobs:
           # 50 pages is 5,000 names, far past any real repository. The bound is
           # here so a malformed response can never spin this job for its whole
           # timeout instead of failing.
+          # NOTE: every failure inside this function must `return 1` explicitly.
+          # It is called as `if ! collect ...`, and bash disables errexit inside
+          # a function invoked in a condition — so a failing command here does
+          # NOT abort the step. A silently-dropped page would publish a partial
+          # list as complete, and W3 would report perfectly-configured secrets
+          # as absent.
           MAX_PAGES=50
           collect() {
             local path="$1" page=1 count
@@ -135,20 +141,38 @@ jobs:
                 -H "Accept: application/vnd.github+json" \
                 -H "Authorization: Bearer ${INVENTORY_TOKEN}" \
                 -H "X-GitHub-Api-Version: 2022-11-28" \
-                "${GITHUB_API_URL}${path}?per_page=100&page=${page}") || return 1
+                "${GITHUB_API_URL}${path}?per_page=100&page=${page}") || {
+                  echo "curl-failed" > /tmp/http_status; return 1; }
               [ "$status" = "200" ] || { echo "$status" > /tmp/http_status; return 1; }
-              jq -r '.secrets[].name' /tmp/page.json >> /tmp/secret-names.txt
-              count=$(jq -r '.secrets | length' /tmp/page.json)
-              [ "$count" -eq 100 ] || break
+              # HTTP 200 does not guarantee the body is the shape we expect —
+              # a proxy error page, or a schema change, parses as 200 + junk.
+              # Shape is checked separately from extraction because an EMPTY
+              # `secrets` array is a perfectly valid answer (a repo with no
+              # secrets), and `jq -e` on a filter that produces no output exits
+              # non-zero — which would turn "none configured" into "skip W3".
+              jq -e '.secrets | arrays' /tmp/page.json >/dev/null 2>&1 || {
+                echo "unparseable-body" > /tmp/http_status; return 1; }
+              count=$(jq -r '.secrets | length' /tmp/page.json) || {
+                echo "unparseable-body" > /tmp/http_status; return 1; }
+              case "$count" in
+                ''|*[!0-9]*) echo "unparseable-body" > /tmp/http_status; return 1;;
+              esac
+              if [ "$count" -gt 0 ]; then
+                jq -r '.secrets[].name' /tmp/page.json >> /tmp/secret-names.txt || {
+                  echo "unparseable-body" > /tmp/http_status; return 1; }
+              fi
+              [ "$count" -eq 100 ] || return 0
               page=$((page + 1))
             done
+            echo "::warning::Stopped after ${MAX_PAGES} pages of ${path}; the secret list may be incomplete."
+            return 1
           }
 
           : > /tmp/secret-names.txt
           rm -f /tmp/http_status
 
           if ! collect "/repos/${GITHUB_REPOSITORY}/actions/secrets"; then
-            skip warning "Repository secrets API returned HTTP $(cat /tmp/http_status 2>/dev/null || echo '?')."
+            skip warning "Reading repository secrets failed ($(cat /tmp/http_status 2>/dev/null || echo 'unknown reason'))."
           fi
 
           # Organization secrets available to this repository. A secret granted
@@ -162,7 +186,7 @@ jobs:
             if [ "$org_status" = "404" ]; then
               echo "::notice::No organization secrets endpoint (owner is not an org)."
             else
-              skip warning "Organization secrets API returned HTTP ${org_status}, so the secret list is incomplete."
+              skip warning "Reading organization secrets failed (${org_status}), so the secret list would be incomplete."
             fi
           fi
 
