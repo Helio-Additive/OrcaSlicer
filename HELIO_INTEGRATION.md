@@ -421,9 +421,10 @@ to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
 workflow ephemerally grafts the upstream commit our content is based on onto the
-branch tip. For tag-release syncs that commit is derived from `version.inc`
-(authoritative — it names the synced release); for `main` syncs it comes from the
-`helio-last-synced-main` tracking tag (`version.inc` would name an older release
+branch tip. For tag-release syncs that commit is derived from `version.inc` (it
+names the synced release) provided it is a **strict** ancestor of the sync target —
+see the rules below for why that qualifier matters; for `main` syncs it comes from
+the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
 ```bash
@@ -449,29 +450,58 @@ PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
 have recurred every Monday (#110). The workflow now answers the question three
 ways, cheapest first, none of which depend on ancestry:
 
-| guard | when | basis |
-| --- | --- | --- |
-| `version.inc` equals the target | before any merge | the tree's own record of which release it holds |
-| ancestor / trial merge | before the graft | ancestry — works only when history was not flattened |
-| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" |
+| guard | when | basis | can it skip on its own? |
+| --- | --- | --- | --- |
+| `version.inc` equals the target | before any merge | a version *string* — sets an expectation only | **no** |
+| tracking tag equals the target | before any merge | a commit id, only ever written after content was validated | yes |
+| ancestor / trial merge | before the graft | ancestry — works only when history was not flattened | yes |
+| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" | yes — this is the authority |
 
 The last one is the backstop and cannot be fooled: if the merge produces a tree
 identical to the release branch's, there is nothing to propose, whatever the
 history says. It skips the PR, records why in the job summary, and advances the
 tracking tag.
 
+**`version.inc` deliberately cannot skip a run by itself.** It is a version string
+in a file, and the release it names can stop describing the tree without the file
+changing — upstream force-retagging a release we already synced, or a local version
+bump landing before the content. Either way the string equals the sync target while
+the target's content is absent, and skipping there would **silently drop upstream
+work**, with every later run reaching the same wrong conclusion. That failure is
+invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
+baseline and sets an expectation, and the merged-tree comparison decides.
+
+Two rules keep that true, and both are load-bearing:
+
+1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
+   a clean no-diff trial merge, an identical merged tree, or a completed sync. That
+   is what lets the tag (unlike `version.inc`) skip a run on its own.
+2. **The graft base must be a *strict* ancestor of the sync target.**
+   `git merge-base --is-ancestor` is true for a commit and itself, so a `version.inc`
+   naming the target would otherwise graft the target onto the branch tip, making the
+   merge-base the target — the merge is then a no-op *by construction* and the tree
+   comparison "confirms" a release that was never merged. The one content-based guard
+   becomes a rubber stamp. The `check` step's refusal to skip on `version.inc` alone
+   only works together with this.
+
 **The tracking tag is a convenience, not a source of truth.** `helio-last-synced`
 is only advanced by a successful push at the end of a run, so an out-of-band merge
 — or a run whose tag push was refused — leaves it behind while the tree moves on.
 It sat at `v2.3.2-rc2` through three releases that way. Two consequences are baked
 into the workflow: for tag-release syncs `version.inc` is preferred over the tag
-as the baseline whenever it names a newer release, and a **refused tag push warns
-rather than failing the run** (the token cannot always force-update tags; observed
-`HTTP 403`). If you see that warning, a maintainer can heal it with:
+as the baseline whenever it names a **strictly newer** release, and a **refused tag
+push warns rather than failing the run** (the token cannot always force-update tags;
+observed `HTTP 403`). If you see that warning, a maintainer can heal it with:
 
 ```bash
-git push origin +<upstream_commit>:refs/tags/helio-last-synced
+git push helio +<upstream_commit>:refs/tags/helio-last-synced
 ```
+
+Note the remote. The workflow's own pushes use `origin` because `actions/checkout`
+configures origin as *this fork*; you are running this in your own clone, where
+`origin` is upstream OrcaSlicer and `helio` is the fork (see "Git Workflow" in
+`CLAUDE.md`). Every maintainer-facing command the workflow prints says `helio` for
+that reason — pushing a Helio tracking tag to `origin` would aim it at upstream.
 
 **Squash the sync branch *before* the PR is opened, too.** GitHub auto-subscribes
 the author of every commit in a PR to that PR's notification thread. A sync branch

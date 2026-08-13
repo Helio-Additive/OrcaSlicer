@@ -123,16 +123,35 @@ jobs:
             if git push origin "refs/tags/$TRACKING_TAG" --force; then
               echo "Updated $TRACKING_TAG -> $1"
             else
-              echo "::warning title=Tracking tag not updated::Could not force-update \`$TRACKING_TAG\` to $1 (the token appears to lack permission to update tags). The sync itself is unaffected — version.inc is used as the authoritative baseline — but the tag will keep pointing at a stale commit until a maintainer runs: git push origin +$1:refs/tags/$TRACKING_TAG"
+              # NOTE ON REMOTES: the push above uses `origin` because that is
+              # what actions/checkout configures — inside Actions, origin IS
+              # this fork. The healing command below is run by a HUMAN in their
+              # own clone, where CLAUDE.md says origin is upstream OrcaSlicer
+              # and `helio` is this fork. Telling a maintainer to push a Helio
+              # tracking tag to `origin` would aim it at upstream.
+              echo "::warning title=Tracking tag not updated::Could not force-update \`$TRACKING_TAG\` to $1 (the token appears to lack permission to update tags). The sync itself is unaffected — nothing below depends on the tag — but it will keep pointing at a stale commit until a maintainer runs, from a clone whose fork remote is \`helio\`: git push helio +$1:refs/tags/$TRACKING_TAG"
             fi
           }
 
-          # version.inc records which upstream release this tree actually holds.
-          # For tag-mode syncs it is authoritative and the tracking tag is not:
-          # the tag is only advanced by a successful push at the end of a run, so
-          # an out-of-band merge, or a run whose tag push was refused, leaves it
+          # version.inc records which upstream release this tree was synced to.
+          # For tag-mode syncs it is a better BASELINE than the tracking tag: the
+          # tag is only advanced by a successful push at the end of a run, so an
+          # out-of-band merge, or a run whose tag push was refused, leaves it
           # behind while the tree moves on. `helio-last-synced` sat at v2.3.2-rc2
           # through three releases for exactly that reason.
+          #
+          # It is NOT proof of content, and must never be treated as such. It is
+          # a version string in a file; the release it names can stop describing
+          # the tree without the file changing:
+          #   - upstream force-retags a release after we synced the original
+          #     commit, so the name now resolves somewhere we have never merged
+          #   - version.inc is bumped locally ahead of the content landing
+          # In both cases the string equals the sync target while the target's
+          # content is absent. Skipping on that would be a SILENT false negative
+          # — upstream work dropped, and every later run reaching the same wrong
+          # conclusion — which is strictly worse than the empty PR of #110. So
+          # version.inc selects the baseline and nothing more; the merged-tree
+          # comparison in `noop` is the only thing here that decides "synced".
           VERSION_COMMIT=""
           VERSION_TAG=""
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
@@ -148,20 +167,28 @@ jobs:
             fi
           fi
 
-          # The tree already holds the release being proposed. This is a direct
-          # statement about content and needs no tag, no ancestry and no trial
-          # merge, so it holds even when the history was flattened by a squash.
+          # version.inc naming the sync target means "we expect to be synced".
+          # Record it, do not act on it: the run continues to the grafted merge
+          # so the tree comparison can confirm or refute it. Deliberately no
+          # `update_tracking_tag` here either — every write of that tag must be
+          # backed by content (an ancestry hit, a clean no-diff trial merge, an
+          # identical merged tree, or a completed sync), so that the tag stays
+          # usable as evidence at line ~165 below.
+          VERSION_MATCHES_TARGET=false
           if [ -n "$VERSION_COMMIT" ] && [ "$VERSION_COMMIT" = "$SYNC_SHA" ]; then
-            echo "version.inc reports $VERSION_TAG, which is the sync target ($SYNC_LABEL) — already synced"
-            update_tracking_tag "$SYNC_SHA"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            VERSION_MATCHES_TARGET=true
+            echo "version.inc reports $VERSION_TAG, which is the sync target ($SYNC_LABEL) — expecting a no-op, but continuing to the merge to verify it by content"
           fi
 
           # Determine baseline
           LAST_SYNCED=""
           if git rev-parse "$TRACKING_TAG" >/dev/null 2>&1; then
             SYNCED_COMMIT=$(git rev-parse "$TRACKING_TAG")
+            # Unlike version.inc, this IS content-backed: the tag is only ever
+            # written after a merge or tree comparison established that the
+            # commit's content is present, and it names a COMMIT rather than a
+            # release name, so an upstream retag moves the target away from it
+            # instead of silently redefining it.
             if [ "$SYNCED_COMMIT" = "$SYNC_SHA" ]; then
               echo "Already synced to $SYNC_LABEL"
               echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -171,7 +198,13 @@ jobs:
             # tag does. The baseline feeds the changelog and the Helio-relevant
             # change report, so a stale one does not just add noise — it reports
             # changes that were reviewed and merged one or more syncs ago.
+            #
+            # Not when version.inc names the target itself: a baseline equal to
+            # the thing being synced makes the changelog range empty and, worse,
+            # feeds the graft step a circular base (see the strict-ancestor
+            # requirement there). Fall back to the tag in that case.
             if [ -n "$VERSION_COMMIT" ] && \
+               [ "$VERSION_COMMIT" != "$SYNC_SHA" ] && \
                git merge-base --is-ancestor "$SYNCED_COMMIT" "$VERSION_COMMIT" && \
                [ "$SYNCED_COMMIT" != "$VERSION_COMMIT" ]; then
               echo "Tracking tag ($TRACKING_TAG -> $SYNCED_COMMIT) is behind version.inc ($VERSION_TAG); using version.inc as the baseline"
@@ -185,7 +218,7 @@ jobs:
               LAST_SYNCED="$TRACKING_TAG"
             fi
           else
-            if [ -n "$VERSION_TAG" ]; then
+            if [ -n "$VERSION_TAG" ] && [ "$VERSION_COMMIT" != "$SYNC_SHA" ]; then
               echo "No previous sync tag found, using version.inc ($VERSION_TAG) as baseline"
               LAST_SYNCED="$VERSION_TAG"
             elif [ "$TRACKING_TAG" = "helio-last-synced" ]; then
@@ -207,7 +240,11 @@ jobs:
             exit 1
           fi
 
-          if [ "$BASELINE_COMMIT" = "$SYNC_SHA" ]; then
+          # The guards above keep version.inc from steering the baseline onto the
+          # target, so reaching this with an equal baseline means a tag genuinely
+          # records this commit as synced. If version.inc is the only reason the
+          # two coincide, do not skip — that is the unvalidated claim again.
+          if [ "$BASELINE_COMMIT" = "$SYNC_SHA" ] && [ "$VERSION_MATCHES_TARGET" != "true" ]; then
             echo "Baseline $LAST_SYNCED and target $SYNC_LABEL point to the same commit — nothing to sync"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -291,6 +328,17 @@ jobs:
           #  - Main syncs (TRACKING_TAG=helio-last-synced-main): version.inc names
           #    an older tagged release, NOT the last synced main commit, so it must
           #    NOT be used — prefer the tracking tag, which points at that commit.
+          #
+          # PREV must be a STRICT ancestor of SYNC_SHA. `--is-ancestor` is true for
+          # a commit and itself, so without the inequality test a version.inc that
+          # names the sync target would graft the target onto the tip, making the
+          # merge-base the target itself. The merge would then be a no-op BY
+          # CONSTRUCTION and the tree comparison would "confirm" already-synced
+          # for a release we have never merged — turning the one content-based
+          # guard into a rubber stamp. This is the mechanism by which an upstream
+          # force-retag, or a local version bump, would silently drop upstream
+          # work; the `check` step's refusal to skip on version.inc alone is only
+          # effective together with this.
           PREV=""
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
@@ -298,14 +346,14 @@ jobs:
               for cand in "v$VER" "$VER"; do
                 if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
                   c=$(git rev-parse "refs/tags/$cand^{commit}")
-                  if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
+                  if [ "$c" != "$SYNC_SHA" ] && git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
                 fi
               done
             fi
           fi
           if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
-            if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; fi
+            if [ "$c" != "$SYNC_SHA" ] && git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; fi
           fi
 
           # Graft only when PREV is a real, newer common ancestor that git does
@@ -394,7 +442,11 @@ jobs:
           if git push origin "refs/tags/$TRACKING_TAG" --force; then
             TAG_NOTE="Tracking tag \`$TRACKING_TAG\` advanced to \`$SYNC_SHA\`."
           else
-            TAG_NOTE=":warning: Could not update \`$TRACKING_TAG\` (push refused). Until a maintainer runs \`git push origin +$SYNC_SHA:refs/tags/$TRACKING_TAG\`, every run will redo this merge to reach the same conclusion."
+            # `helio`, not `origin`: this text is read by a human in their own
+            # clone, where origin is upstream OrcaSlicer (CLAUDE.md → Git
+            # Workflow). The push above correctly uses origin because inside
+            # Actions origin is this fork.
+            TAG_NOTE=":warning: Could not update \`$TRACKING_TAG\` (push refused). Until a maintainer runs \`git push helio +$SYNC_SHA:refs/tags/$TRACKING_TAG\` (from a clone whose fork remote is \`helio\`), every run will redo this merge to reach the same conclusion."
             echo "::warning title=Tracking tag not updated::Could not force-update $TRACKING_TAG to $SYNC_SHA."
           fi
 
@@ -996,5 +1048,6 @@ jobs:
           # without — the same permission gap that produced #110.
           git tag -f "$TRACKING_TAG" "$SYNC_SHA"
           if ! git push origin "refs/tags/$TRACKING_TAG" --force; then
-            echo "::warning title=Tracking tag not updated::The sync PR was created, but \`$TRACKING_TAG\` could not be advanced to $SYNC_SHA (the token appears to lack permission to update tags). A maintainer can heal it with: git push origin +$SYNC_SHA:refs/tags/$TRACKING_TAG"
+            # `helio` — maintainer-facing, see the note in the `check` step.
+            echo "::warning title=Tracking tag not updated::The sync PR was created, but \`$TRACKING_TAG\` could not be advanced to $SYNC_SHA (the token appears to lack permission to update tags). A maintainer can heal it with, from a clone whose fork remote is \`helio\`: git push helio +$SYNC_SHA:refs/tags/$TRACKING_TAG"
           fi
