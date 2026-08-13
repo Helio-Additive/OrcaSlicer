@@ -67,10 +67,16 @@ REQUIRED_FIELDS = ("status", "owner", "reason")
 # is a false negative in the dangerous direction: an undeclared credential would
 # produce no E4 and merge unnoticed, which is the exact failure this check exists
 # to prevent.
-SECRET_DOT_RE = re.compile(r"\bsecrets\.([A-Za-z_][A-Za-z0-9_-]*)")
-VARS_DOT_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_-]*)")
-SECRET_INDEX_RE = re.compile(r"\bsecrets\[([^\]]*)\]")
-VARS_INDEX_RE = re.compile(r"\bvars\[([^\]]*)\]")
+#
+# Both forms tolerate expression whitespace around the accessor. Actions accepts
+# `secrets [ 'X' ]` and `secrets . X`, and WHOLE_CONTEXT_RE below deliberately
+# stands down when an accessor follows — so a pattern that required the accessor
+# to be adjacent left the spaced spelling matching *nothing at all*: no name, no
+# dynamic finding, no E4. The strictest-looking pattern was the leakiest.
+SECRET_DOT_RE = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)")
+VARS_DOT_RE = re.compile(r"\bvars\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)")
+SECRET_INDEX_RE = re.compile(r"\bsecrets\s*\[([^\]]*)\]")
+VARS_INDEX_RE = re.compile(r"\bvars\s*\[([^\]]*)\]")
 # The whole context used as a value — `toJSON(secrets)`, `format(..., secrets)`.
 # That consumes *every* available secret, so treating it as "no reference found"
 # is the worst possible reading: a workflow with the broadest dependency there is
@@ -164,6 +170,12 @@ def expression_spans(text: str) -> list[str]:
         index = end + 2
 
 
+def string_literal_spans(expression: str) -> list[tuple[int, int]]:
+    """The (open, close) offsets of each quoted string literal in `expression`."""
+    _, spans = _scan_string_aware(expression, 0, stop_at_expression_end=False)
+    return spans
+
+
 def without_string_literals(expression: str) -> str:
     """`expression` with the contents of quoted strings blanked out.
 
@@ -171,7 +183,7 @@ def without_string_literals(expression: str) -> str:
     x)` must not read as a use of the `secrets` context. Blanking rather than
     deleting keeps offsets, so nothing accidentally joins across a removed span.
     """
-    _, spans = _scan_string_aware(expression, 0, stop_at_expression_end=False)
+    spans = string_literal_spans(expression)
     if not spans:
         return expression
     chars = list(expression)
@@ -401,16 +413,31 @@ def _resolve_index(subscripts: list[str]) -> tuple[set[str], set[str]]:
     return static, dynamic
 
 
+def _index_matches(pattern: re.Pattern, text: str,
+                   literals: list[tuple[int, int]]) -> list[str]:
+    """Subscript bodies for accesses that begin outside any string literal."""
+    return [
+        match.group(1)
+        for match in pattern.finditer(text)
+        if not any(start <= match.start() <= end for start, end in literals)
+    ]
+
+
 def referenced(raw_text: str) -> tuple[set[str], set[str], set[str]]:
     """Secrets, vars, and unresolvable dynamic references found in a workflow."""
     text = expression_regions(raw_text)
 
     # Bracket subscripts are read from the text WITH strings intact — the name
-    # in `secrets['X']` is itself a string literal. Everything else is read from
-    # the blanked text, so a word inside a string cannot be mistaken for a
-    # context access.
-    static_secrets, dyn_secrets = _resolve_index(SECRET_INDEX_RE.findall(text))
-    static_vars, dyn_vars = _resolve_index(VARS_INDEX_RE.findall(text))
+    # in `secrets['X']` is itself a string literal, so blanking first would
+    # destroy the very thing being read. But that alone matches bracket-SHAPED
+    # text that is entirely inside a literal, e.g. `contains('secrets[foo]', x)`,
+    # reporting an unresolvable dynamic reference and failing E4 on a workflow
+    # that touches no credential. The discriminator is where the access STARTS:
+    # in `secrets['X']` the word `secrets` sits outside any literal; in the
+    # `contains` case it sits inside one.
+    literals = string_literal_spans(text)
+    static_secrets, dyn_secrets = _resolve_index(_index_matches(SECRET_INDEX_RE, text, literals))
+    static_vars, dyn_vars = _resolve_index(_index_matches(VARS_INDEX_RE, text, literals))
 
     bare = without_string_literals(text)
 
@@ -499,8 +526,12 @@ def configured_secret_names() -> set[str] | None:
         raw = Path(path).read_text(encoding="utf-8")
     except OSError:
         return None
-    names = {line.strip() for line in raw.splitlines() if line.strip()}
-    return names or None
+    # An empty file is a VALID answer — a repository with no secrets configured —
+    # and must stay distinct from "no metadata". Collapsing it to None inverted
+    # the result in the one state where W3 has the most to say: every declared
+    # secret absent, and no warning about any of them. It also made
+    # --strict-secrets report the file as unsupplied when it had been read fine.
+    return {line.strip() for line in raw.splitlines() if line.strip()}
 
 
 def main() -> int:

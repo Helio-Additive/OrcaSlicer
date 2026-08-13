@@ -53,6 +53,13 @@ jobs:
       - name: Install PyYAML
         run: pip install --quiet pyyaml
 
+      # Before the checker's verdict is trusted, confirm the checker works. Its
+      # expression scanner is the part that fails silently: a pattern that
+      # matches nothing produces no E4, so a broken scanner and a clean repo
+      # look identical in the output below.
+      - name: Test the inventory checker
+        run: python3 scripts/helio/test_check_workflow_inventory.py
+
       - name: Check workflow inventory
         run: python3 scripts/helio/check_workflow_inventory.py
 
@@ -150,7 +157,14 @@ jobs:
               # `secrets` array is a perfectly valid answer (a repo with no
               # secrets), and `jq -e` on a filter that produces no output exits
               # non-zero — which would turn "none configured" into "skip W3".
-              jq -e '.secrets | arrays' /tmp/page.json >/dev/null 2>&1 || {
+              #
+              # EVERY element is validated, not just the outer array. `{"secrets":
+              # [{}]}` satisfies `arrays`, and `.secrets[].name` then yields the
+              # string "null", so one malformed member among valid ones publishes
+              # a plausible-but-partial inventory as complete — and W3 reports
+              # correctly-configured secrets as absent, confidently.
+              jq -e '.secrets | arrays and all(.[]; (.name? | type) == "string" and (.name | length) > 0)' \
+                /tmp/page.json >/dev/null 2>&1 || {
                 echo "unparseable-body" > /tmp/http_status; return 1; }
               count=$(jq -r '.secrets | length' /tmp/page.json) || {
                 echo "unparseable-body" > /tmp/http_status; return 1; }
