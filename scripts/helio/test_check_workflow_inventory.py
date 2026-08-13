@@ -128,6 +128,30 @@ check("a path that merely looks like a context access",
       refs(wf("        run: cat /tmp/secrets.json\n"))[0],
       [])
 
+print("\nMalformed input must fail toward detection, never toward silence\n")
+
+# The string walk tracks quotes to find where an expression ends. An unterminated
+# quote makes it consume the rest of the file — the question is whether that
+# swallows later genuine references into a "literal" and suppresses them. It does
+# not: an unclosed quote records no span, so nothing is blanked and nothing is
+# filtered. Both secrets below are still reported.
+check("unterminated quote does not suppress later references",
+      refs(wf("        env:\n"
+              "          A: ${{ contains('unterminated , secrets.REAL_TOKEN) }}\n"
+              "          B: ${{ secrets.SECOND_TOKEN }}\n"))[0],
+      ["REAL_TOKEN", "SECOND_TOKEN"])
+
+# The accessor patterns allow whitespace, and `\s` includes newlines, while the
+# scanned text is expression regions joined by "\n". A match could in principle
+# be fabricated across a region boundary. It cannot here: a boundary crossing
+# would need one region ending in a bare `secrets` and the next starting with
+# `.NAME`, and a bare `secrets` is already a fatal whole-context finding on its
+# own — so there is no case where the boundary is the only thing E4 reports.
+check("adjacent regions do not fabricate a dot access across the join",
+      refs(wf("        env:\n          A: ${{ secrets }}\n"
+              "          B: ${{ vars.OK }}\n")),
+      ([], ["OK"], ["the whole `secrets` context"]))
+
 print("\n`secrets: inherit` — an all-secrets grant to code this check cannot read\n")
 
 check("external reusable workflow",
