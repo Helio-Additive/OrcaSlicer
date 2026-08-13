@@ -340,20 +340,47 @@ jobs:
           # work; the `check` step's refusal to skip on version.inc alone is only
           # effective together with this.
           PREV=""
+          SELF_NAMED=false
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
               for cand in "v$VER" "$VER"; do
                 if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
                   c=$(git rev-parse "refs/tags/$cand^{commit}")
-                  if [ "$c" != "$SYNC_SHA" ] && git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
+                  if [ "$c" = "$SYNC_SHA" ]; then SELF_NAMED=true; continue; fi
+                  if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
                 fi
               done
             fi
           fi
           if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
-            if [ "$c" != "$SYNC_SHA" ] && git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; fi
+            if [ "$c" = "$SYNC_SHA" ]; then
+              SELF_NAMED=true
+            elif git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
+              PREV="$c"
+            fi
+          fi
+
+          # Our records name the sync target itself as the base. Rejecting it
+          # outright leaves no graft at all, and the merge then runs against the
+          # ancient pre-squash common ancestor — which conflicts, so a run that
+          # should quietly do nothing files a conflict issue instead (that is a
+          # regression this step caused once already).
+          #
+          # Use the target's FIRST PARENT. It says exactly what the record means
+          # — "our content is based on this release" — so the merge applies that
+          # release's own delta and nothing else. It is strictly older than the
+          # target, so it cannot make the merge a no-op by construction: if we
+          # really do hold the release the merge is clean and empty, and if we do
+          # not (a retag, or a local version bump) the delta arrives and the tree
+          # changes. Both answers stay content-derived.
+          if [ -z "$PREV" ] && [ "$SELF_NAMED" = "true" ]; then
+            p=$(git rev-parse -q --verify "$SYNC_SHA^1" 2>/dev/null || true)
+            if [ -n "$p" ]; then
+              PREV="$p"
+              echo "Records name the sync target as the base; using its first parent ($PREV) so the merge tests the release's own delta."
+            fi
           fi
 
           # Graft only when PREV is a real, newer common ancestor that git does
