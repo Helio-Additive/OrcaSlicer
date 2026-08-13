@@ -450,12 +450,14 @@ PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
 have recurred every Monday (#110). The workflow now answers the question three
 ways, cheapest first, none of which depend on ancestry:
 
+There are **four** guards, and only the last is authoritative:
+
 | guard | when | basis | can it skip on its own? |
 | --- | --- | --- | --- |
 | `version.inc` equals the target | before any merge | a version *string* — sets an expectation only | **no** |
 | tracking tag equals the target | before any merge | a commit id, only ever written after content was validated | yes |
-| ancestor / trial merge | before the graft | ancestry — works only when history was not flattened | yes |
-| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" | yes — this is the authority |
+| ancestor check / trial merge | before the graft | **ancestry-dependent** — only meaningful when history was not flattened, which after a squash it always is | yes |
+| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" | yes — **this is the authority** |
 
 The last one is the backstop and cannot be fooled: if the merge produces a tree
 identical to the release branch's, there is nothing to propose, whatever the
@@ -483,6 +485,37 @@ Two rules keep that true, and both are load-bearing:
    comparison "confirms" a release that was never merged. The one content-based guard
    becomes a rubber stamp. The `check` step's refusal to skip on `version.inc` alone
    only works together with this.
+
+   When the records *do* name the target itself, the base becomes the target's
+   **first parent** — which is what "our content is based on this release" actually
+   means, so the merge applies that release's own delta and the tree comparison
+   still decides. Rejecting the candidate outright instead left no graft at all,
+   and the merge then ran against the ancient pre-squash ancestor and conflicted,
+   turning a run that should quietly do nothing into a weekly conflict issue.
+
+3. **A `version.inc` candidate must be content-validated before it is grafted.**
+   Choosing the graft base is **asymmetric**: too old is merely expensive (more
+   delta recomputed, conflict set inflated), while too new **silently drops
+   upstream work** — git reads the content between the real base and the claimed
+   one as deliberate local reversions and never re-applies it. The merge succeeds,
+   the PR opens, and it claims a release whose content is only partly present.
+
+   Strictness alone does not catch this. If the tree holds v2.4.1, `version.inc`
+   says v2.4.2 and the target is v2.4.3, then v2.4.2 *is* a strict ancestor of the
+   target — so it passes rule 2 and grafts, and only `v2.4.2..v2.4.3` is applied.
+   The workflow therefore validates the candidate the same way the `noop` step
+   validates the target, one release earlier: graft the candidate's own parent,
+   trial-merge the candidate, and see whether the tree moves. Unchanged means we
+   hold that release and it is safe as a base. Changed means `version.inc` is
+   describing a release this branch does not have — the run warns loudly and falls
+   back to the tracking tag, which is content-backed by construction.
+
+`scripts/helio/test_sync_noop_guards.py` pins all of this. It extracts the real
+`check` and `graft` step bodies from the workflow rather than transcribing them,
+and runs them against synthetic repositories whose content is held by a squashed
+commit with no upstream ancestry. Add a row there before changing any of the three
+rules above — every one of them was added in response to a failure that the
+then-current tests did not catch.
 
 **The tracking tag is a convenience, not a source of truth.** `helio-last-synced`
 is only advanced by a successful push at the end of a run, so an out-of-band merge
