@@ -413,5 +413,133 @@ r.append(scenario(
     expect_skip=True, expect_noop=None,
     version="2.4.2", chain="hunks", fork_at="v2.4.2", tag_at="v2.4.0"))
 
+
+# ---------------------------------------------------------------------------
+# Direct tests of upstream_content.sh. The scenarios above exercise it through
+# the workflow, which cannot reach these cases: they are about the boundary
+# between "missing", "held" and "cannot tell".
+# ---------------------------------------------------------------------------
+print("\nupstream_content.sh — the three-way boundary\n")
+
+
+def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False):
+    """Upstream + a squashed fork, shaped for one boundary case."""
+    up = os.path.join(tmp, "up")
+    os.makedirs(up)
+    sh("git init -q -b main && git config user.email a@b && git config user.name A", up)
+
+    def wr(path, content, mode=None):
+        full = os.path.join(up, path)
+        os.makedirs(os.path.dirname(full) or up, exist_ok=True)
+        open(full, "w").write(content)
+        if mode is not None:
+            os.chmod(full, mode)
+
+    wr("tool.sh", "#!/bin/sh\necho hi\n", 0o644)
+    wr("cfg.ini", "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\n")
+    sh("git add -A && git commit -q -m 2.4.0 && git tag v2.4.0", up)
+
+    if prereleases:
+        # Upstream tags several prereleases per release. base_below must not
+        # count these as steps, or the walk stays inside one release family.
+        for n, rc in enumerate(("v2.4.1-rc1", "v2.4.1-rc2"), start=1):
+            wr("cfg.ini",
+               "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\nrc%d\n" % n)
+            sh("git add -A && git commit -q -m %s && git tag %s" % (rc, rc), up)
+
+    if mode_only:
+        # ONLY the mode changes: identical blob on both sides.
+        os.chmod(os.path.join(up, "tool.sh"), 0o755)
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif overlap:
+        # Upstream rewrites the SAME line Helio will rewrite.
+        wr("cfg.ini", "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)).replace(
+            "k5=v5", "k5=upstream") + "\n")
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    else:
+        wr("new.c", "// new\n")
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+
+    fork = os.path.join(tmp, "fork")
+    sh("git clone -q %s %s" % (up, fork), tmp)
+    sh("git config user.email a@b && git config user.name A", fork)
+    sh("git checkout -q -f v2.4.0 && git checkout -q --orphan release", fork)
+    if overlap:
+        cfg = os.path.join(fork, "cfg.ini")
+        open(cfg, "w").write(open(cfg).read().replace("k5=v5", "k5=helio"))
+    sh("git add -A && git commit -q -m squashed", fork)
+    sh("git fetch -q origin '+refs/tags/*:refs/tags/*' --force", fork)
+    install_content_script(fork)
+    return fork, git(fork, "rev-list", "-n1", "v2.4.0")
+
+
+def content(fork, *args):
+    return sh("scripts/helio/upstream_content.sh " + " ".join(args), fork, check=False)
+
+
+def boundary(label, *, kw, cmd, want_rc=None, want_out=None, want_empty=False,
+             want_v240=False):
+    tmp = tempfile.mkdtemp()
+    try:
+        fork, v240 = content_repo(tmp, **kw)
+        p = content(fork, *cmd)
+        got = p.stdout.strip()
+        ok = True
+        detail = "rc=%d out=%r" % (p.returncode, got)
+        if want_rc is not None and p.returncode != want_rc:
+            ok = False
+        if want_out is not None and want_out not in got:
+            ok = False
+        # `x in y` is vacuously true for the empty string, so "reports nothing"
+        # needs its own assertion rather than want_out="".
+        if want_empty and got != "":
+            ok = False
+        if want_v240:
+            detail += " v2.4.0=%s" % v240[:8]
+            if got != v240:
+                ok = False
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        " + detail)
+        if not ok:
+            print("        wanted rc=%s out~=%r empty=%s v2.4.0=%s"
+                  % (want_rc, want_out, want_empty, want_v240))
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+b = []
+# A mode-only change has identical blobs on both sides, so a blob-only
+# comparison reports nothing missing and the executable bit is dropped for good.
+b.append(boundary("mode-only change (100644 -> 100755) is reported missing",
+                  kw=dict(mode_only=True), cmd=["missing", "v2.4.1"],
+                  want_out="tool.sh"))
+b.append(boundary("mode-only change means NOT already-synced",
+                  kw=dict(mode_only=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
+# Overlapping edits: git merge-file conflicts, which cannot distinguish
+# "we have it, with our edit on top" from "we never got it".
+b.append(boundary("overlapping edit is `unknown`, not `missing`",
+                  kw=dict(overlap=True), cmd=["unknown", "v2.4.1"],
+                  want_out="cfg.ini"))
+b.append(boundary("overlapping edit does NOT report missing",
+                  kw=dict(overlap=True), cmd=["missing", "v2.4.1"], want_empty=True))
+# The pair that was the bug: strict must refuse, permissive must allow.
+b.append(boundary("`holds` REFUSES on unknown -> the sync is not skipped",
+                  kw=dict(overlap=True), cmd=["holds", "v2.4.1"], want_rc=1))
+b.append(boundary("`base-ok` ALLOWS on unknown -> the graft is not lost",
+                  kw=dict(overlap=True), cmd=["base-ok", "v2.4.1"], want_rc=0))
+
+# Prereleases must not count as steps in the ancestry walk.
+# Two prereleases sit between v2.4.0 and v2.4.1. One step below v2.4.1 must be
+# v2.4.0, not v2.4.1-rc2 -- otherwise a four-release window can stay inside one
+# release family and the depth guarantee is worth nothing.
+b.append(boundary("base_below skips prerelease tags and lands on v2.4.0",
+                  kw=dict(prereleases=True), cmd=["base-below", "v2.4.1", "1"],
+                  want_v240=True))
+
+r += b
+
 print("\n%d/%d passed" % (sum(r), len(r)))
 sys.exit(0 if all(r) else 1)

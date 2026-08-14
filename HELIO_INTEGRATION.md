@@ -540,17 +540,32 @@ Two rules keep that true, and both are load-bearing:
    two `git diff --raw` calls give every id on both sides — and for the remainder
    where our blob matches neither side, a three-way merge decides:
 
-   | our blob | verdict |
+   | our blob + mode | verdict |
    | --- | --- |
-   | equals the candidate's | we hold it |
-   | equals the base's | never applied |
-   | neither, merge is clean and changes ours | never applied |
-   | neither, merge is clean and leaves ours alone | we hold it |
-   | neither, merge conflicts | inconclusive — **not** treated as missing |
+   | equals the candidate's | held |
+   | equals the base's | **missing** |
+   | neither, merge is clean and changes ours | **missing** |
+   | neither, merge is clean and leaves ours alone | held |
+   | neither, merge conflicts | **unknown** |
 
-   The conflict row is deliberate. An up-to-date fork whose local edit sits on
-   top of upstream's in the same region conflicts here too, so rejecting on
-   conflict would reject Helio's own touchpoint files every week.
+   Mode is part of the comparison, not just the blob. A path whose only change
+   is `100644` → `100755` has identical blob ids on both sides, so a blob-only
+   test reports nothing and the executable bit is dropped from the sync for good.
+
+   **`unknown` is a third answer, and the two callers lean opposite ways on it.**
+   A conflict cannot distinguish "we have upstream's change with our edit on top"
+   from "we never received it", because both produce overlapping hunks. So:
+
+   | question | caller | `unknown` means |
+   | --- | --- | --- |
+   | is the sync already done? | `holds`, in `check` | **not** done — do not skip |
+   | is this safe as a merge base? | `base-ok`, in `graft` | tolerated — still graft |
+
+   Guessing *yes* on the first skips a release silently. Guessing *no* on the
+   second leaves no graft, and the merge then runs against the ancient
+   pre-squash ancestor and conflicts every week. Collapsing the two was a real
+   bug: the conflict case was reasoned about for the graft base, then the same
+   function was reused for the skip decision, where the safe direction inverts.
 
    Candidates are ordered by **ancestry** (`git describe` on each successive
    parent), not by tag date — tags sharing a timestamp sort arbitrarily, and a

@@ -501,7 +501,9 @@ jobs:
           if [ "${#CANDS[@]}" -gt 0 ]; then
             for idx in "${!CANDS[@]}"; do
               c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
-              if "$CONTENT" holds "$c"; then
+              # base-ok, not holds: an undecidable path must not cost the
+              # graft. The skip decision in `check` uses the strict form.
+              if "$CONTENT" base-ok "$c"; then
                 PREV="$c"
                 echo "$d names $c and this tree holds its inherited content — using it as the merge base."
                 break
