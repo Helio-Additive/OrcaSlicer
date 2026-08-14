@@ -144,7 +144,10 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         # scenario passes for the wrong reason.
         commit("2.4.0", {"version.inc": verinc("2.4.2"), "src/core.c": "int main(){}\n"})
         sh("git tag v2.4.0", up)
-        commit("2.4.1", {"src/mid.c": "// content that only v2.4.1 introduced\n"})
+        # A non-ASCII path, because git octal-escapes those in `--raw` output
+        # and this repo has accented filenames under resources/profiles.
+        commit("2.4.1", {"src/mid.c": "// content that only v2.4.1 introduced\n",
+                         "src/wéird nàme.json": "{}\n"})
         v241 = git(up, "rev-parse", "HEAD")
         sh("git tag v2.4.1", up)
         commit("2.4.2", {"src/core.c": "int main(){return 0;}\n"})
@@ -243,11 +246,12 @@ def run_graft_and_merge(fork, target, sync_sha):
 
 
 def scenario(name, expect_skip, expect_noop, expect_file=None,
-             no_silent_drop=False, expect_text=None, **kw):
+             no_silent_drop=False, expect_text=None, expect_file_extra=None, **kw):
     """no_silent_drop: pass if the merge conflicts (safe — a human resolves it)
     OR completes cleanly with every expected file present. Fail only on the
     dangerous combination: a clean merge that quietly omits upstream content."""
     wanted = [expect_file] if isinstance(expect_file, str) else (expect_file or [])
+    wanted = wanted + (expect_file_extra or [])
     tmp = tempfile.mkdtemp()
     try:
         fork, target, sync_sha = build(tmp, **kw)
@@ -369,6 +373,7 @@ r.append(scenario(
     " the tree is at v2.4.0 -> v2.4.1 content must NOT be dropped",
     expect_skip=False, expect_noop=False,
     expect_file=["src/mid.c", "src/newfile.c"],
+    expect_file_extra=["src/wéird nàme.json"],
     version="2.4.2", chain="stale", new_release=True,
     fork_at="v2.4.0", tag_at="v2.4.2", no_silent_drop=True))
 r.append(scenario(

@@ -113,19 +113,26 @@ missing_paths() {
 
   # `git diff --raw` gives ":srcmode dstmode srcsha dstsha status\tpath", so the
   # word splitting on $meta below is deliberate, not an oversight.
+  #
+  # core.quotePath=false stops git octal-escaping non-ASCII paths. Correctness
+  # does not depend on it — the path is only a key for cross-referencing the two
+  # diffs, and both quote identically, while the comparison itself is on blob
+  # ids — but this repository has accented filenames under resources/profiles,
+  # and "never applied: \"resources/profiles/w\\303\\251ird.json\"" is not a
+  # message anyone can act on.
   while IFS=$'\t' read -r meta path; do
     [ -n "${path:-}" ] || continue
     # shellcheck disable=SC2086  # splitting the raw header into fields is the point
     set -- $meta
     U_ORIG["$path"]="$3"; U_NEW["$path"]="$4"
-  done < <(git diff --raw --no-renames "$base" "$cand" 2>/dev/null || true)
+  done < <(git -c core.quotePath=false diff --raw --no-renames "$base" "$cand" 2>/dev/null || true)
 
   while IFS=$'\t' read -r meta path; do
     [ -n "${path:-}" ] || continue
     # shellcheck disable=SC2086  # as above
     set -- $meta
     OURS["$path"]="$4"
-  done < <(git diff --raw --no-renames "$base" HEAD 2>/dev/null || true)
+  done < <(git -c core.quotePath=false diff --raw --no-renames "$base" HEAD 2>/dev/null || true)
 
   [ "${#U_NEW[@]}" -gt 0 ] || return 0
   for path in "${!U_NEW[@]}"; do
