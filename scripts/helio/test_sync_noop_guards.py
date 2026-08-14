@@ -58,7 +58,15 @@ def install_content_script(repo):
 def sh(cmd, cwd, env=None, check=True):
     e = dict(os.environ)
     e.update(env or {})
-    p = subprocess.run(["bash", "-c", cmd], cwd=cwd, env=e,
+    # Match the shell GitHub Actions uses for `run:` bodies:
+    # `bash --noprofile --norc -e -o pipefail`. The `check` step body has no
+    # `set -e` of its own — only `graft` does — so running it under a plain
+    # `bash -c` gives the harness WEAKER error semantics than production. A
+    # command that fails mid-body aborts the step on Actions and would have
+    # carried on here, so a scenario could pass locally and behave differently
+    # in CI. That is the exact class of defect this file exists to catch.
+    p = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail",
+                        "-c", cmd], cwd=cwd, env=e,
                        capture_output=True, text=True)
     if check and p.returncode != 0:
         print(p.stdout, p.stderr)
