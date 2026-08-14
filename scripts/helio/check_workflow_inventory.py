@@ -83,6 +83,15 @@ VARS_INDEX_RE = re.compile(r"\bvars\s*\[([^\]]*)\]")
 # would pass E4 declaring nothing. It cannot be resolved to names, so it is
 # reported as a dynamic reference, the same as an unresolvable subscript.
 WHOLE_CONTEXT_RE = re.compile(r"(?<![.\w'\"])(secrets|vars)\b(?!\s*[.\[])")
+# GitHub's object-filter syntax. `${{ toJSON(secrets.*) }}` yields every value in
+# the context — the broadest dependency there is — and matched *nothing*: the dot
+# patterns require an identifier after the dot, so `*` fails them, and
+# WHOLE_CONTEXT_RE stands down whenever a dot follows. Between the two, a
+# wildcard consuming every secret read as no reference at all. Like a whole
+# context use it cannot be resolved to names, so it is reported as dynamic.
+# (`secrets[*]` needs no special case: the index pattern matches it and `*` is
+# not a quoted literal, so it is already reported.)
+WILDCARD_RE = re.compile(r"\b(secrets|vars)\s*\.\s*\*")
 # A bracket subscript that is a plain quoted literal resolves to a known name.
 # Anything else (`secrets[matrix.token]`, `secrets[format('{0}_KEY', x)]`) cannot
 # be resolved statically and is reported rather than ignored.
@@ -223,12 +232,46 @@ def _condition_values(document: object) -> list[str]:
     return values
 
 
+def _all_scalars(node: object) -> list[str]:
+    """Every string scalar in the parsed document, keys included.
+
+    An expression is evaluated wherever it appears — `run:`, `env:`, `with:`, a
+    key — so there is no location to filter on here. That is the difference from
+    `_condition_values`, which must be selective precisely because an unwrapped
+    condition is only a condition in two places.
+    """
+    out: list[str] = []
+    stack: list[object] = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for key, value in current.items():
+                stack.append(key)
+                stack.append(value)
+        elif isinstance(current, list):
+            stack.extend(current)
+        elif isinstance(current, str):
+            out.append(current)
+    return out
+
+
 def expression_regions(text: str) -> str:
     """The parts of a workflow file where Actions evaluates contexts.
 
-    `${{ }}` spans are read from the raw text, which handles multi-line
-    expressions regardless of how the YAML wraps them. Condition values are read
-    from the parsed document instead: a folded scalar
+    `${{ }}` spans are read from the parsed document's scalar values, not from
+    the raw file. Reading raw text also scans YAML comments, so a disabled step
+    left behind by an upstream sync —
+
+        # token: ${{ secrets.OLD_TOKEN }}
+
+    — read as a live credential dependency and produced a fatal E4 for a
+    workflow that has none. Every place Actions evaluates an expression is a
+    scalar in the parsed document, so walking scalars loses nothing and drops
+    comments for free. Block and folded scalars arrive already joined, so a
+    multi-line expression still reads as one span.
+
+    Condition values are collected separately, because the `${{ }}` wrapper is
+    optional for them: a folded scalar
 
         if: >-
           secrets.NEW_TOKEN != ''
@@ -237,18 +280,21 @@ def expression_regions(text: str) -> str:
     lines, so a line-oriented regex sees only the `>-` marker and reports no
     dependency at all.
     """
-    regions = expression_spans(text)
     try:
         document = yaml.safe_load(text)
     except yaml.YAMLError:
         document = None
 
     if document is None:
-        # Unparseable: fall back to the line regex. It over-matches, but a file
-        # this check cannot read must not become a silent hole.
-        regions += IF_CONDITION_RE.findall(text)
-    else:
-        regions += _condition_values(document)
+        # Unparseable: fall back to scanning raw text, comments and all. It
+        # over-matches, but a file this check cannot read must not become a
+        # silent hole — a false E4 is arguable, a missed credential is not.
+        return "\n".join(expression_spans(text) + IF_CONDITION_RE.findall(text))
+
+    regions: list[str] = []
+    for scalar in _all_scalars(document):
+        regions += expression_spans(scalar)
+    regions += _condition_values(document)
     return "\n".join(regions)
 
 
@@ -447,6 +493,8 @@ def referenced(raw_text: str) -> tuple[set[str], set[str], set[str]]:
 
     dynamic = {f"secrets[{d}]" for d in dyn_secrets} | {f"vars[{d}]" for d in dyn_vars}
     dynamic |= {f"the whole `{context}` context" for context in WHOLE_CONTEXT_RE.findall(bare)}
+    dynamic |= {f"every `{context}` value via `{context}.*`"
+                for context in WILDCARD_RE.findall(bare)}
     return secrets, variables, dynamic
 
 
@@ -487,29 +535,46 @@ def inherited_secret_grants(raw_text: str) -> set[str]:
     return grants
 
 
-def uses_environments(raw_text: str) -> bool:
-    """Whether any job targets a deployment environment.
+def environment_scoped_secrets(raw_text: str) -> set[str]:
+    """Secrets referenced by jobs that target a deployment environment.
 
     W3 is answered from repository- and organization-scoped secret names.
-    Environment-scoped secrets live behind a third endpoint keyed by
-    environment name, so a workflow that uses one would have a perfectly
-    configured secret reported as absent. Nothing here uses environments today;
-    this exists so that the day one arrives, the gap says so instead of
-    producing a confident wrong answer.
+    Environment-scoped secrets live behind a third endpoint keyed by environment
+    name, so a workflow that uses one would have a perfectly configured secret
+    reported as absent. This exists so that the gap says so instead of producing
+    a confident wrong answer.
+
+    Scoped per JOB, not per workflow. Treating "some job here uses an
+    environment" as a property of the file downgraded every absent secret in a
+    mixed workflow — including ones referenced only by jobs with no environment,
+    which the repo/org inventory answers for perfectly well. Under
+    `--strict-secrets` a definitely-unavailable secret then exited 0, which is
+    the enforcement the option promises quietly not happening.
     """
     try:
         document = yaml.safe_load(raw_text)
     except yaml.YAMLError:
-        return False
+        return set()
     if not isinstance(document, dict):
-        return False
+        return set()
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
-        return False
-    return any(
-        isinstance(job, dict) and job.get("environment") is not None
-        for job in jobs.values()
-    )
+        return set()
+
+    scoped: set[str] = set()
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict) or job.get("environment") is None:
+            continue
+        # Re-serialise the single job and run the same extraction over it. Kept
+        # under a `jobs:` mapping so `_condition_values` still recognises the
+        # job- and step-level `if:` keys inside it.
+        try:
+            fragment = yaml.safe_dump({"jobs": {str(job_name): job}})
+        except yaml.YAMLError:
+            continue
+        job_secrets, _, _ = referenced(fragment)
+        scoped |= job_secrets
+    return scoped
 
 
 def configured_secret_names() -> set[str] | None:
@@ -653,22 +718,29 @@ def main() -> int:
             # here, so "it will fail at runtime" would be exactly the confident
             # wrong answer this check is supposed to avoid. Say what is actually
             # known instead, and never escalate it under --strict-secrets.
-            environment_scoped = uses_environments(text)
-            if declared_secrets and environment_scoped:
+            # Per-job, not per-workflow: only the secrets an environment-targeting
+            # job actually references are unanswerable here. A secret referenced
+            # solely by a job with no environment is answered normally, even in a
+            # workflow where some other job does use one.
+            env_scoped = environment_scoped_secrets(text)
+            unanswerable = declared_secrets & env_scoped
+            if unanswerable:
                 report.warn(
                     "W3",
-                    f"`{name}` targets a deployment environment. Secret presence is "
+                    f"`{name}` references {', '.join('`%s`' % s for s in sorted(unanswerable))} "
+                    "from a job targeting a deployment environment. Secret presence is "
                     "checked against repository- and organization-scoped names only, "
-                    "so any absence reported below may be an environment secret this "
-                    "check cannot see.",
+                    "so an absence reported for those may be an environment secret "
+                    "this check cannot see.",
                 )
             for absent in sorted(declared_secrets - secrets_present):
-                if environment_scoped:
+                if absent in env_scoped:
                     report.warn(
                         "W3",
                         f"`{name}` declares `{absent}`, which is not a repository or "
-                        "organization secret. If the job's environment provides it, "
-                        "this is expected; otherwise the workflow will fail at runtime.",
+                        "organization secret. If the environment of the job that "
+                        "references it provides it, this is expected; otherwise the "
+                        "workflow will fail at runtime.",
                     )
                     continue
                 message = (

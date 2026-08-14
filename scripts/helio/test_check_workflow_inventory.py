@@ -166,6 +166,72 @@ check("LOCAL reusable workflow is fine — its own entry is checked",
           "    secrets: inherit\n")),
       [])
 
+print("\nRound-5 findings\n")
+
+# P1. The object filter yields every value in the context, and matched nothing:
+# the dot patterns need an identifier after the dot, and WHOLE_CONTEXT_RE stands
+# down whenever a dot follows. The broadest dependency there is read as none.
+check("must-not-miss: `secrets.*` object filter -> dynamic",
+      refs(wf("        env:\n          A: ${{ toJSON(secrets.*) }}\n")),
+      ([], [], ["every `secrets` value via `secrets.*`"]))
+check("must-not-miss: `vars.*` object filter -> dynamic",
+      refs(wf("        env:\n          A: ${{ toJSON(vars.*) }}\n")),
+      ([], [], ["every `vars` value via `vars.*`"]))
+check("must-not-miss: spaced `secrets . *` -> dynamic",
+      refs(wf("        env:\n          A: ${{ toJSON(secrets . *) }}\n")),
+      ([], [], ["every `secrets` value via `secrets.*`"]))
+check("must-not-fire: `secrets.*` inside a string literal is not an access",
+      refs(wf("        env:\n          A: ${{ contains('secrets.*', 'x') }}\n")),
+      ([], [], []))
+# `secrets[*]` needs no new pattern — the index form already reports it.
+check("control: `secrets[*]` was already reported as dynamic",
+      refs(wf("        env:\n          A: ${{ toJSON(secrets[*]) }}\n")),
+      ([], [], ["secrets[*]"]))
+
+# P2. Expression regions came from raw file text, so a commented-out step read as
+# a live credential dependency — a fatal E4 for a workflow that has none. An
+# upstream sync leaving a disabled secret-using step in comments would block.
+check("must-not-fire: a secret in a YAML comment is not a reference",
+      refs("name: t\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+           "    steps:\n      - run: echo hi\n"
+           "        # token: ${{ secrets.OLD_TOKEN }}\n"),
+      ([], [], []))
+check("must-not-fire: a whole-line comment is not a reference",
+      refs("name: t\non: push\n# env: ${{ secrets.COMMENTED }}\njobs:\n  j:\n"
+           "    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"),
+      ([], [], []))
+# The must-not-miss half of the same change: a `#` inside a real expression or a
+# run: body is not a comment, and dropping to parsed scalars must not lose it.
+check("must-not-miss: `#` inside a run: body does not truncate the scan",
+      refs(wf("        env:\n          A: ${{ secrets.REAL }}\n"
+              "      - run: |\n          echo '# not a comment'\n"
+              "          curl -H \"t: ${{ secrets.SECOND }}\"\n")),
+      (["REAL", "SECOND"], [], []))
+check("must-not-miss: folded job-level if: still resolves",
+      refs("name: t\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+           "    if: >-\n      secrets.FOLDED != ''\n"
+           "    steps:\n      - run: echo hi\n"),
+      (["FOLDED"], [], []))
+check("must-not-miss: unparseable YAML still falls back to a raw scan",
+      refs("name: t\non: push\njobs: [\n  broken: ${{ secrets.BROKEN }}\n"),
+      (["BROKEN"], [], []))
+
+# P2. Environment scoping was a property of the FILE, so one job targeting an
+# environment downgraded every absent secret in the workflow — including secrets
+# only ever referenced by jobs with no environment.
+MIXED = (
+    "name: t\non: push\njobs:\n"
+    "  deploy:\n    runs-on: ubuntu-latest\n    environment: prod\n"
+    "    steps:\n      - run: echo\n        env:\n          A: ${{ secrets.ENV_ONLY }}\n"
+    "  plain:\n    runs-on: ubuntu-latest\n"
+    "    steps:\n      - run: echo\n        env:\n          B: ${{ secrets.REPO_ONLY }}\n"
+)
+check("environment scoping is per job, not per workflow",
+      sorted(cwi.environment_scoped_secrets(MIXED)), ["ENV_ONLY"])
+check("a workflow with no environment scopes nothing",
+      sorted(cwi.environment_scoped_secrets(
+          wf("        env:\n          A: ${{ secrets.PLAIN }}\n"))), [])
+
 print("\nSecret inventory — empty must stay distinct from unavailable\n")
 
 
