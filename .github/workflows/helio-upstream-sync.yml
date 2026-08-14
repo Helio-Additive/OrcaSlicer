@@ -366,31 +366,111 @@ jobs:
           #     ancestor of v2.4.3, so a strictness test alone accepts it, and
           #     only v2.4.2..v2.4.3 gets applied. v2.4.2's content is dropped.
           #
-          # Case 1 is handled by SELF_NAMED below. Case 2 needs actual validation,
-          # which is what version_content_present does — and it is the same trick
-          # the `noop` step uses, one release earlier: graft the candidate's own
-          # parent, trial-merge the candidate, and see whether the tree moves. If
-          # it does not, we already hold that release and it is safe as a base. If
-          # it does, version.inc is describing a release this tree does not have.
-          version_content_present() {
-            local candidate="$1" parent tip tree_before merged status
-            parent=$(git rev-parse -q --verify "${candidate}^1" 2>/dev/null || true)
-            [ -n "$parent" ] || return 1
-            tip=$(git rev-parse HEAD)
-            tree_before=$(git rev-parse 'HEAD^{tree}')
-            git replace --graft "$tip" $(git rev-parse "${tip}^@") "$parent" >/dev/null 2>&1 || return 1
-            status=1
-            if git merge --no-commit --no-ff "$candidate" >/dev/null 2>&1; then
-              merged=$(git write-tree 2>/dev/null || true)
-              [ "$merged" = "$tree_before" ] && status=0
-            fi
-            git merge --abort >/dev/null 2>&1 || git reset --hard "$tip" >/dev/null 2>&1 || true
-            git replace -d "$tip" >/dev/null 2>&1 || true
-            return $status
+          # Case 1 is handled by SELF_NAMED below. Case 2 needs actual validation.
+          #
+          # Validating a candidate by its OWN delta is not enough, and that was
+          # the third route to the same silent drop. Grafting the candidate's
+          # first parent and trial-merging the candidate proves only that the
+          # candidate's LAST STEP is present; everything below it is assumed. The
+          # assumption is exactly what is false when the gap sits underneath a
+          # small step: tree at v2.4.0, version.inc says v2.4.2, v2.4.1 added a
+          # file, v2.4.2 only bumped version.inc. The v2.4.2 delta is a version
+          # string we already have, so the trial passes, v2.4.2 becomes the base,
+          # and v2.4.1's file is dropped from the sync. The same hole applies to
+          # the tracking tag, which was not validated at all — and it can name a
+          # commit this branch does not hold, because it is advanced when a sync
+          # PR is *created*, not when it is merged (see "Note pending sync").
+          #
+          # So validate INHERITED content, and do it without merging. A path that
+          # upstream changed between BASE and the candidate, and that our tree
+          # still holds at exactly the BASE version, is a change we never applied.
+          # That is a set difference between two diffs:
+          #
+          #   changed upstream:  git diff --name-only BASE CANDIDATE
+          #   changed by us:     git diff --name-only BASE HEAD
+          #   never applied:     the first minus the second
+          #
+          # A file upstream ADDED that we lack is in the first and not the second,
+          # so it is caught too. A file Helio deliberately modified is in both, so
+          # our own divergence never reads as a missing sync. No trial merge, so
+          # no conflict noise, no worktree mutation, and it costs two diffs rather
+          # than a merge per candidate — which is what makes a window of several
+          # releases affordable.
+          # Two releases is the minimum that closes the finding — the gap sits one
+          # release under the candidate, so the base has to start one release
+          # under THAT — and it is also the most that is safe to demand. A deeper
+          # window widens the diff being compared, and any upstream file Helio
+          # happens to hold at the older content (a deliberate revert, say) reads
+          # as "never applied" and rejects a base that was fine. That failure is
+          # loud rather than silent (warning, no graft, conflict) but it is a
+          # weekly treadmill, which is a regression this step has caused before.
+          CONTENT_DEPTH=2   # how many releases of inherited content to require
+          MAX_WALK=6        # how far to walk down before giving up on a graft
+
+          # base_below <ref> <n>: the nth release tag strictly older than <ref> on
+          # its ancestry; the oldest reachable if there are fewer than n; <ref>^1
+          # if there are no release tags at all. Empty only at the start of
+          # history.
+          #
+          # Ordered by ANCESTRY, via `git describe` on each successive parent.
+          # Sorting `git tag --merged` by creatordate looked equivalent and is
+          # not: tags sharing a timestamp come back in an arbitrary order, so the
+          # walk could return a base one release too NEW and hand back exactly the
+          # unvalidated base this function exists to reject.
+          base_below() {
+            local ref="$1" want="$2" c i p t last=""
+            c=$(git rev-parse "${ref}^{commit}")
+            for (( i=0; i<want; i++ )); do
+              p=$(git rev-parse -q --verify "${c}^1" 2>/dev/null || true)
+              [ -n "$p" ] || break
+              t=$(git describe --tags --abbrev=0 --match 'v*' "$p" 2>/dev/null || true)
+              [ -n "$t" ] || break
+              c=$(git rev-parse "refs/tags/$t^{commit}")
+              last="$c"
+            done
+            if [ -n "$last" ]; then echo "$last"; return 0; fi
+            git rev-parse -q --verify "${ref}^1" 2>/dev/null || true
           }
 
+          MISSING_SAMPLE=""
+          # holds_content <candidate>: does this tree hold the candidate AND the
+          # releases it inherits from, back to CONTENT_DEPTH?
+          holds_content() {
+            local candidate="$1" base missing
+            base=$(base_below "$candidate" "$CONTENT_DEPTH")
+            # No older release and no parent: the start of history, so there is
+            # nothing underneath that could be missing.
+            [ -n "$base" ] || return 0
+            missing=$(comm -23 \
+              <(git diff --name-only "$base" "$candidate" | sort -u) \
+              <(git diff --name-only "$base" HEAD | sort -u))
+            [ -n "$missing" ] || return 0
+            MISSING_SAMPLE=$(printf '%s\n' "$missing" | head -5 | tr '\n' ' ')
+            return 1
+          }
+
+          # first_held <start>: the newest commit at or below <start> whose
+          # inherited content this tree holds. Walking down on failure matters —
+          # rejecting outright leaves no graft, and the merge then runs against
+          # the ancient pre-squash ancestor and conflicts, which is the treadmill
+          # a previous fix here created. An older base is only more expensive.
+          first_held() {
+            local c="$1" i
+            for (( i=0; i<MAX_WALK; i++ )); do
+              [ -n "$c" ] || return 1
+              if holds_content "$c"; then echo "$c"; return 0; fi
+              c=$(base_below "$c" 1)
+            done
+            return 1
+          }
+
+          # Candidates in preference order. Every one of them is a CLAIM about
+          # what this tree contains, and every one of them is now checked against
+          # the tree before it can steer the merge.
           PREV=""
           SELF_NAMED=false
+          CANDS=()
+          CDESC=()
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
@@ -399,46 +479,54 @@ jobs:
                   c=$(git rev-parse "refs/tags/$cand^{commit}")
                   if [ "$c" = "$SYNC_SHA" ]; then SELF_NAMED=true; continue; fi
                   if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
-                    if version_content_present "$c"; then
-                      PREV="$c"
-                      echo "version.inc names $cand and this tree holds its content — using it as the merge base."
-                    else
-                      echo "::warning title=version.inc does not match the tree::version.inc names \`$cand\`, but a trial merge shows this tree does NOT hold that release's content. Not using it as the merge base — doing so would make git treat the missing changes as intentional reversions and drop them from this sync. Falling back to the tracking tag. Someone should reconcile version.inc with what the branch actually contains."
-                    fi
+                    CANDS+=("$c"); CDESC+=("version.inc ($cand)")
                     break
                   fi
                 fi
               done
             fi
           fi
-          if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
+          if git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
             if [ "$c" = "$SYNC_SHA" ]; then
               SELF_NAMED=true
             elif git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
-              PREV="$c"
+              CANDS+=("$c"); CDESC+=("the tracking tag ($TRACKING_TAG)")
             fi
           fi
 
-          # Our records name the sync target itself as the base. Rejecting it
-          # outright leaves no graft at all, and the merge then runs against the
-          # ancient pre-squash common ancestor — which conflicts, so a run that
-          # should quietly do nothing files a conflict issue instead (that is a
-          # regression this step caused once already).
-          #
-          # Use the target's FIRST PARENT. It says exactly what the record means
-          # — "our content is based on this release" — so the merge applies that
-          # release's own delta and nothing else. It is strictly older than the
-          # target, so it cannot make the merge a no-op by construction: if we
-          # really do hold the release the merge is clean and empty, and if we do
-          # not (a retag, or a local version bump) the delta arrives and the tree
-          # changes. Both answers stay content-derived.
-          if [ -z "$PREV" ] && [ "$SELF_NAMED" = "true" ]; then
+          # Our records name the sync target itself. Use the target's FIRST
+          # PARENT: it says exactly what the record means — "our content is based
+          # on this release" — and being strictly older it cannot make the merge a
+          # no-op by construction. If we really hold the release the merge is
+          # clean and empty; if we do not, the delta arrives and the tree changes.
+          if [ "$SELF_NAMED" = "true" ]; then
             p=$(git rev-parse -q --verify "$SYNC_SHA^1" 2>/dev/null || true)
             if [ -n "$p" ]; then
-              PREV="$p"
-              echo "Records name the sync target as the base; using its first parent ($PREV) so the merge tests the release's own delta."
+              CANDS+=("$p"); CDESC+=("the sync target's first parent")
             fi
+          fi
+
+          if [ "${#CANDS[@]}" -gt 0 ]; then
+            for idx in "${!CANDS[@]}"; do
+              c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+              MISSING_SAMPLE=""
+              if holds_content "$c"; then
+                PREV="$c"
+                echo "$d names $c and this tree holds its inherited content — using it as the merge base."
+                break
+              fi
+              # Capture the reason before walking: first_held runs in a subshell,
+              # so anything it records in MISSING_SAMPLE would not survive.
+              rejected="$MISSING_SAMPLE"
+              held=$(first_held "$(base_below "$c" 1)" || true)
+              if [ -n "$held" ]; then
+                PREV="$held"
+                echo "::warning title=Records do not match the tree::$d names \`$c\`, but this tree does not hold that release's inherited content (never applied: ${rejected:-see log}). Using \`$held\` instead — the newest commit whose content is actually present. Grafting \`$c\` would make git read the missing changes as deliberate reversions and drop them from this sync. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
+                break
+              fi
+              echo "::warning title=Merge base candidate rejected::$d names \`$c\`, but this tree does not hold its content (never applied: ${rejected:-see log}) and no validated older base was found within $MAX_WALK steps."
+            done
           fi
 
           # Graft only when PREV is a real, newer common ancestor that git does
@@ -1132,23 +1220,35 @@ jobs:
               }
             }
 
-      - name: Update tracking tag
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true' && steps.build.outcome == 'success'
+      - name: Note pending sync
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         env:
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          TARGET_BRANCH: ${{ steps.branch.outputs.target }}
         run: |
 
-          # Move the tracking tag to the upstream target commit that was synced.
-          # Note: build_all is fire-and-forget (dispatch only), so we track the
-          # upstream commit. Build failures will show up on the PR via status checks.
+          # The tracking tag is deliberately NOT advanced here.
           #
-          # A refused push warns rather than failing: by this point the sync PR
-          # has been opened and the work is done. Failing the job here would mark
-          # a successful sync as failed over a tag the workflow can survive
-          # without — the same permission gap that produced #110.
-          git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-          if ! git push origin "refs/tags/$TRACKING_TAG" --force; then
-            # `helio` — maintainer-facing, see the note in the `check` step.
-            echo "::warning title=Tracking tag not updated::The sync PR was created, but \`$TRACKING_TAG\` could not be advanced to $SYNC_SHA (the token appears to lack permission to update tags). A maintainer can heal it with, from a clone whose fork remote is \`helio\`: git push helio +$SYNC_SHA:refs/tags/$TRACKING_TAG"
-          fi
+          # It used to be, as soon as the sync PR was created. That made the tag a
+          # record of "a PR was opened", not of "this branch holds that content" —
+          # and the rest of the workflow reads it as the latter. Two silent drops
+          # followed from the gap. If the PR was closed unmerged, the early exit in
+          # `check` ("tracking tag equals the target") skipped that release for
+          # good. And while the PR merely sat open, the tag named content the
+          # branch did not have, so the next release grafted it as the merge base
+          # and git read the unmerged content as deliberate reversions.
+          #
+          # The tag now only ever moves on evidence that the content is ON the
+          # target branch: the ancestor hit, the no-diff trial merge, or the
+          # merged-tree comparison in `noop`. After this PR is merged, the next
+          # run takes one of those paths and advances it then. Until then the run
+          # redoes the merge each week and refreshes the same PR, which is the
+          # honest description of the state: not synced yet.
+          {
+            echo "### Sync PR open, tracking tag unchanged"
+            echo
+            echo "\`$TRACKING_TAG\` still points at the last commit whose content is on \`$TARGET_BRANCH\`."
+            echo "It advances to \`$SYNC_SHA\` (\`$SYNC_LABEL\`) on the first run after this PR merges."
+          } >> "$GITHUB_STEP_SUMMARY"

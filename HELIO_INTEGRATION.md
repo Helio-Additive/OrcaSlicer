@@ -476,8 +476,19 @@ baseline and sets an expectation, and the merged-tree comparison decides.
 Two rules keep that true, and both are load-bearing:
 
 1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
-   a clean no-diff trial merge, an identical merged tree, or a completed sync. That
-   is what lets the tag (unlike `version.inc`) skip a run on its own.
+   a clean no-diff trial merge, or an identical merged tree. That is what lets the
+   tag (unlike `version.inc`) skip a run on its own.
+
+   "A sync PR was opened" is **not** such evidence, and the workflow used to treat
+   it as if it were: the tag advanced as soon as the PR was created. That made the
+   tag a record of intent while the rest of the workflow read it as a record of
+   content, and two silent drops followed. A PR closed unmerged left the tag at a
+   release the branch never received, so the `check` step skipped it for good; and
+   while the PR merely sat open, the next release grafted that unreceived commit as
+   the merge base. The tag now moves only once the content is on the target branch —
+   the first run after the sync PR merges takes one of the three paths above and
+   advances it there. Until then each run redoes the merge and refreshes the same
+   PR, which is the honest description of the state: not synced yet.
 2. **The graft base must be a *strict* ancestor of the sync target.**
    `git merge-base --is-ancestor` is true for a commit and itself, so a `version.inc`
    naming the target would otherwise graft the target onto the branch tip, making the
@@ -493,22 +504,54 @@ Two rules keep that true, and both are load-bearing:
    and the merge then ran against the ancient pre-squash ancestor and conflicted,
    turning a run that should quietly do nothing into a weekly conflict issue.
 
-3. **A `version.inc` candidate must be content-validated before it is grafted.**
-   Choosing the graft base is **asymmetric**: too old is merely expensive (more
-   delta recomputed, conflict set inflated), while too new **silently drops
-   upstream work** — git reads the content between the real base and the claimed
-   one as deliberate local reversions and never re-applies it. The merge succeeds,
-   the PR opens, and it claims a release whose content is only partly present.
+3. **Every graft candidate must be content-validated, for its *inherited*
+   content — not just its own delta.** Choosing the graft base is **asymmetric**:
+   too old is merely expensive (more delta recomputed, conflict set inflated),
+   while too new **silently drops upstream work** — git reads the content between
+   the real base and the claimed one as deliberate local reversions and never
+   re-applies it. The merge succeeds, the PR opens, and it claims a release whose
+   content is only partly present.
 
    Strictness alone does not catch this. If the tree holds v2.4.1, `version.inc`
    says v2.4.2 and the target is v2.4.3, then v2.4.2 *is* a strict ancestor of the
    target — so it passes rule 2 and grafts, and only `v2.4.2..v2.4.3` is applied.
-   The workflow therefore validates the candidate the same way the `noop` step
-   validates the target, one release earlier: graft the candidate's own parent,
-   trial-merge the candidate, and see whether the tree moves. Unchanged means we
-   hold that release and it is safe as a base. Changed means `version.inc` is
-   describing a release this branch does not have — the run warns loudly and falls
-   back to the tracking tag, which is content-backed by construction.
+
+   Validating the candidate's **own delta** does not catch it either, and that is
+   the subtle part. Grafting the candidate's first parent and trial-merging it
+   proves the candidate's last step is present and *assumes* everything under it.
+   When the gap sits below a small step, the assumption is exactly what is false:
+   tree at v2.4.0, `version.inc` says v2.4.2, v2.4.1 added a file, and v2.4.2 only
+   bumped the version string — which the fork already carries, so the trial passes
+   and v2.4.1's file is dropped. The same hole reached through the tracking tag,
+   which was not validated at all.
+
+   So validation asks about inherited content, and does it **without merging**. A
+   path that upstream changed between a base two releases below the candidate and
+   the candidate itself, and that our tree still holds at exactly the base
+   version, is a change we never applied:
+
+   ```
+   changed upstream:  git diff --name-only BASE CANDIDATE
+   changed by us:     git diff --name-only BASE HEAD
+   never applied:     the first minus the second
+   ```
+
+   A file upstream *added* that we lack is in the first and not the second, so it
+   is caught too; a file Helio deliberately modified is in both, so our own
+   divergence never reads as a missing sync. No trial merge means no conflict
+   noise and no worktree mutation, which is what makes a multi-release window
+   affordable. Candidates are ordered by **ancestry** (`git describe` on each
+   successive parent), not by tag date — tags sharing a timestamp sort
+   arbitrarily, and a base one release too new is the very thing being rejected.
+
+   A candidate that fails is not simply dropped: the run walks down to the newest
+   commit whose content *is* present and grafts that, warning loudly and naming
+   the files that were never applied. Rejecting outright leaves no graft, and the
+   merge then runs against the ancient pre-squash ancestor and conflicts — the
+   weekly treadmill rule 2 already had to undo once. The window is deliberately
+   two releases: enough to see a gap one release under the candidate, and no more
+   than that, because a wider diff makes any upstream file Helio holds at older
+   content read as "never applied".
 
 `scripts/helio/test_sync_noop_guards.py` pins all of this. It extracts the real
 `check` and `graft` step bodies from the workflow rather than transcribing them,

@@ -54,8 +54,31 @@ def git(repo, *args):
 
 
 def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
-          new_release=False, no_tag=False, fork_at=None, tag_at=None):
-    """Fork repo whose profile tree holds v2.4.2 via a SQUASHED commit."""
+          new_release=False, no_tag=False, fork_at=None, tag_at=None,
+          chain=None):
+    """Fork repo whose profile tree holds v2.4.2 via a SQUASHED commit.
+
+    `chain` selects an alternative upstream shape for the round-5 findings. Both
+    need four releases so that a release the records name sits ABOVE a release
+    whose content the fork lacks — that gap is what neither guard could see.
+
+    chain="thin" — the top release's whole delta is the version string:
+
+        v2.4.0  core.c            <- what the fork's tree really holds
+        v2.4.1  + src/mid.c       <- the content that must not be dropped
+        v2.4.2  version.inc only  <- the thin release version.inc names
+        v2.4.3  + src/newfile.c   <- the sync target
+
+    Delta-only validation passes v2.4.2 because the only thing it checks is a
+    version bump the fork already carries for an unrelated reason.
+
+    chain="stale" — same gap, reached through the tracking tag instead. Upstream
+    never rewrites version.inc, so the fork's copy matches at every release and
+    cannot conflict; that keeps the merge clean and lets the dropped content show
+    up as a missing file rather than being masked by a conflict. version.inc's
+    own candidate IS rejected here, which is the point: the run then falls
+    through to the tracking tag, which nothing validated.
+    """
     up = os.path.join(tmp, "upstream")
     os.makedirs(up)
     sh("git init -q -b main && git config user.email a@b && git config user.name A", up)
@@ -71,15 +94,38 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
     def verinc(v):
         return 'set(SoftFever_VERSION "%s")\n' % v
 
-    commit("base", {"version.inc": verinc("2.4.1"), "src/core.c": "int main(){}\n"})
-    v241 = git(up, "rev-parse", "HEAD")
-    sh("git tag v2.4.1", up)
+    if chain == "thin":
+        commit("2.4.0", {"version.inc": verinc("2.4.0"), "src/core.c": "int main(){}\n"})
+        sh("git tag v2.4.0", up)
+        commit("2.4.1", {"version.inc": verinc("2.4.1"),
+                         "src/mid.c": "// content that only v2.4.1 introduced\n"})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
+        # Whole delta is the version string. This is what defeats delta-only
+        # validation: the fork's version.inc already reads 2.4.2.
+        commit("2.4.2", {"version.inc": verinc("2.4.2")})
+        sh("git tag v2.4.2", up)
+    elif chain == "stale":
+        # version.inc is written once and never touched again, so the fork's copy
+        # agrees with upstream at every release and the merge cannot conflict on
+        # it. Without that, a version.inc conflict masks the dropped file and the
+        # scenario passes for the wrong reason.
+        commit("2.4.0", {"version.inc": verinc("2.4.2"), "src/core.c": "int main(){}\n"})
+        sh("git tag v2.4.0", up)
+        commit("2.4.1", {"src/mid.c": "// content that only v2.4.1 introduced\n"})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
+        commit("2.4.2", {"src/core.c": "int main(){return 0;}\n"})
+        sh("git tag v2.4.2", up)
+    else:
+        commit("base", {"version.inc": verinc("2.4.1"), "src/core.c": "int main(){}\n"})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
 
-    commit("2.4.2", {"version.inc": verinc("2.4.2"),
-                     "src/core.c": "int main(){return 0;}\n",
-                     "src/mid.c": "// content that only v2.4.2 introduced\n"})
-    v242_a = git(up, "rev-parse", "HEAD")
-    sh("git tag v2.4.2", up)
+        commit("2.4.2", {"version.inc": verinc("2.4.2"),
+                         "src/core.c": "int main(){return 0;}\n",
+                         "src/mid.c": "// content that only v2.4.2 introduced\n"})
+        sh("git tag v2.4.2", up)
 
     # The fork: upstream content + a Helio delta, collapsed into ONE commit with
     # no upstream ancestry (what squash-merging a sync PR leaves behind).
@@ -104,8 +150,10 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
                                   "src/newfeature.c": "// added after retag\n"})
         sh("git tag -f v2.4.2", up)
     if bump_ahead or new_release:
-        commit("2.4.3", {"version.inc": verinc("2.4.3"),
-                         "src/newfile.c": "// genuinely new upstream work\n"})
+        files = {"src/newfile.c": "// genuinely new upstream work\n"}
+        if chain != "stale":  # see the chain="stale" note: version.inc stays put
+            files["version.inc"] = verinc("2.4.3")
+        commit("2.4.3", files)
         sh("git tag v2.4.3", up)
 
     sh("git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --force", fork)
@@ -247,6 +295,37 @@ r.append(scenario(
     expect_file=["src/mid.c", "src/newfile.c"],
     version="2.4.2", new_release=True, fork_at="v2.4.1", no_tag=True,
     no_silent_drop=True))
+
+# Round 5. Both findings are the same hole seen from two sides: a candidate was
+# accepted on a claim about the tree rather than a check of it. Delta-only
+# validation cannot see the gap when the gap is BELOW the delta being checked,
+# and the tracking tag was not validated at all.
+r.append(scenario(
+    "CODEX P1 (a): version.inc names a thin release (version bump only) whose PARENT"
+    " release we lack -> v2.4.1 content must NOT be dropped",
+    expect_skip=False, expect_noop=False,
+    expect_file=["src/mid.c", "src/newfile.c"],
+    version="2.4.2", chain="thin", new_release=True,
+    fork_at="v2.4.0", tag_at="v2.4.0", no_silent_drop=True))
+r.append(scenario(
+    "CODEX P1 (b): tracking tag advanced by an unmerged sync PR names v2.4.2 while"
+    " the tree is at v2.4.0 -> v2.4.1 content must NOT be dropped",
+    expect_skip=False, expect_noop=False,
+    expect_file=["src/mid.c", "src/newfile.c"],
+    version="2.4.2", chain="stale", new_release=True,
+    fork_at="v2.4.0", tag_at="v2.4.2", no_silent_drop=True))
+r.append(scenario(
+    "control for (a): same thin-release shape but the tree really does hold"
+    " v2.4.2 -> normal sync, target content arrives",
+    expect_skip=False, expect_noop=False, expect_file="src/newfile.c",
+    version="2.4.2", chain="thin", new_release=True,
+    fork_at="v2.4.2", tag_at="v2.4.2"))
+r.append(scenario(
+    "control for (b): same stale-tag shape but the tree really does hold v2.4.2"
+    " -> normal sync, target content arrives",
+    expect_skip=False, expect_noop=False, expect_file="src/newfile.c",
+    version="2.4.2", chain="stale", new_release=True,
+    fork_at="v2.4.2", tag_at="v2.4.2"))
 
 print("\n%d/%d passed" % (sum(r), len(r)))
 sys.exit(0 if all(r) else 1)
