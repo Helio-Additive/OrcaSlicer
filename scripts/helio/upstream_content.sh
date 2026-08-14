@@ -127,7 +127,22 @@ _change_state() {
   if git merge-file -q -p "$dir/ours" "$dir/base" "$dir/theirs" > "$dir/merged" 2>/dev/null; then
     if cmp -s "$dir/ours" "$dir/merged"; then out=held; else out=absent; fi
   else
-    out=unknown  # conflict, binary, or merge-file error
+    # Conflict, binary, or a merge-file error — all indistinguishable here.
+    #
+    # BINARIES ARE THE UNMEASURED CASE. `git merge-file` exits 255 on binary
+    # content, so any binary upstream changed that Helio also changed is
+    # permanently `unknown`, and `holds` refuses on unknown. Mostly that is
+    # cheap: a false `holds`=0 sends the run to the merge, where the `noop`
+    # tree comparison decides correctly. The exception is a conflict-resolution
+    # sync, where `noop` never runs — there it would mean a conflict issue
+    # refreshed weekly for a merged sync.
+    #
+    # Helio's image touchpoints are ADDITIONS (`helio_*.svg`, `expand_helio.png`),
+    # which upstream never touches and which therefore never enter this
+    # comparison at all. So the exposure looks empty in practice — but that is
+    # read off HELIO_INTEGRATION.md, not measured against a real four-release
+    # window, and it should be measured before being relied on.
+    out=unknown
   fi
   rm -rf "$dir"
   printf '%s' "$out"
