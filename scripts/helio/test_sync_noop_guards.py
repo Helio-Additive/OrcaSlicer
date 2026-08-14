@@ -38,6 +38,23 @@ CHECK = step_body("Check if already synced")
 GRAFT = step_body("Establish correct merge base (ephemeral graft)")
 
 
+CONTENT_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "upstream_content.sh")
+
+
+def install_content_script(repo):
+    """Put the real upstream_content.sh where the step bodies expect it.
+
+    The steps resolve it through $GITHUB_WORKSPACE, so the synthetic repo needs
+    a copy at the same relative path. Copied rather than reimplemented — the
+    point of this harness is to run the shipped code.
+    """
+    dest = os.path.join(repo, "scripts", "helio")
+    os.makedirs(dest, exist_ok=True)
+    shutil.copy2(CONTENT_SH, os.path.join(dest, "upstream_content.sh"))
+    os.chmod(os.path.join(dest, "upstream_content.sh"), 0o755)
+
+
 def sh(cmd, cwd, env=None, check=True):
     e = dict(os.environ)
     e.update(env or {})
@@ -105,6 +122,21 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         # validation: the fork's version.inc already reads 2.4.2.
         commit("2.4.2", {"version.inc": verinc("2.4.2")})
         sh("git tag v2.4.2", up)
+    elif chain == "hunks":
+        # Codex round 6: upstream edits one hunk of a file, Helio independently
+        # edits another hunk of the SAME file. Comparing changed path NAMES sees
+        # the path on both sides and cancels it out, while upstream's hunk is
+        # genuinely absent. Only looking inside the file can tell.
+        wide = "\n".join("line %d" % i for i in range(1, 41)) + "\n"
+        commit("2.4.0", {"version.inc": verinc("2.4.2"), "src/wide.c": wide})
+        sh("git tag v2.4.0", up)
+        # Upstream changes the TOP of the file.
+        top = wide.replace("line 3\n", "line 3 CHANGED UPSTREAM\n")
+        commit("2.4.1", {"src/wide.c": top})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
+        commit("2.4.2", {"src/core.c": "int main(){return 0;}\n"})
+        sh("git tag v2.4.2", up)
     elif chain == "stale":
         # version.inc is written once and never touched again, so the fork's copy
         # agrees with upstream at every release and the merge cannot conflict on
@@ -141,6 +173,11 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
     sh("git checkout -q -f %s" % (fork_at or "HEAD"), fork)
     sh("git checkout -q --orphan release", fork)
     open(os.path.join(fork, "helio.c"), "w").write("// helio thermal_index\n")
+    if chain == "hunks":
+        # Helio edits the BOTTOM of the same file, from the v2.4.0 content.
+        wide_path = os.path.join(fork, "src", "wide.c")
+        body = open(wide_path).read()
+        open(wide_path, "w").write(body.replace("line 38\n", "line 38 helio thermal_index\n"))
     open(os.path.join(fork, "version.inc"), "w").write(verinc(version))
     sh("git add -A && git commit -q -m 'Upstream sync: v2.4.2 (squashed)'", fork)
 
@@ -156,6 +193,7 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         commit("2.4.3", files)
         sh("git tag v2.4.3", up)
 
+    install_content_script(fork)
     sh("git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --force", fork)
 
     target = "v2.4.3" if (bump_ahead or new_release) else "v2.4.2"
@@ -175,6 +213,7 @@ def run_check(fork, target, sync_sha):
         "SYNC_SHA": sync_sha, "SYNC_LABEL": target,
         "TRACKING_TAG": "helio-last-synced", "SYNC_REF": target,
         "GITHUB_OUTPUT": outfile, "GITHUB_STEP_SUMMARY": outfile + ".sum",
+        "GITHUB_WORKSPACE": fork,
     }
     p = sh(CHECK, fork, env, check=False)
     out = dict(l.split("=", 1) for l in open(outfile).read().splitlines() if "=" in l)
@@ -188,6 +227,7 @@ def run_graft_and_merge(fork, target, sync_sha):
         "SYNC_SHA": sync_sha, "SYNC_LABEL": target,
         "TRACKING_TAG": "helio-last-synced", "SYNC_REF": target,
         "GITHUB_OUTPUT": outfile,
+        "GITHUB_WORKSPACE": fork,
     }
     p = sh(GRAFT, fork, env, check=False)
     gout = dict(l.split("=", 1) for l in open(outfile).read().splitlines() if "=" in l)
@@ -203,7 +243,7 @@ def run_graft_and_merge(fork, target, sync_sha):
 
 
 def scenario(name, expect_skip, expect_noop, expect_file=None,
-             no_silent_drop=False, **kw):
+             no_silent_drop=False, expect_text=None, **kw):
     """no_silent_drop: pass if the merge conflicts (safe — a human resolves it)
     OR completes cleanly with every expected file present. Fail only on the
     dangerous combination: a clean merge that quietly omits upstream content."""
@@ -228,6 +268,18 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
                 print("  PASS  " + name)
                 print("        " + " | ".join(results))
                 return True
+            if expect_text:
+                path, needle = expect_text
+                body = ""
+                full = os.path.join(fork, path)
+                if os.path.exists(full):
+                    body = open(full).read()
+                got = needle in body
+                results.append("%s contains %r=%s" % (path, needle, got))
+                if not got:
+                    results.append("MISSING -> upstream hunk silently dropped")
+                    ok_files = False
+                    FAILURES.append(name + " / " + path)
             for want in wanted:
                 present = os.path.exists(os.path.join(fork, want))
                 results.append("%s present=%s" % (want, present))
@@ -250,9 +302,14 @@ FAILURES: list[str] = []
 
 print("Scenarios (fork tree holds v2.4.2 via a squashed commit; tag stale at v2.4.1)\n")
 r = []
+# Was expect_skip=False/noop=True: the run merged, then discovered the merge
+# changed nothing. The content test in `check` now answers the same question
+# before merging, so the same invariant — NO PR for a release we already hold —
+# is reached earlier and without depending on ancestry. The assertion is on the
+# outcome, not on which guard produced it.
 r.append(scenario(
-    "#107: cron re-proposes v2.4.2, already merged -> no PR (decided by tree, not version.inc)",
-    expect_skip=False, expect_noop=True, version="2.4.2"))
+    "#107: cron re-proposes v2.4.2, already merged -> no PR (content test, pre-merge)",
+    expect_skip=True, expect_noop=None, version="2.4.2"))
 r.append(scenario(
     "FALSE SKIP A: upstream force-retags v2.4.2 onto new content -> must NOT skip",
     expect_skip=False, expect_noop=False, expect_file="src/newfeature.c",
@@ -270,8 +327,8 @@ r.append(scenario(
     version="2.4.2", new_release=True))
 
 r.append(scenario(
-    "REGRESSION CHECK: #107 shape but NO usable tracking tag -> must still be a clean no-op",
-    expect_skip=False, expect_noop=True, version="2.4.2", no_tag=True))
+    "REGRESSION CHECK: #107 shape but NO usable tracking tag -> must still open no PR",
+    expect_skip=True, expect_noop=None, version="2.4.2", no_tag=True))
 
 r.append(scenario(
     "hardest: force-retag AND no tracking tag -> parent-of-target base, content must arrive",
@@ -326,6 +383,30 @@ r.append(scenario(
     expect_skip=False, expect_noop=False, expect_file="src/newfile.c",
     version="2.4.2", chain="stale", new_release=True,
     fork_at="v2.4.2", tag_at="v2.4.2"))
+
+
+# Round 6. Both are cases the previous round's fix could not see.
+r.append(scenario(
+    "CODEX P1: upstream edits one hunk, Helio edits another hunk of the SAME file"
+    " -> the upstream hunk must not be treated as already applied",
+    expect_skip=False, expect_noop=False, expect_file="src/core.c",
+    version="2.4.2", chain="hunks", new_release=True,
+    fork_at="v2.4.0", tag_at="v2.4.2", no_silent_drop=True,
+    expect_text=("src/wide.c", "line 3 CHANGED UPSTREAM")))
+r.append(scenario(
+    "CODEX P1: a LEGACY tracking tag at the target, written by the old workflow"
+    " for a PR that never merged -> must not skip the release for ever",
+    expect_skip=False, expect_noop=False,
+    expect_file=["src/mid.c", "src/newfile.c"],
+    version="2.4.2", chain="stale", new_release=True,
+    fork_at="v2.4.0", tag_at_target=True, no_silent_drop=True))
+
+r.append(scenario(
+    "CODEX P2: a resolved+squash-merged CONFLICT sync (branch holds the release"
+    " WITH Helio edits on top) -> must be recognised as synced, not re-conflicted"
+    " every week",
+    expect_skip=True, expect_noop=None,
+    version="2.4.2", chain="hunks", fork_at="v2.4.2", tag_at="v2.4.0"))
 
 print("\n%d/%d passed" % (sum(r), len(r)))
 sys.exit(0 if all(r) else 1)

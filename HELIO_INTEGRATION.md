@@ -525,33 +525,47 @@ Two rules keep that true, and both are load-bearing:
    and v2.4.1's file is dropped. The same hole reached through the tracking tag,
    which was not validated at all.
 
-   So validation asks about inherited content, and does it **without merging**. A
-   path that upstream changed between a base two releases below the candidate and
-   the candidate itself, and that our tree still holds at exactly the base
-   version, is a change we never applied:
+   So validation asks about inherited content, and it compares **trees**. The
+   work lives in `scripts/helio/upstream_content.sh`, shared with the `check`
+   step so that "does this branch hold release X?" has one implementation; it was
+   inline in the graft step before, which is precisely why `check` could not use
+   it and went on trusting the tracking tag.
 
-   ```
-   changed upstream:  git diff --name-only BASE CANDIDATE
-   changed by us:     git diff --name-only BASE HEAD
-   never applied:     the first minus the second
-   ```
+   A path upstream changed between a base four releases below the candidate and
+   the candidate itself, which our tree still holds at exactly the base version,
+   is a change we never applied. Comparing changed path **names** is not enough:
+   if upstream edits one hunk of a file and Helio independently edits another
+   hunk, the path appears on both sides and a name-level set difference cancels
+   it out while upstream's hunk is genuinely absent. So blob ids are compared —
+   two `git diff --raw` calls give every id on both sides — and for the remainder
+   where our blob matches neither side, a three-way merge decides:
 
-   A file upstream *added* that we lack is in the first and not the second, so it
-   is caught too; a file Helio deliberately modified is in both, so our own
-   divergence never reads as a missing sync. No trial merge means no conflict
-   noise and no worktree mutation, which is what makes a multi-release window
-   affordable. Candidates are ordered by **ancestry** (`git describe` on each
-   successive parent), not by tag date — tags sharing a timestamp sort
-   arbitrarily, and a base one release too new is the very thing being rejected.
+   | our blob | verdict |
+   | --- | --- |
+   | equals the candidate's | we hold it |
+   | equals the base's | never applied |
+   | neither, merge is clean and changes ours | never applied |
+   | neither, merge is clean and leaves ours alone | we hold it |
+   | neither, merge conflicts | inconclusive — **not** treated as missing |
+
+   The conflict row is deliberate. An up-to-date fork whose local edit sits on
+   top of upstream's in the same region conflicts here too, so rejecting on
+   conflict would reject Helio's own touchpoint files every week.
+
+   Candidates are ordered by **ancestry** (`git describe` on each successive
+   parent), not by tag date — tags sharing a timestamp sort arbitrarily, and a
+   base one release too new is the very thing being rejected.
 
    A candidate that fails is not simply dropped: the run walks down to the newest
    commit whose content *is* present and grafts that, warning loudly and naming
    the files that were never applied. Rejecting outright leaves no graft, and the
    merge then runs against the ancient pre-squash ancestor and conflicts — the
-   weekly treadmill rule 2 already had to undo once. The window is deliberately
-   two releases: enough to see a gap one release under the candidate, and no more
-   than that, because a wider diff makes any upstream file Helio holds at older
-   content read as "never applied".
+   weekly treadmill rule 2 already had to undo once.
+
+   The window is four releases. Any finite window has a floor — a change older
+   than the base is outside the diff and invisible — so this is a depth/cost
+   trade rather than a proof.
+
 
 `scripts/helio/test_sync_noop_guards.py` pins all of this. It extracts the real
 `check` and `graft` step bodies from the workflow rather than transcribing them,

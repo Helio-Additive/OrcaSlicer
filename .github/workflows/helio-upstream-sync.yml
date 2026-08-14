@@ -119,6 +119,10 @@ jobs:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
         run: |
+          # Shared with the `graft` step below, so "does this branch hold
+          # release X?" has one implementation rather than two that drift.
+          CONTENT="$GITHUB_WORKSPACE/scripts/helio/upstream_content.sh"
+
           # Moving the tracking tag requires force-updating a tag on this repo,
           # which the workflow token is not always permitted to do (observed:
           # HTTP 403). That must not fail a sync run — the tag is a convenience,
@@ -189,17 +193,32 @@ jobs:
 
           # Determine baseline
           LAST_SYNCED=""
+          TAG_UNTRUSTED=false
           if git rev-parse "$TRACKING_TAG" >/dev/null 2>&1; then
             SYNCED_COMMIT=$(git rev-parse "$TRACKING_TAG")
-            # Unlike version.inc, this IS content-backed: the tag is only ever
-            # written after a merge or tree comparison established that the
-            # commit's content is present, and it names a COMMIT rather than a
-            # release name, so an upstream retag moves the target away from it
-            # instead of silently redefining it.
+            # The tag matching the target is a REASON TO LOOK, not an answer.
+            #
+            # It used to exit here on its own, on the grounds that the tag is
+            # only ever written after content was validated. That was not true:
+            # the tag was advanced when a sync PR was *created*. So a PR closed
+            # unmerged left the tag naming a release this branch never received,
+            # and this exit then skipped that release permanently — every run,
+            # for ever. Removing the PR-creation write stops NEW tags being
+            # wrong; it does nothing for tags already written that way, which is
+            # why the claim has to be rechecked here rather than trusted.
             if [ "$SYNCED_COMMIT" = "$SYNC_SHA" ]; then
-              echo "Already synced to $SYNC_LABEL"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              if "$CONTENT" holds "$SYNC_SHA"; then
+                echo "Already synced to $SYNC_LABEL (tracking tag, confirmed by content)"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              # Rejecting the tag at THIS exit is not enough. The tag also feeds
+              # the baseline, and a baseline equal to the target hits a second,
+              # separate "nothing to sync" exit further down — so the bad tag
+              # skipped the release anyway, through a different door. Mark it
+              # untrusted and let every consumer below ignore it.
+              TAG_UNTRUSTED=true
+              echo "::warning title=Tracking tag does not match the tree::\`$TRACKING_TAG\` names $SYNC_LABEL, but this branch does not hold that release's content (never applied: $("$CONTENT" missing "$SYNC_SHA" 2>/dev/null | head -5 | tr '\n' ' ')). The tag was probably advanced by a sync PR that was never merged. Ignoring the tag for this run and syncing anyway."
             fi
             # Prefer version.inc when it names a NEWER upstream release than the
             # tag does. The baseline feeds the changelog and the Helio-relevant
@@ -218,11 +237,26 @@ jobs:
               LAST_SYNCED="$VERSION_TAG"
             fi
             # For tag mode, try to find the v* tag at that commit
-            if [ -z "$LAST_SYNCED" ] && [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ] && \
+               [ "$TRACKING_TAG" = "helio-last-synced" ]; then
               LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
             fi
-            if [ -z "$LAST_SYNCED" ]; then
+            if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ]; then
               LAST_SYNCED="$TRACKING_TAG"
+            fi
+            # The tag is untrusted and version.inc gave us nothing usable, so
+            # there is no record left to take a baseline from. Fall back to the
+            # newest release whose content this branch demonstrably holds — the
+            # same content test, which is the only thing here that has not been
+            # wrong about this branch.
+            if [ -z "$LAST_SYNCED" ]; then
+              LAST_SYNCED=$("$CONTENT" first-held "$("$CONTENT" base-below "$SYNC_SHA" 1)" || true)
+              if [ -n "$LAST_SYNCED" ]; then
+                echo "Baseline taken from content: $LAST_SYNCED is the newest release this branch holds"
+              else
+                LAST_SYNCED="v2.3.2-rc2"
+                echo "No usable record and no validated release; falling back to the bootstrap baseline"
+              fi
             fi
           else
             if [ -n "$VERSION_TAG" ] && [ "$VERSION_COMMIT" != "$SYNC_SHA" ]; then
@@ -292,6 +326,30 @@ jobs:
             fi
           fi
           git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+
+          # The content test, which is what the two checks above only approximate.
+          #
+          # Both of them ask an ANCESTRY question, and this fork squash-merges,
+          # so both are defeated by exactly the history they run against. That is
+          # survivable for a clean sync — the merged-tree comparison in `noop`
+          # catches it later. It is NOT survivable for a sync that CONFLICTED:
+          # the resolution branch is squash-merged too, the ancestor check misses
+          # it, the pre-graft trial merge conflicts against the wrong base, and
+          # `noop` never runs because `noop` only runs after a clean merge. So
+          # nothing would ever record that a resolved sync had landed, and the
+          # workflow would re-conflict and refresh the conflict issue every week
+          # for a sync that is already on the branch. That regression arrived
+          # with the removal of the PR-creation tag write, which had been
+          # covering for it.
+          #
+          # This asks the tree directly, so it is immune to the squash and covers
+          # the conflict path, the out-of-band merge, and the ordinary one alike.
+          if "$CONTENT" holds "$SYNC_SHA"; then
+            echo "Target $SYNC_LABEL is already present in this branch's content — updating tracking tag and skipping"
+            update_tracking_tag "$SYNC_SHA"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -381,92 +439,25 @@ jobs:
           # commit this branch does not hold, because it is advanced when a sync
           # PR is *created*, not when it is merged (see "Note pending sync").
           #
-          # So validate INHERITED content, and do it without merging. A path that
-          # upstream changed between BASE and the candidate, and that our tree
-          # still holds at exactly the BASE version, is a change we never applied.
-          # That is a set difference between two diffs:
+          # So validate INHERITED content, and compare TREES rather than names.
           #
-          #   changed upstream:  git diff --name-only BASE CANDIDATE
-          #   changed by us:     git diff --name-only BASE HEAD
-          #   never applied:     the first minus the second
+          # That work lives in scripts/helio/upstream_content.sh, shared with the
+          # `check` step above, so "does this branch hold release X?" has one
+          # implementation. It was inline here before, which is exactly why the
+          # check step could not use it and went on trusting the tracking tag.
           #
-          # A file upstream ADDED that we lack is in the first and not the second,
-          # so it is caught too. A file Helio deliberately modified is in both, so
-          # our own divergence never reads as a missing sync. No trial merge, so
-          # no conflict noise, no worktree mutation, and it costs two diffs rather
-          # than a merge per candidate — which is what makes a window of several
-          # releases affordable.
-          # Two releases is the minimum that closes the finding — the gap sits one
-          # release under the candidate, so the base has to start one release
-          # under THAT — and it is also the most that is safe to demand. A deeper
-          # window widens the diff being compared, and any upstream file Helio
-          # happens to hold at the older content (a deliberate revert, say) reads
-          # as "never applied" and rejects a base that was fine. That failure is
-          # loud rather than silent (warning, no graft, conflict) but it is a
-          # weekly treadmill, which is a regression this step has caused before.
-          CONTENT_DEPTH=2   # how many releases of inherited content to require
-          MAX_WALK=6        # how far to walk down before giving up on a graft
-
-          # base_below <ref> <n>: the nth release tag strictly older than <ref> on
-          # its ancestry; the oldest reachable if there are fewer than n; <ref>^1
-          # if there are no release tags at all. Empty only at the start of
-          # history.
-          #
-          # Ordered by ANCESTRY, via `git describe` on each successive parent.
-          # Sorting `git tag --merged` by creatordate looked equivalent and is
-          # not: tags sharing a timestamp come back in an arbitrary order, so the
-          # walk could return a base one release too NEW and hand back exactly the
-          # unvalidated base this function exists to reject.
-          base_below() {
-            local ref="$1" want="$2" c i p t last=""
-            c=$(git rev-parse "${ref}^{commit}")
-            for (( i=0; i<want; i++ )); do
-              p=$(git rev-parse -q --verify "${c}^1" 2>/dev/null || true)
-              [ -n "$p" ] || break
-              t=$(git describe --tags --abbrev=0 --match 'v*' "$p" 2>/dev/null || true)
-              [ -n "$t" ] || break
-              c=$(git rev-parse "refs/tags/$t^{commit}")
-              last="$c"
-            done
-            if [ -n "$last" ]; then echo "$last"; return 0; fi
-            git rev-parse -q --verify "${ref}^1" 2>/dev/null || true
-          }
-
-          MISSING_SAMPLE=""
-          # holds_content <candidate>: does this tree hold the candidate AND the
-          # releases it inherits from, back to CONTENT_DEPTH?
-          holds_content() {
-            local candidate="$1" base missing
-            base=$(base_below "$candidate" "$CONTENT_DEPTH")
-            # No older release and no parent: the start of history, so there is
-            # nothing underneath that could be missing.
-            [ -n "$base" ] || return 0
-            missing=$(comm -23 \
-              <(git diff --name-only "$base" "$candidate" | sort -u) \
-              <(git diff --name-only "$base" HEAD | sort -u))
-            [ -n "$missing" ] || return 0
-            MISSING_SAMPLE=$(printf '%s\n' "$missing" | head -5 | tr '\n' ' ')
-            return 1
-          }
-
-          # first_held <start>: the newest commit at or below <start> whose
-          # inherited content this tree holds. Walking down on failure matters —
-          # rejecting outright leaves no graft, and the merge then runs against
-          # the ancient pre-squash ancestor and conflicts, which is the treadmill
-          # a previous fix here created. An older base is only more expensive.
-          first_held() {
-            local c="$1" i
-            for (( i=0; i<MAX_WALK; i++ )); do
-              [ -n "$c" ] || return 1
-              if holds_content "$c"; then echo "$c"; return 0; fi
-              c=$(base_below "$c" 1)
-            done
-            return 1
-          }
+          # Comparing changed path NAMES is not enough either: if upstream edits
+          # one hunk of a file and Helio independently edits another hunk, the
+          # path appears on both sides and a name-level set difference cancels it
+          # out while upstream's hunk is genuinely absent. The script compares
+          # blob ids, and for the remainder where our blob matches neither side
+          # it runs a three-way merge to decide whether upstream's change is
+          # already in ours.
+          CONTENT="$GITHUB_WORKSPACE/scripts/helio/upstream_content.sh"
 
           # Candidates in preference order. Every one of them is a CLAIM about
-          # what this tree contains, and every one of them is now checked against
-          # the tree before it can steer the merge.
+          # what this tree contains, and every one of them is checked against the
+          # tree before it can steer the merge.
           PREV=""
           SELF_NAMED=false
           CANDS=()
@@ -510,16 +501,15 @@ jobs:
           if [ "${#CANDS[@]}" -gt 0 ]; then
             for idx in "${!CANDS[@]}"; do
               c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
-              MISSING_SAMPLE=""
-              if holds_content "$c"; then
+              if "$CONTENT" holds "$c"; then
                 PREV="$c"
                 echo "$d names $c and this tree holds its inherited content — using it as the merge base."
                 break
               fi
-              # Capture the reason before walking: first_held runs in a subshell,
-              # so anything it records in MISSING_SAMPLE would not survive.
-              rejected="$MISSING_SAMPLE"
-              held=$(first_held "$(base_below "$c" 1)" || true)
+              # Name the files, not just the verdict: "the tree does not hold
+              # v2.4.2" is not actionable, "src/mid.c was never applied" is.
+              rejected=$("$CONTENT" missing "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+              held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" || true)
               if [ -n "$held" ]; then
                 PREV="$held"
                 echo "::warning title=Records do not match the tree::$d names \`$c\`, but this tree does not hold that release's inherited content (never applied: ${rejected:-see log}). Using \`$held\` instead — the newest commit whose content is actually present. Grafting \`$c\` would make git read the missing changes as deliberate reversions and drop them from this sync. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
