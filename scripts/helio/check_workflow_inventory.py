@@ -536,7 +536,15 @@ def inherited_secret_grants(raw_text: str) -> set[str]:
 
 
 def environment_scoped_secrets(raw_text: str) -> set[str]:
-    """Secrets referenced by jobs that target a deployment environment.
+    """Secrets referenced ONLY by jobs that target a deployment environment.
+
+    "Only" is load-bearing. A secret referenced by an environment job *and* by
+    an ordinary job is definitively required from the repository or
+    organization, because the ordinary job has no environment to supply it —
+    so its absence is a real finding and must still escalate under
+    `--strict-secrets`. Returning every secret an environment job touches
+    downgraded those too, which is the same under-reporting this function was
+    introduced to fix, one level in.
 
     W3 is answered from repository- and organization-scoped secret names.
     Environment-scoped secrets live behind a third endpoint keyed by environment
@@ -561,9 +569,10 @@ def environment_scoped_secrets(raw_text: str) -> set[str]:
     if not isinstance(jobs, dict):
         return set()
 
-    scoped: set[str] = set()
+    in_environment: set[str] = set()
+    elsewhere: set[str] = set()
     for job_name, job in jobs.items():
-        if not isinstance(job, dict) or job.get("environment") is None:
+        if not isinstance(job, dict):
             continue
         # Re-serialise the single job and run the same extraction over it. Kept
         # under a `jobs:` mapping so `_condition_values` still recognises the
@@ -571,10 +580,17 @@ def environment_scoped_secrets(raw_text: str) -> set[str]:
         try:
             fragment = yaml.safe_dump({"jobs": {str(job_name): job}})
         except yaml.YAMLError:
-            continue
+            # A job that will not round-trip leaves this function unable to say
+            # which references belong where. Scoping nothing means every absent
+            # secret keeps escalating, which is the direction that reports too
+            # much rather than too little.
+            return set()
         job_secrets, _, _ = referenced(fragment)
-        scoped |= job_secrets
-    return scoped
+        if job.get("environment") is None:
+            elsewhere |= job_secrets
+        else:
+            in_environment |= job_secrets
+    return in_environment - elsewhere
 
 
 def configured_secret_names() -> set[str] | None:

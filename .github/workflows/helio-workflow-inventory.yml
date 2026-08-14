@@ -92,6 +92,32 @@ jobs:
   #      has no credentials.
   secret-names:
     name: Read configured secret names
+    # The `if:` below is NOT the control. A `workflow_dispatch` runs the
+    # workflow definition from the ref it was dispatched against, so a feature
+    # branch supplies this file — including this condition, which that branch
+    # can simply delete. Any same-repository branch can equally add a new
+    # push-triggered workflow that reads a repository secret directly. No
+    # in-file guard can protect a repository-scoped secret from someone with
+    # write access, because the file is the thing they control.
+    #
+    # The control is `environment:`. Environment protection rules live in
+    # repository settings, not in this file, so branch code cannot alter them.
+    # With WORKFLOW_INVENTORY_TOKEN stored as an ENVIRONMENT secret of
+    # `workflow-inventory`, and that environment's deployment-branch rule
+    # restricted to `orca-latest-parity-bambu`, a job running from any other ref
+    # does not receive it — whatever the workflow file says.
+    #
+    # REQUIRED ADMIN SETUP before W3 can do anything (Settings → Environments):
+    #   1. create environment `workflow-inventory`
+    #   2. set its deployment branches to `orca-latest-parity-bambu` only
+    #   3. add WORKFLOW_INVENTORY_TOKEN as an *environment* secret there,
+    #      not a repository secret
+    # Until then the token resolves empty, the step skips, and W3 stays dormant
+    # — the current state, so this change is inert until someone configures it.
+    # A repository-scoped secret of the same name would still work here and
+    # would still be branch-reachable; the point of step 3 is that it must not
+    # be one.
+    environment: workflow-inventory
     if: >-
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/orca-latest-parity-bambu'

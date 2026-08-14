@@ -228,6 +228,23 @@ MIXED = (
 )
 check("environment scoping is per job, not per workflow",
       sorted(cwi.environment_scoped_secrets(MIXED)), ["ENV_ONLY"])
+
+# A secret referenced by an environment job AND an ordinary job is definitively
+# required from the repo/org — the ordinary job has no environment to supply it.
+# Returning every secret an env job touches downgraded those too, so a missing
+# shared secret still exited 0 under --strict-secrets.
+SHARED = (
+    "name: t\non: push\njobs:\n"
+    "  deploy:\n    runs-on: ubuntu-latest\n    environment: prod\n"
+    "    steps:\n      - run: echo\n        env:\n"
+    "          A: ${{ secrets.SHARED }}\n          B: ${{ secrets.ENV_ONLY }}\n"
+    "  plain:\n    runs-on: ubuntu-latest\n"
+    "    steps:\n      - run: echo\n        env:\n"
+    "          C: ${{ secrets.SHARED }}\n"
+)
+check("a secret used by BOTH an env job and an ordinary job is not scoped away",
+      sorted(cwi.environment_scoped_secrets(SHARED)), ["ENV_ONLY"])
+
 check("a workflow with no environment scopes nothing",
       sorted(cwi.environment_scoped_secrets(
           wf("        env:\n          A: ${{ secrets.PLAIN }}\n"))), [])
