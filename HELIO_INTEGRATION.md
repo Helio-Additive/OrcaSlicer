@@ -403,6 +403,51 @@ Do **not** blanket "take upstream" on docs the way you would for upstream-owned
 data files (e.g. `resources/profiles/*.json`). If upstream adds a genuinely useful
 branding-neutral note, port just that note into the Helio wording by hand.
 
+### Rule 14: Inherited CI Trigger Filters (branch & path)
+
+> Numbered 14 to leave room for PR #106, which introduces Rule 12 (workflow
+> inventory manifest) and Rule 13 (profiles taken verbatim). This rule is the
+> *reachability* complement to Rule 12: the manifest records whether an inherited
+> workflow **should** run here, this rule covers whether it **can**.
+
+Upstream workflows are written for **upstream's** branch layout: they gate on
+`branches: [main]` (plus `release/*`). This fork's release branch is
+`orca-latest-parity-bambu`, so an inherited workflow is **silently inert here**
+unless someone adds that branch to its filter. Nothing fails — the workflow simply
+never starts, which is far harder to notice than a red check.
+
+When a sync adds or edits a workflow with a `pull_request` / `push` trigger, check
+both filters:
+
+| filter | failure mode if wrong |
+| --- | --- |
+| `branches:` | workflow never runs on this fork's PRs at all |
+| `paths:` | workflow never runs for the file types you care about |
+
+**`paths:` is evaluated before any job-level `if:`.** This matters for the
+`ready-to-build` opt-in on `build_all.yml`: a label cannot start a workflow that the
+path filter excluded, so a profile-only PR carrying `ready-to-build` produced no build
+at all until `resources/**` and `localization/**` were added to the `pull_request`
+`paths:` list (they were already in the `push` list — the asymmetry was the bug).
+
+**Currently inert on this fork — needs an owner decision, do not just flip the branch:**
+
+- `check_profiles.yml` — `branches: [main]`. Profile validation has never run on a PR
+  here. It downloads the **nightly** validator from upstream `main`, but this fork is
+  pinned to v2.4.2, so it currently **fails on inherited data**: `Qidi/process/
+  fdm_process_n_common.json` and `Qidi/machine/fdm_qidi_x3_common.json` carry
+  `machine_prepare_compensation_time` and the `filament_dev_ams_drying_*` keys, which
+  are absent from this fork's own `PrintConfig.cpp`. Every touch of those files came
+  from an upstream sync — this is inherited skew, not Helio drift. Enabling the
+  workflow as-is would red-light every profile PR on day one. Pin the validator to the
+  matching release (or scope it to changed vendors) first.
+- `check_locale.yml` — `branches: [main]`. Translation checks never run here either.
+- `check_profiles_comment.yml` — triggers on `workflow_run` of "Check profiles", so it
+  is dead for as long as `check_profiles.yml` is.
+
+`scripts/orca_extra_profile_check.py` **does** pass on the parity branch today
+(0 errors, exit 0), so that half could be enabled independently of the validator.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a

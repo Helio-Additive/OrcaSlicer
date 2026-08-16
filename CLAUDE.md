@@ -42,8 +42,35 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 - Dependency caching per OS/arch with hash of `deps/**`
 
 ### Build All (`build_all.yml`)
-- Triggers on push/PR to `main` and `release/*` branches
+- Triggers on push/PR to `main`, `release/*` and `orca-latest-parity-bambu`
 - Runs full build matrix + unit tests + Flatpak builds
+- **On `orca-latest-parity-bambu`, PR builds are opt-in**: every job carries an `if:`
+  requiring the PR to have the `ready-to-build` label. PRs to `main` / `release/*` are
+  not label-gated. This is how a reviewer asks for build artifacts on a parity PR.
+- **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
+  the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
+  never starts the workflow at all and the `ready-to-build` label does nothing — the
+  label cannot re-trigger a workflow that was filtered out. Keep the `pull_request`
+  `paths:` list a superset of anything a reviewer might want built; it previously omitted
+  `resources/**` and `localization/**` (which the `push` filter already had), which left
+  the label inert on profile-only and translation-only PRs.
+- Adding those paths does **not** make profile syncs build automatically — the label gate
+  still skips every job on an unlabelled parity-branch PR. Widening `paths:` only changes
+  whether the workflow *starts*; the label decides whether it *builds*.
+
+### Profile & locale validation — inactive on this fork
+`check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
+`pull_request: branches: [main]`. This fork's PRs target `orca-latest-parity-bambu`, so
+**neither has ever run on a PR here**, and `check_profiles_comment.yml` (which reports
+results via `workflow_run` on "Check profiles") is dead along with them.
+
+Do not simply add the parity branch to those filters: as of v2.4.2 the inherited profile
+data does not pass the validator the workflow downloads. `check_profiles.yml` fetches the
+**nightly** validator built from upstream `main`, while this fork is pinned to the v2.4.2
+release, so the validator rejects keys that were valid at v2.4.2 and removed later
+(`machine_prepare_compensation_time`, the `filament_dev_ams_drying_*` family). Turning the
+workflow on unchanged would fail every profile PR immediately. Pinning the validator to the
+matching release, or scoping validation to changed vendors, has to be decided first.
 
 ## Git Workflow
 - **Base branch**: `orca-latest-parity-bambu` (not `main`)

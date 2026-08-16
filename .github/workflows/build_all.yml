@@ -33,6 +33,18 @@ on:
      - 'build_release_vs2022.bat'
      - 'build_release_macos.sh'
      - 'scripts/flatpak/**'
+     # Helio: data-only paths, present in the `push` filter above but historically
+     # absent here. Without them a PR touching only profiles or translations never
+     # triggers this workflow, so applying `ready-to-build` to such a PR is silently
+     # inert (see PR #109, which had to be built by manual dispatch instead).
+     #
+     # This does NOT make profile syncs build automatically: every job below is
+     # gated on `contains(labels.*.name, 'ready-to-build')` for PRs whose base is
+     # `orca-latest-parity-bambu`, so an unlabelled profile sync still skips. The
+     # one real widening is a resources-only PR targeting `main` / `release/*`,
+     # which is not label-gated — this fork opens no such PRs.
+     - 'localization/**'
+     - 'resources/**'
 
 
   schedule:
