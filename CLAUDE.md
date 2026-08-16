@@ -56,7 +56,9 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
   the label inert on profile-only and translation-only PRs.
 - Adding those paths does **not** make profile syncs build automatically — the label gate
   still skips every job on an unlabelled parity-branch PR. Widening `paths:` only changes
-  whether the workflow *starts*; the label decides whether it *builds*.
+  whether the workflow *starts*; the label decides whether it *builds*. The exception is
+  PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
+  translation-only PR to those branches now builds the full matrix. This fork opens none.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare

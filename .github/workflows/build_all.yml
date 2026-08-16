@@ -40,9 +40,12 @@ on:
      #
      # This does NOT make profile syncs build automatically: every job below is
      # gated on `contains(labels.*.name, 'ready-to-build')` for PRs whose base is
-     # `orca-latest-parity-bambu`, so an unlabelled profile sync still skips. The
-     # one real widening is a resources-only PR targeting `main` / `release/*`,
-     # which is not label-gated — this fork opens no such PRs.
+     # `orca-latest-parity-bambu`, so an unlabelled profile sync still skips.
+     #
+     # The one real widening is a PR touching only these two paths that targets
+     # `main` / `release/*` — either profiles or translations, on `opened`,
+     # `synchronize` and `reopened` alike — because those bases are not
+     # label-gated. This fork opens no PRs to those branches.
      - 'localization/**'
      - 'resources/**'
 
