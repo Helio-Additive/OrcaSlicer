@@ -547,9 +547,17 @@ Two rules keep that true, and both are load-bearing:
    | neither, merge is clean and leaves ours alone | held |
    | neither, merge conflicts | **unknown** |
 
-   Mode is part of the comparison, not just the blob. A path whose only change
-   is `100644` → `100755` has identical blob ids on both sides, so a blob-only
-   test reports nothing and the executable bit is dropped from the sync for good.
+   Mode is part of the comparison, not just the blob, and it is decided **before**
+   the three-way merge rather than inside it. A path whose only change is
+   `100644` → `100755` has identical blob ids on both sides, so a blob-only test
+   reports nothing and the executable bit is dropped from the sync for good.
+   Comparing blob-and-mode together closes that case but not the next one: if
+   upstream changes only the mode while Helio independently edits the blob, the
+   composite values differ for a reason unrelated to the mode, and the text merge
+   — which is handed blob ids and cannot see modes at all — finds upstream's blob
+   equal to the base's, leaves ours alone and answers *held*. So the rule is
+   applied first and separately: upstream moved the mode and we are still at the
+   base's mode, therefore we never received it, whatever the blobs then say.
 
    **`unknown` is a third answer, and the two callers lean opposite ways on it.**
    A conflict cannot distinguish "we have upstream's change with our edit on top"
@@ -558,13 +566,36 @@ Two rules keep that true, and both are load-bearing:
    | question | caller | `unknown` means |
    | --- | --- | --- |
    | is the sync already done? | `holds`, in `check` | **not** done — do not skip |
-   | is this safe as a merge base? | `base-ok`, in `graft` | tolerated — still graft |
+   | is this safe as a merge base? | `base-ok`, in `graft` | tolerated — but only as a last resort |
 
    Guessing *yes* on the first skips a release silently. Guessing *no* on the
    second leaves no graft, and the merge then runs against the ancient
    pre-squash ancestor and conflicts every week. Collapsing the two was a real
    bug: the conflict case was reasoned about for the graft base, then the same
    function was reused for the skip decision, where the safe direction inverts.
+
+   **Tolerated is not the same as preferred**, and that distinction was itself a
+   bug for two rounds. The argument above is sound about *rejecting* an
+   undecidable candidate and unsound about *accepting* one, because an
+   undecidable path in the **base** is the single shape that drops upstream work
+   with no conflict at all: if the base already carries upstream's value for that
+   path and the sync target has not moved it since, the merge sees
+   `theirs == base`, keeps ours, and nothing is reported. So `graft` takes a
+   candidate outright only when `holds` passes. A candidate that is merely
+   `base-ok` sends the run looking for a provably-held base *below* it
+   (`first-held … strict`), where the same paths are still in motion and the
+   merge must therefore present them — as a change applied or as a conflict,
+   either way visible. Only when no such base exists within `MAX_WALK` steps is
+   the undecidable candidate used, and then the run says so and names the paths.
+   Preferring an older base costs conflict volume, which is the direction this
+   whole mechanism chooses everywhere else.
+
+   `MAX_WALK` and `CONTENT_DEPTH` are set in the `check` and `graft` steps' own
+   `env:` blocks, not only inside `upstream_content.sh`. The script runs as a
+   separate process, so a value defined only there is invisible to the workflow's
+   shell — and the graft step interpolates `$MAX_WALK` into its rejection
+   warning under `set -u`, where an unset variable aborts the step instead of
+   warning and carrying on.
 
    Candidates are ordered by **ancestry** (`git describe` on each successive
    parent), not by tag date — tags sharing a timestamp sort arbitrarily, and a
