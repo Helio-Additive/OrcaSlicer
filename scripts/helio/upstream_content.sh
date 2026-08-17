@@ -21,7 +21,9 @@
 #   unknown <candidate>    paths where presence cannot be decided from content
 #   holds <candidate>      exit 0 only if nothing is missing AND nothing unknown
 #   base-ok <candidate>    exit 0 if nothing is missing (unknown tolerated)
-#   first-held <start>     newest commit at or below <start> usable as a base
+#   first-held <start> [strict]
+#                          newest commit at or below <start> usable as a base;
+#                          `strict` demands `holds`, the default `base-ok`
 #
 # `holds` and `base-ok` differ on purpose, because the two callers need opposite
 # treatment of "cannot tell":
@@ -194,9 +196,25 @@ classify_paths() {
     ours="${OURS[$path]:-$orig}"
     if [ "$theirs" = "$ours" ]; then continue; fi                        # held
     if [ "$ours" = "$orig" ]; then printf 'missing\t%s\n' "$path"; continue; fi
-    # All three differ: only looking inside the file can decide, and it may not
-    # be able to. Mode-only divergence is not something a text merge can rule
-    # on either, so it stays undecided rather than being called held.
+    # MODE FIRST, before the text merge, because the text merge cannot see modes
+    # and answers `held` for a mode change that is genuinely absent.
+    #
+    # Upstream flips 100644 -> 100755 and changes nothing else, while Helio
+    # independently edits the blob. All three composite values then differ, so we
+    # reach here — but `_change_state` is handed blob ids only, and upstream's
+    # blob equals the base's, so the three-way merge leaves our blob alone and
+    # returns `held`. `holds` succeeds and the executable bit is dropped from the
+    # sync for good. Comparing the composite values (added for the mode-ONLY
+    # case) does not catch this one: our blob diverges too, so the composites
+    # differ for a reason that has nothing to do with the mode.
+    #
+    # So decide the mode separately: upstream moved it and we are still sitting
+    # at the base's mode, therefore we never received that change. Whatever the
+    # blobs then say cannot make it present.
+    if [ "${theirs%% *}" != "${orig%% *}" ] && [ "${ours%% *}" = "${orig%% *}" ]; then
+      printf 'missing\t%s\n' "$path"; continue
+    fi
+    # Blobs. Only looking inside the file can decide, and it may not be able to.
     case "$(_change_state "${orig#* }" "${ours#* }" "${theirs#* }")" in
       absent)  printf 'missing\t%s\n' "$path" ;;
       unknown) printf 'unknown\t%s\n' "$path" ;;
@@ -227,16 +245,32 @@ base_ok() {
   [ -z "$(missing_paths "$base" "$candidate")" ]
 }
 
-# first_held <start>: the newest commit at or below <start> usable as a merge
-# base — permissive, so an undecidable path does not cost the graft. Walking down on failure matters — rejecting outright leaves no
-# graft, and the merge then runs against the ancient pre-squash ancestor and
-# conflicts, which is a treadmill this workflow has produced before. A base that
-# is too old only costs conflict volume; one that is too new drops work silently.
+# first_held <start> [strict]: the newest commit at or below <start> usable as a
+# merge base.
+#
+# Walking down on failure matters — rejecting outright leaves no graft, and the
+# merge then runs against the ancient pre-squash ancestor and conflicts, which is
+# a treadmill this workflow has produced before. A base that is too old only
+# costs conflict volume; one that is too new drops work silently.
+#
+# Default is permissive (`base_ok`), so an undecidable path does not cost the
+# graft entirely. `strict` uses `holds_content`, and exists for the caller that
+# wants a base carrying nothing undecidable at all: an undecidable path in the
+# BASE is the one shape that drops upstream work without a conflict, because if
+# the base already carries upstream's value and the target has not moved it
+# since, the three-way merge sees theirs == base and silently keeps ours.
 first_held() {
-  local c="$1" i
+  local c mode="${2:-permissive}" i
+  # Normalise to a commit id so the answer does not depend on whether the caller
+  # passed a tag or a sha — this value is echoed into warnings and grafted.
+  c=$(git rev-parse -q --verify "${1:-}^{commit}" 2>/dev/null || true)
   for (( i=0; i<MAX_WALK; i++ )); do
     [ -n "$c" ] || return 1
-    if base_ok "$c"; then echo "$c"; return 0; fi
+    if [ "$mode" = "strict" ]; then
+      if holds_content "$c"; then echo "$c"; return 0; fi
+    elif base_ok "$c"; then
+      echo "$c"; return 0
+    fi
     c=$(base_below "$c" 1)
   done
   return 1
@@ -248,6 +282,6 @@ case "${1:-}" in
   unknown)    unknown_paths "$(base_below "$2")" "$2" ;;
   holds)      holds_content "$2" ;;
   base-ok)    base_ok "$2" ;;
-  first-held) first_held "$2" ;;
+  first-held) first_held "$2" "${3:-}" ;;
   *) echo "usage: $0 {base-below|missing|unknown|holds|base-ok|first-held} <ref>" >&2; exit 2 ;;
 esac

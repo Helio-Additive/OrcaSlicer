@@ -118,6 +118,9 @@ jobs:
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          # Same value as the graft step: this step also calls `first-held`, and
+          # the two must not walk different distances.
+          MAX_WALK: '6'
         run: |
           # Shared with the `graft` step below, so "does this branch hold
           # release X?" has one implementation rather than two that drift.
@@ -389,6 +392,15 @@ jobs:
         env:
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          # Set HERE, not only in upstream_content.sh. The script's
+          # `MAX_WALK="${MAX_WALK:-6}"` initialises the variable in the script's
+          # OWN process; this step's shell is a different process and never sees
+          # it. The rejection warning below interpolates $MAX_WALK, and under
+          # `set -u` an unset variable there aborts the step — turning "warn and
+          # carry on without a graft" into a failed run. Exporting it from the
+          # step also keeps the number the walk uses and the number the warning
+          # quotes to a single source.
+          MAX_WALK: '6'
         run: |
           set -euo pipefail
           TIP=$(git rev-parse HEAD)
@@ -501,13 +513,42 @@ jobs:
           if [ "${#CANDS[@]}" -gt 0 ]; then
             for idx in "${!CANDS[@]}"; do
               c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
-              # base-ok, not holds: an undecidable path must not cost the
-              # graft. The skip decision in `check` uses the strict form.
-              if "$CONTENT" base-ok "$c"; then
+
+              # 1. Nothing missing AND nothing undecidable. Take it.
+              if "$CONTENT" holds "$c"; then
                 PREV="$c"
                 echo "$d names $c and this tree holds its inherited content — using it as the merge base."
                 break
               fi
+
+              # 2. Nothing DEFINITIVELY missing, but some paths cannot be decided
+              #    from content (Helio's edit overlaps upstream's in the same
+              #    region, so the three-way merge conflicts and proves nothing).
+              #
+              #    `base-ok` used to accept this outright, on the reasoning that
+              #    a wrong rejection only costs conflict volume. That reasoning
+              #    is right about REJECTING and wrong about ACCEPTING: an
+              #    undecidable path in the BASE is exactly the shape that drops
+              #    upstream work without a conflict. If the base already carries
+              #    upstream's value for that path and the sync target has not
+              #    moved it since, the merge sees theirs == base, keeps ours, and
+              #    nobody is told. Prefer an older base where the path is still
+              #    in motion, so the merge either applies upstream's change or
+              #    conflicts — either way it is visible.
+              if "$CONTENT" base-ok "$c"; then
+                undecided=$("$CONTENT" unknown "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                clean=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
+                if [ -n "$clean" ]; then
+                  PREV="$clean"
+                  echo "::notice title=Using an older merge base::$d names \`$c\`, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content. Using \`$clean\` instead — the newest release below it whose content is provably present — so those paths are still presented by the merge instead of being resolved in Helio's favour in silence. This costs conflict volume; grafting \`$c\` would cost upstream changes without saying so."
+                  break
+                fi
+                PREV="$c"
+                echo "::warning title=Merge base accepted with undecidable paths::$d names \`$c\` and nothing is definitively missing, but ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps below it. Using it anyway, because leaving no graft conflicts against the pre-squash ancestor on every run — but if upstream changed those paths at or below \`$c\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
+                break
+              fi
+
+              # 3. Content definitively missing.
               # Name the files, not just the verdict: "the tree does not hold
               # v2.4.2" is not actionable, "src/mid.c was never applied" is.
               rejected=$("$CONTENT" missing "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
@@ -604,7 +645,14 @@ jobs:
           echo "noop=true" >> "$GITHUB_OUTPUT"
           echo "The merge of $SYNC_LABEL produced a tree identical to the target branch — its content is already incorporated. Not opening a PR."
 
-          git tag -f "$TRACKING_TAG" "$SYNC_SHA"
+          # `noop=true` is already written above, deliberately: the four
+          # downstream steps gate on it, and they must skip whatever happens to
+          # the tag. The tag write itself is guarded too — under the Actions
+          # default `-e` an unguarded `git tag -f` failing here would fail the
+          # job for a run whose conclusion ("nothing to do") was already correct
+          # and already recorded.
+          git tag -f "$TRACKING_TAG" "$SYNC_SHA" || \
+            echo "::warning title=Tracking tag not updated::Could not write $TRACKING_TAG locally."
           if git push origin "refs/tags/$TRACKING_TAG" --force; then
             TAG_NOTE="Tracking tag \`$TRACKING_TAG\` advanced to \`$SYNC_SHA\`."
           else

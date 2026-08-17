@@ -447,10 +447,9 @@ test for "have we got this release already?" reasons about **ancestry** — is t
 target an ancestor of `HEAD`, does a trial merge apply cleanly — and ancestry is
 precisely what the squash destroyed. In August 2026 that produced #107: an empty
 PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
-have recurred every Monday (#110). The workflow now answers the question three
-ways, cheapest first, none of which depend on ancestry:
-
-There are **four** guards, and only the last is authoritative:
+have recurred every Monday (#110). The workflow now answers the question with
+**four** guards, cheapest first. Two of them still reason about ancestry and are
+kept only as cheap early exits; the authoritative one does not:
 
 | guard | when | basis | can it skip on its own? |
 | --- | --- | --- | --- |

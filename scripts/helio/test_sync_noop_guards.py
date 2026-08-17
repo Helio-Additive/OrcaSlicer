@@ -21,6 +21,15 @@ MAP: dict[str, str] = {}
 
 
 def step_body(name):
+    """Return (script, literal_env) for a step.
+
+    literal_env is the step's own `env:` entries that are plain values rather
+    than `${{ }}` expressions — MAX_WALK is one. Reading them from the workflow
+    instead of hardcoding them here is what makes the harness catch their
+    removal: the graft step's rejection warning interpolates $MAX_WALK under
+    `set -u`, so dropping it from the workflow env aborts the step, and the
+    scenarios then fail on the step status rather than passing anyway.
+    """
     wf = yaml.safe_load(open(WF))
     for s in wf["jobs"]["sync"]["steps"]:
         if s.get("name") == name:
@@ -30,12 +39,15 @@ def step_body(name):
                 if key in MAP:
                     return "${%s}" % MAP[key]
                 raise SystemExit("unmapped expression in %r: %s" % (name, key))
-            return EXPR.sub(sub, body)  # no-op once every input arrives via env
+            literal = {k: str(v) for k, v in (s.get("env") or {}).items()
+                       if not EXPR.search(str(v))}
+            # no-op once every input arrives via env
+            return EXPR.sub(sub, body), literal
     raise SystemExit("step not found: " + name)
 
 
-CHECK = step_body("Check if already synced")
-GRAFT = step_body("Establish correct merge base (ephemeral graft)")
+CHECK, CHECK_ENV = step_body("Check if already synced")
+GRAFT, GRAFT_ENV = step_body("Establish correct merge base (ephemeral graft)")
 
 
 CONTENT_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -80,7 +92,7 @@ def git(repo, *args):
 
 def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
           new_release=False, no_tag=False, fork_at=None, tag_at=None,
-          chain=None):
+          chain=None, target_tag=None):
     """Fork repo whose profile tree holds v2.4.2 via a SQUASHED commit.
 
     `chain` selects an alternative upstream shape for the round-5 findings. Both
@@ -145,6 +157,25 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         sh("git tag v2.4.1", up)
         commit("2.4.2", {"src/core.c": "int main(){return 0;}\n"})
         sh("git tag v2.4.2", up)
+    elif chain == "deep":
+        # Nine releases, and the fork holds only the bottom one. Every candidate
+        # is definitively missing content AND so is every one of the MAX_WALK=6
+        # steps below it, so `first-held` returns nothing and the graft step
+        # reaches its LAST branch — the "no validated older base" warning.
+        #
+        # Nothing else here reaches that branch, which is how `$MAX_WALK` came to
+        # be interpolated into it while only ever being set inside
+        # upstream_content.sh's own process: under `set -u` that aborts the step
+        # instead of warning and carrying on.
+        commit("2.4.0", {"version.inc": verinc("2.4.0"), "src/core.c": "int main(){}\n"})
+        sh("git tag v2.4.0", up)
+        v241 = git(up, "rev-parse", "HEAD")
+        for n in range(1, 9):
+            commit("2.4.%d" % n, {"version.inc": verinc("2.4.%d" % n),
+                                  "src/only_in_24%d.c" % n: "// only v2.4.%d\n" % n})
+            sh("git tag v2.4.%d" % n, up)
+            if n == 1:
+                v241 = git(up, "rev-parse", "HEAD")
     elif chain == "stale":
         # version.inc is written once and never touched again, so the fork's copy
         # agrees with upstream at every release and the merge cannot conflict on
@@ -207,7 +238,7 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
     install_content_script(fork)
     sh("git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --force", fork)
 
-    target = "v2.4.3" if (bump_ahead or new_release) else "v2.4.2"
+    target = target_tag or ("v2.4.3" if (bump_ahead or new_release) else "v2.4.2")
     sync_sha = git(fork, "rev-list", "-n1", target)
     if no_tag:
         sh("git tag -d helio-last-synced 2>/dev/null || true", fork)
@@ -226,6 +257,7 @@ def run_check(fork, target, sync_sha):
         "GITHUB_OUTPUT": outfile, "GITHUB_STEP_SUMMARY": outfile + ".sum",
         "GITHUB_WORKSPACE": fork,
     }
+    env.update(CHECK_ENV)
     p = sh(CHECK, fork, env, check=False)
     out = dict(l.split("=", 1) for l in open(outfile).read().splitlines() if "=" in l)
     return p, out
@@ -240,6 +272,7 @@ def run_graft_and_merge(fork, target, sync_sha):
         "GITHUB_OUTPUT": outfile,
         "GITHUB_WORKSPACE": fork,
     }
+    env.update(GRAFT_ENV)
     p = sh(GRAFT, fork, env, check=False)
     gout = dict(l.split("=", 1) for l in open(outfile).read().splitlines() if "=" in l)
     pre_merge = git(fork, "rev-parse", "HEAD")
@@ -265,17 +298,33 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
         fork, target, sync_sha = build(tmp, **kw)
         cp, out = run_check(fork, target, sync_sha)
         ok_files = True
+        ok_steps = cp.returncode == 0
         skip = out.get("skip") == "true"
         results = ["check.skip=%s (exit %d)" % (skip, cp.returncode)]
+        if not ok_steps:
+            results.append("check STEP FAILED -> Actions would stop here")
+            FAILURES.append(name + " / check step exit %d" % cp.returncode)
+        gp = None
         noop = None
         if not skip:
             gp, gout, status, noop = run_graft_and_merge(fork, target, sync_sha)
+            # A nonzero graft step is a FAILED RUN on Actions: the job stops and
+            # never reaches the merge. Ignoring it here let an aborted graft be
+            # followed by an ungrafted merge whose conflict was then scored as
+            # "conflict -> safe" and printed as a PASS, so a scenario could go
+            # green for a step that never ran.
+            if gp.returncode != 0:
+                ok_steps = False
+                results.append("graft STEP FAILED (exit %d) -> Actions would stop here" % gp.returncode)
+                FAILURES.append(name + " / graft step exit %d" % gp.returncode)
             if gout.get("prev_upstream"):
                 results.append("base=%s" % gout["prev_upstream"][:8])
             results.append("grafted=%s" % gout.get("grafted"))
             results.append("merge=%s" % status)
             results.append("noop=%s" % noop)
-            if no_silent_drop and status == "conflict":
+            # ok_steps guards this: a conflict is only "safe" when it is the
+            # conflict Actions would actually have reached.
+            if ok_steps and no_silent_drop and status == "conflict":
                 results.append("conflict -> safe (human resolves, nothing claimed)")
                 print("  PASS  " + name)
                 print("        " + " | ".join(results))
@@ -299,12 +348,18 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
                     results.append("MISSING -> content silently dropped")
                     ok_files = False
                     FAILURES.append(name + " / " + want)
-        ok = (skip == expect_skip) and (noop == expect_noop) and ok_files
+        ok = (skip == expect_skip) and (noop == expect_noop) and ok_files and ok_steps
         print(("  PASS  " if ok else "  FAIL  ") + name)
         print("        " + " | ".join(results))
         if not ok:
             print("        expected skip=%s noop=%s" % (expect_skip, expect_noop))
             print(cp.stdout[-1500:])
+            # The graft step's output, not just the check step's: when a
+            # scenario fails at the graft stage, printing only `check` shows the
+            # step that worked.
+            if gp is not None:
+                print(gp.stdout[-1500:])
+                print(gp.stderr[-1500:])
         return ok
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -430,7 +485,8 @@ r.append(scenario(
 print("\nupstream_content.sh — the three-way boundary\n")
 
 
-def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False):
+def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
+                 mode_and_blob=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
@@ -455,8 +511,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False):
                "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\nrc%d\n" % n)
             sh("git add -A && git commit -q -m %s && git tag %s" % (rc, rc), up)
 
-    if mode_only:
-        # ONLY the mode changes: identical blob on both sides.
+    if mode_only or mode_and_blob:
+        # ONLY the mode changes upstream: identical blob on both sides. With
+        # mode_and_blob the FORK then edits the blob independently (below), so
+        # all three composite mode/blob values differ and the composite
+        # comparison added for mode_only no longer catches it — the text merge
+        # sees theirs == base, leaves our blob alone and answers `held`.
         os.chmod(os.path.join(up, "tool.sh"), 0o755)
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
     elif overlap:
@@ -475,6 +535,11 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False):
     if overlap:
         cfg = os.path.join(fork, "cfg.ini")
         open(cfg, "w").write(open(cfg).read().replace("k5=v5", "k5=helio"))
+    if mode_and_blob:
+        # Helio edits the file's CONTENT while leaving the mode at 100644.
+        tool = os.path.join(fork, "tool.sh")
+        open(tool, "w").write("#!/bin/sh\necho helio\n")
+        os.chmod(tool, 0o644)
     sh("git add -A && git commit -q -m squashed", fork)
     sh("git fetch -q origin '+refs/tags/*:refs/tags/*' --force", fork)
     install_content_script(fork)
@@ -486,7 +551,7 @@ def content(fork, *args):
 
 
 def boundary(label, *, kw, cmd, want_rc=None, want_out=None, want_empty=False,
-             want_v240=False):
+             want_v240=False, want_not_v240=False):
     tmp = tempfile.mkdtemp()
     try:
         fork, v240 = content_repo(tmp, **kw)
@@ -505,6 +570,13 @@ def boundary(label, *, kw, cmd, want_rc=None, want_out=None, want_empty=False,
         if want_v240:
             detail += " v2.4.0=%s" % v240[:8]
             if got != v240:
+                ok = False
+        # "stopped somewhere newer than v2.4.0" — the permissive counterpart to
+        # want_v240, so the pair actually asserts the two forms DISAGREE rather
+        # than both merely exiting 0.
+        if want_not_v240:
+            detail += " v2.4.0=%s" % v240[:8]
+            if got == v240 or got == "":
                 ok = False
         print(("  PASS  " if ok else "  FAIL  ") + label)
         print("        " + detail)
@@ -547,7 +619,51 @@ b.append(boundary("base_below skips prerelease tags and lands on v2.4.0",
                   kw=dict(prereleases=True), cmd=["base-below", "v2.4.1", "1"],
                   want_v240=True))
 
+# Round 7, Codex P2. Upstream changes ONLY the mode while Helio independently
+# edits the blob. All three composite values then differ, so the composite
+# comparison added for the mode-only case does not fire, and the text merge --
+# handed blob ids with the modes stripped -- sees theirs == base, leaves our
+# blob alone and answers `held`. The executable bit is dropped for good and
+# `holds` reports the release as already synced.
+b.append(boundary("mode change + INDEPENDENT blob edit is reported missing",
+                  kw=dict(mode_and_blob=True), cmd=["missing", "v2.4.1"],
+                  want_out="tool.sh"))
+b.append(boundary("mode change + independent blob edit means NOT already-synced",
+                  kw=dict(mode_and_blob=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
+# Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
+# undecidable paths, so the graft lands on a base where those paths are still in
+# motion and the merge has to present them. The permissive form must still stop
+# at the same candidate, because that is what keeps a graft from being lost
+# entirely -- the two forms disagreeing here is the whole point.
+b.append(boundary("`first-held strict` walks past an undecidable candidate to v2.4.0",
+                  kw=dict(overlap=True), cmd=["first-held", "v2.4.1", "strict"],
+                  want_v240=True))
+b.append(boundary("`first-held` (permissive) still stops at the undecidable candidate",
+                  kw=dict(overlap=True), cmd=["first-held", "v2.4.1"],
+                  want_rc=0, want_not_v240=True))
+
 r += b
 
+# Round 7, CodeRabbit. Reaches the LAST branch of the graft step's candidate
+# loop — every candidate rejected AND no validated base within MAX_WALK steps
+# below it. Nothing else in this file got there, which is how a `$MAX_WALK` that
+# only ever existed inside upstream_content.sh's own process survived review: in
+# the workflow's shell, under `set -u`, it aborts the step instead of warning.
+# The value now comes from the step's `env:` block, read out of the workflow by
+# step_body, so deleting it there fails this scenario rather than going unseen.
+r.append(scenario(
+    "CODERABBIT: every graft candidate rejected and no validated base within the"
+    " walk -> warn and continue, do not abort the step",
+    expect_skip=False, expect_noop=None,
+    version="2.4.7", chain="deep", fork_at="v2.4.0", tag_at="v2.4.7",
+    target_tag="v2.4.8", no_silent_drop=True))
+
 print("\n%d/%d passed" % (sum(r), len(r)))
+if FAILURES:
+    # FAILURES was collected and never printed, so a run that failed showed the
+    # count but not what to look at.
+    print("\nfailed:")
+    for f in FAILURES:
+        print("  - " + f)
 sys.exit(0 if all(r) else 1)
