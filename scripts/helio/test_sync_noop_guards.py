@@ -287,7 +287,8 @@ def run_graft_and_merge(fork, target, sync_sha):
 
 
 def scenario(name, expect_skip, expect_noop, expect_file=None,
-             no_silent_drop=False, expect_text=None, expect_file_extra=None, **kw):
+             no_silent_drop=False, expect_text=None, expect_file_extra=None,
+             expect_graft_warning=None, **kw):
     """no_silent_drop: pass if the merge conflicts (safe — a human resolves it)
     OR completes cleanly with every expected file present. Fail only on the
     dangerous combination: a clean merge that quietly omits upstream content."""
@@ -322,9 +323,20 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
             results.append("grafted=%s" % gout.get("grafted"))
             results.append("merge=%s" % status)
             results.append("noop=%s" % noop)
+            # Asserting the WARNING TEXT, not just that the step survived.
+            # Without it this scenario passes for any route through the loop,
+            # including one that never reaches the branch it exists to cover.
+            if expect_graft_warning:
+                blob = gp.stdout + gp.stderr
+                got = expect_graft_warning in blob
+                results.append("graft warns %r=%s" % (expect_graft_warning, got))
+                if not got:
+                    results.append("MISSING -> did not reach the intended branch")
+                    ok_files = False
+                    FAILURES.append(name + " / graft warning")
             # ok_steps guards this: a conflict is only "safe" when it is the
             # conflict Actions would actually have reached.
-            if ok_steps and no_silent_drop and status == "conflict":
+            if ok_steps and ok_files and no_silent_drop and status == "conflict":
                 results.append("conflict -> safe (human resolves, nothing claimed)")
                 print("  PASS  " + name)
                 print("        " + " | ".join(results))
@@ -486,7 +498,7 @@ print("\nupstream_content.sh — the three-way boundary\n")
 
 
 def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
-                 mode_and_blob=False):
+                 mode_and_blob=False, mode_divergent=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
@@ -511,7 +523,7 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
                "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\nrc%d\n" % n)
             sh("git add -A && git commit -q -m %s && git tag %s" % (rc, rc), up)
 
-    if mode_only or mode_and_blob:
+    if mode_only or mode_and_blob or mode_divergent:
         # ONLY the mode changes upstream: identical blob on both sides. With
         # mode_and_blob the FORK then edits the blob independently (below), so
         # all three composite mode/blob values differ and the composite
@@ -540,6 +552,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         tool = os.path.join(fork, "tool.sh")
         open(tool, "w").write("#!/bin/sh\necho helio\n")
         os.chmod(tool, 0o644)
+    if mode_divergent:
+        # Upstream sets 100755; Helio moves the SAME path to a THIRD mode by
+        # replacing it with a symlink (120000). No side agrees with any other.
+        tool = os.path.join(fork, "tool.sh")
+        os.remove(tool)
+        os.symlink("cfg.ini", tool)
     sh("git add -A && git commit -q -m squashed", fork)
     sh("git fetch -q origin '+refs/tags/*:refs/tags/*' --force", fork)
     install_content_script(fork)
@@ -631,6 +649,23 @@ b.append(boundary("mode change + INDEPENDENT blob edit is reported missing",
 b.append(boundary("mode change + independent blob edit means NOT already-synced",
                   kw=dict(mode_and_blob=True), cmd=["holds", "v2.4.1"], want_rc=1))
 
+# Round 8, CodeRabbit. Upstream moves the mode one way and Helio moves the SAME
+# path a different way (here, to a symlink). All three modes differ, so "we took
+# upstream's change and then changed it again" and "we never got it and changed
+# it ourselves" are indistinguishable -- the mode equivalent of an overlapping
+# hunk. Falling through to the blobs answers `held`, because upstream's blob
+# equals the base's; the mode must produce `unknown` instead.
+b.append(boundary("upstream and Helio move the mode differently -> unknown",
+                  kw=dict(mode_divergent=True), cmd=["unknown", "v2.4.1"],
+                  want_out="tool.sh"))
+b.append(boundary("divergent modes are NOT reported missing",
+                  kw=dict(mode_divergent=True), cmd=["missing", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("divergent modes mean NOT already-synced (`holds` refuses)",
+                  kw=dict(mode_divergent=True), cmd=["holds", "v2.4.1"], want_rc=1))
+b.append(boundary("divergent modes still allow a graft base (`base-ok` tolerates)",
+                  kw=dict(mode_divergent=True), cmd=["base-ok", "v2.4.1"], want_rc=0))
+
 # Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
 # undecidable paths, so the graft lands on a base where those paths are still in
 # motion and the merge has to present them. The permissive form must still stop
@@ -657,7 +692,8 @@ r.append(scenario(
     " walk -> warn and continue, do not abort the step",
     expect_skip=False, expect_noop=None,
     version="2.4.7", chain="deep", fork_at="v2.4.0", tag_at="v2.4.7",
-    target_tag="v2.4.8", no_silent_drop=True))
+    target_tag="v2.4.8", no_silent_drop=True,
+    expect_graft_warning="no validated older base was found within 6 steps"))
 
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
@@ -666,4 +702,6 @@ if FAILURES:
     print("\nfailed:")
     for f in FAILURES:
         print("  - " + f)
-sys.exit(0 if all(r) else 1)
+# FAILURES gates the exit as well as `r`: a collected failure that somehow left
+# every scenario's own verdict True would otherwise be printed and then ignored.
+sys.exit(0 if (all(r) and not FAILURES) else 1)

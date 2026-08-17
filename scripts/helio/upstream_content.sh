@@ -208,11 +208,25 @@ classify_paths() {
     # case) does not catch this one: our blob diverges too, so the composites
     # differ for a reason that has nothing to do with the mode.
     #
-    # So decide the mode separately: upstream moved it and we are still sitting
-    # at the base's mode, therefore we never received that change. Whatever the
-    # blobs then say cannot make it present.
-    if [ "${theirs%% *}" != "${orig%% *}" ] && [ "${ours%% *}" = "${orig%% *}" ]; then
-      printf 'missing\t%s\n' "$path"; continue
+    # So decide the mode separately, and in three ways rather than two — the
+    # same held/absent/unknown split the blobs get, for the same reason.
+    if [ "${theirs%% *}" != "${orig%% *}" ]; then
+      if [ "${ours%% *}" = "${orig%% *}" ]; then
+        # We are still sitting at the base's mode, so we never received the
+        # change. Whatever the blobs say cannot make it present.
+        printf 'missing\t%s\n' "$path"; continue
+      elif [ "${ours%% *}" != "${theirs%% *}" ]; then
+        # Upstream moved the mode and we moved it somewhere ELSE — Helio chmod'd
+        # the file independently. That is the mode equivalent of an overlapping
+        # hunk: "we took upstream's change and then changed it again" and "we
+        # never got upstream's change and changed it ourselves" produce the same
+        # three values. A text merge cannot rule on it, and letting it fall
+        # through to the blobs invites exactly the `held` this block exists to
+        # prevent. Undecidable, so say so.
+        printf 'unknown\t%s\n' "$path"; continue
+      fi
+      # ours == theirs: we already carry upstream's mode. Fall through and let
+      # the blobs decide the rest of the change.
     fi
     # Blobs. Only looking inside the file can decide, and it may not be able to.
     case "$(_change_state "${orig#* }" "${ours#* }" "${theirs#* }")" in
