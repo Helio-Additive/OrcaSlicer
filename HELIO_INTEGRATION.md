@@ -743,12 +743,44 @@ is only advanced by a successful push at the end of a run, so an out-of-band mer
 It sat at `v2.3.2-rc2` through three releases that way. Two consequences are baked
 into the workflow: for tag-release syncs `version.inc` is preferred over the tag
 as the baseline whenever it names a **strictly newer** release, and a **refused tag
-push warns rather than failing the run** (the token cannot always force-update tags;
-observed `HTTP 403`). If you see that warning, a maintainer can heal it with:
+push warns rather than failing the run**. If you see that warning, a maintainer can
+heal it with:
 
 ```bash
 git push helio +<upstream_commit>:refs/tags/helio-last-synced
 ```
+
+**Why the push is refused — it is not what it looked like.** This was recorded for
+months as "the token cannot *always* force-update tags (`HTTP 403`)", which implied
+an intermittent permission gap or a tag-protection rule. Neither is true. The real
+message, from run `32014594574`:
+
+```text
+! [remote rejected] helio-last-synced -> helio-last-synced
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/build_all.yml` without `workflows` permission)
+```
+
+The tracking tag points at an **upstream** commit. Creating that ref makes
+upstream's `.github/workflows/**` newly reachable from a ref in this repository,
+and GitHub refuses to let any GitHub App token — `GITHUB_TOKEN` included — create
+a ref that introduces workflow content without the `workflows` permission. That
+permission is **not** one of the scopes a workflow's `permissions:` block can
+grant, so this cannot be fixed by editing the workflow: it fails on every run, and
+always will. That, not bad luck, is why the tag stuck at `v2.3.2-rc2` across three
+releases and let the ancestry problem compound into #107.
+
+Three ways out, none yet chosen:
+
+| option | cost |
+| --- | --- |
+| PAT with `workflows` scope, stored as a **repo secret** | a long-lived credential able to rewrite workflow files, held to solve a bookkeeping problem |
+| drop the tag entirely | every decision already has a content-backed fallback, so this is mostly deletion |
+| point the tag at the **Helio** commit, upstream sha in the annotated tag message | needs no new permission (the commit is already reachable), but every reader of the tag has to change |
+
+Do **not** attempt to fix this by adding `workflows:` to the workflow's
+`permissions:` block. It is not a valid key there, and a run will not tell you so —
+it will just keep failing the same way.
 
 Note the remote. The workflow's own pushes use `origin` because `actions/checkout`
 configures origin as *this fork*; you are running this in your own clone, where

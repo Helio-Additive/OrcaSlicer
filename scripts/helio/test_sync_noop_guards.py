@@ -5,7 +5,7 @@ against synthetic repositories that reproduce each false-skip scenario.
 The step bodies are extracted from the workflow, so this tests the shipped code
 rather than a transcription of it.
 """
-import os, re, shutil, subprocess, sys, tempfile
+import json, os, re, shutil, subprocess, sys, tempfile
 import yaml
 
 WF = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -63,8 +63,10 @@ def install_content_script(repo):
     """
     dest = os.path.join(repo, "scripts", "helio")
     os.makedirs(dest, exist_ok=True)
-    shutil.copy2(CONTENT_SH, os.path.join(dest, "upstream_content.sh"))
-    os.chmod(os.path.join(dest, "upstream_content.sh"), 0o755)
+    for name in ("upstream_content.sh", "sync_completion.sh"):
+        src = os.path.join(os.path.dirname(CONTENT_SH), name)
+        shutil.copy2(src, os.path.join(dest, name))
+        os.chmod(os.path.join(dest, name), 0o755)
 
 
 def sh(cmd, cwd, env=None, check=True):
@@ -248,7 +250,7 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
     return fork, target, sync_sha
 
 
-def run_check(fork, target, sync_sha):
+def run_check(fork, target, sync_sha, extra_env=None):
     outfile = os.path.join(fork, "..", "ghout")
     open(outfile, "w").close()
     env = {
@@ -256,8 +258,18 @@ def run_check(fork, target, sync_sha):
         "TRACKING_TAG": "helio-last-synced", "SYNC_REF": target,
         "GITHUB_OUTPUT": outfile, "GITHUB_STEP_SUMMARY": outfile + ".sum",
         "GITHUB_WORKSPACE": fork,
+        # Inputs to the completion signal. Supplied unconditionally because the
+        # step runs under `set -u` — omitting them would abort the step rather
+        # than exercise the guard. With no HELIO_PR_FIXTURE and no `gh` on the
+        # box, sync_completion.sh reports "cannot tell" and the step falls
+        # through to its existing behaviour, which is what every pre-existing
+        # scenario here expects.
+        "RELEASE_BRANCH": "orca-latest-parity-bambu",
+        "BRANCH_NAME": "helio-release-candidate-%s" % target,
     }
     env.update(CHECK_ENV)
+    if extra_env:
+        env.update(extra_env)
     p = sh(CHECK, fork, env, check=False)
     out = dict(l.split("=", 1) for l in open(outfile).read().splitlines() if "=" in l)
     return p, out
@@ -694,6 +706,177 @@ r.append(scenario(
     version="2.4.7", chain="deep", fork_at="v2.4.0", tag_at="v2.4.7",
     target_tag="v2.4.8", no_silent_drop=True,
     expect_graft_warning="no validated older base was found within 6 steps"))
+
+
+# ---------------------------------------------------------------------------
+# The completion signal for CONFLICT syncs (scripts/helio/sync_completion.sh).
+#
+# This is the one guard in the workflow that leaves git, because the question it
+# answers cannot be answered from content: after a resolved conflict the tree
+# legitimately lacks some of upstream's changes, so a tree that never received
+# the sync and a tree whose resolver chose Helio's version are identical.
+#
+# The danger is entirely in the FALSE POSITIVE direction — a wrong "yes" skips a
+# release permanently — so most of what follows asserts refusal, not acceptance.
+# ---------------------------------------------------------------------------
+COMPLETION_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "sync_completion.sh")
+
+SHA = "8500fcdccaa10b5099ac20d252af3a7c560046f1"
+OTHER_SHA = "1111111111111111111111111111111111111111"
+BASE_BR = "orca-latest-parity-bambu"
+BRANCH = "helio-release-candidate-v2.4.2"
+
+
+def completion(prs, *, sync_sha=SHA, base=BASE_BR, branch=BRANCH):
+    """Run the real script against a fixture standing in for the API."""
+    tmp = tempfile.mkdtemp()
+    try:
+        fx = os.path.join(tmp, "prs.json")
+        with open(fx, "w") as fh:
+            json.dump(prs, fh)
+        p = subprocess.run(
+            ["bash", COMPLETION_SH, sync_sha, base, branch],
+            capture_output=True, text=True,
+            env={**os.environ, "HELIO_PR_FIXTURE": fx},
+        )
+        return p
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def pr(number, *, merged=True, base=BASE_BR, head=BRANCH, body=""):
+    return {
+        "number": number,
+        "merged_at": "2026-08-01T00:00:00Z" if merged else None,
+        "base": {"ref": base},
+        "head": {"ref": head},
+        "body": body,
+    }
+
+
+MARKER = "<!-- helio-sync-target: %s -->" % SHA
+
+c = []
+
+
+def comp_case(label, prs, *, want_rc, want_pr=None, want_stderr=None, **kw):
+    p = completion(prs, **kw)
+    ok = (p.returncode == want_rc)
+    if ok and want_pr is not None:
+        ok = p.stdout.strip() == str(want_pr)
+    if ok and want_stderr is not None:
+        ok = want_stderr in p.stderr
+    print("  %s  %s" % ("PASS" if ok else "FAIL", label))
+    if not ok:
+        print("        rc=%s (want %s) out=%r err=%r"
+              % (p.returncode, want_rc, p.stdout.strip(), p.stderr.strip()))
+        FAILURES.append(label)
+    return ok
+
+
+print("\nCompletion signal — a merged PR is the only thing that may skip a conflict sync")
+
+# Accepts: the shape this exists for.
+c.append(comp_case("merged PR carrying the sync-target marker is accepted",
+                   [pr(96, body="Resolved v2.4.2.\n" + MARKER)],
+                   want_rc=0, want_pr=96))
+
+# Refuses: each of these, wrongly accepted, skips a release for ever.
+c.append(comp_case("closed-but-UNMERGED PR is refused (the #107 bug in reverse)",
+                   [pr(96, merged=False, body=MARKER)],
+                   want_rc=1))
+c.append(comp_case("merged into a DIFFERENT base is refused",
+                   [pr(96, base="main", body=MARKER)],
+                   want_rc=1))
+c.append(comp_case("marker naming a DIFFERENT sha is refused (upstream force-retag)",
+                   [pr(96, body="<!-- helio-sync-target: %s -->" % OTHER_SHA,
+                       head="some-other-branch")],
+                   want_rc=1))
+c.append(comp_case("no PRs at all -> refused",
+                   [], want_rc=1))
+c.append(comp_case("merged PR for an unrelated branch is refused",
+                   [pr(96, head="feature/unrelated", body="no marker here")],
+                   want_rc=1))
+
+# The retag case is the subtle one: same branch name, different content. The
+# marker is what separates them, so assert the two answers differ on the SAME
+# fixture rather than only that each is individually plausible.
+retag_fixture = [pr(96, body="Resolved v2.4.2.\n" + MARKER)]
+c.append(comp_case("same fixture, retagged target -> refused where the original was accepted",
+                   retag_fixture, sync_sha=OTHER_SHA, want_rc=1))
+
+# Branch-name fallback: accepted for pre-marker PRs, but it must SAY so, because
+# it is the one path that cannot detect a force-retag.
+c.append(comp_case("pre-marker PR matches on branch name and warns that it did",
+                   [pr(107, body="opened before the marker existed")],
+                   want_rc=0, want_pr=107, want_stderr="matched by BRANCH NAME"))
+c.append(comp_case("main-mode branch matches on the short sha it embeds",
+                   [pr(88, head="helio-upstream-main-2026-08-10-%s" % SHA[:7],
+                       body="")],
+                   want_rc=0, want_pr=88, branch=""))
+c.append(comp_case("main-mode branch with a DIFFERENT short sha is refused",
+                   [pr(88, head="helio-upstream-main-2026-08-10-deadbee", body="")],
+                   want_rc=1, branch=""))
+
+# A merged PR must not be found by luck: put the real one behind decoys.
+c.append(comp_case("finds the marker PR among unmerged and unrelated ones",
+                   [pr(1, merged=False, body=MARKER),
+                    pr(2, base="main", body=MARKER),
+                    pr(3, head="x", body="nothing"),
+                    pr(96, body=MARKER)],
+                   want_rc=0, want_pr=96))
+
+# Malformed / unreachable API must read as "cannot tell", never as "synced".
+c.append(comp_case("malformed API payload is refused, not treated as proof",
+                   "not json at all", want_rc=1))
+
+r += c
+
+# End-to-end: the real `check` step body must actually skip on that signal.
+print("\nCompletion signal — end to end through the real `check` step")
+
+
+def completion_e2e(label, prs, *, want_skip):
+    tmp = tempfile.mkdtemp()
+    try:
+        # A GENUINELY NEW release: the fork does not hold its content, so every
+        # content-based guard above correctly declines and the completion signal
+        # is the only thing left that can decide. If this repo already held the
+        # target, `holds` would skip first and the scenario would pass without
+        # ever reaching the code under test.
+        fork, target, sync_sha = build(tmp, version="2.4.2", new_release=True)
+        # Rewrite the fixture's marker to the sha this synthetic repo actually
+        # produced. Hardcoding SHA here would make the scenario pass for the
+        # wrong reason, which has already happened twice on this PR.
+        fixed = []
+        for p in prs:
+            q = dict(p)
+            q["body"] = (q.get("body") or "").replace(SHA, sync_sha)
+            fixed.append(q)
+        fx = os.path.join(tmp, "prs.json")
+        with open(fx, "w") as fh:
+            json.dump(fixed, fh)
+        p, out = run_check(fork, target, sync_sha,
+                           extra_env={"HELIO_PR_FIXTURE": fx})
+        got = out.get("skip") == "true"
+        ok = (got == want_skip) and p.returncode == 0
+        print("  %s  %s" % ("PASS" if ok else "FAIL", label))
+        if not ok:
+            print("        skip=%s (want %s) rc=%s" % (out.get("skip"), want_skip, p.returncode))
+            print(p.stdout[-1200:], p.stderr[-800:])
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(completion_e2e(
+    "a merged, marker-carrying PR makes the check step skip",
+    [pr(96, body=MARKER)], want_skip=True))
+r.append(completion_e2e(
+    "an unmerged PR does NOT make the check step skip",
+    [pr(96, merged=False, body=MARKER)], want_skip=False))
 
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
