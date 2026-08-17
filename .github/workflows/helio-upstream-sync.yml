@@ -593,18 +593,65 @@ jobs:
           echo "pre_merge=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           if git merge "$SYNC_REF" --no-edit; then
+            MERGED_CLEAN=1
+          else
+            MERGED_CLEAN=0
+          fi
+
+          # ---------------------------------------------------------------
+          # Profiles are taken VERBATIM from upstream. See HELIO_INTEGRATION.md
+          # Rule 13.
+          #
+          # Helio has never customised resources/profiles — every commit that has
+          # ever touched it is an upstream sync. Hand-resolving conflicts there
+          # therefore produced no Helio content, only damage: resolving
+          # Anycubic.json reordered its JSON keys, which left a 2468-line textual
+          # diff that was SEMANTICALLY IDENTICAL to upstream and then conflicted
+          # again on every subsequent sync (issues #88, #92, #94 — three
+          # resolutions, all self-inflicted). A separate resolution also failed to
+          # propagate an upstream deletion, leaving three Anet A8 Plus files that
+          # Helio shipped and upstream did not.
+          #
+          # Overwriting the tree makes profile conflicts structurally impossible
+          # and guarantees profile parity by construction.
+          #
+          # `rm -rf` first is load-bearing: `git checkout <ref> -- <path>` adds and
+          # updates but never deletes, which is exactly how those stale Anet files
+          # survived several syncs.
+          #
+          # If Helio ever DOES need a fork-specific profile, this step has to grow
+          # an exception path — it will silently discard such a change today.
+          # ---------------------------------------------------------------
+          rm -rf resources/profiles
+          git checkout "$SYNC_REF" -- resources/profiles
+          git add -A resources/profiles
+
+          if [ "$MERGED_CLEAN" = "1" ]; then
+            # The merge already committed; fold the profile reset into it so the
+            # sync stays a single commit.
+            if ! git diff --cached --quiet; then
+              git commit --amend --no-edit
+            fi
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
-            echo "status=conflict" >> "$GITHUB_OUTPUT"
-
             # Write the conflict list to a file rather than a step output / env
             # var. A large list (thousands of files) overflows the OS argument
             # limit when passed as an env var into a later step, crashing it with
             # "Argument list too long" before the tracking issue can be created.
             git diff --name-only --diff-filter=U > "$GITHUB_WORKSPACE/sync-conflicts.txt"
             COUNT=$(wc -l < "$GITHUB_WORKSPACE/sync-conflicts.txt" | tr -d ' ')
-            echo "conflict_count=$COUNT" >> "$GITHUB_OUTPUT"
-            echo "Merge produced $COUNT conflicted files."
+
+            if [ "$COUNT" = "0" ]; then
+              # Every conflict was inside resources/profiles and has just been
+              # resolved by taking upstream's tree. Nothing left for a human.
+              git commit --no-edit
+              echo "status=clean" >> "$GITHUB_OUTPUT"
+              echo "All conflicts were in resources/profiles; resolved by taking upstream verbatim."
+            else
+              echo "status=conflict" >> "$GITHUB_OUTPUT"
+              echo "conflict_count=$COUNT" >> "$GITHUB_OUTPUT"
+              echo "Merge produced $COUNT conflicted files (resources/profiles excluded — taken verbatim from upstream)."
+            fi
           fi
 
       # Drop the local replace overlay now that the merge is done, so every

@@ -118,6 +118,9 @@ generation so work started under the old credential can never land.
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
 | `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
+| `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
+| `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
+| `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
 
@@ -402,6 +405,121 @@ So for `README.md` conflicts (and any other branding/distribution/marketing copy
 Do **not** blanket "take upstream" on docs the way you would for upstream-owned
 data files (e.g. `resources/profiles/*.json`). If upstream adds a genuinely useful
 branding-neutral note, port just that note into the Helio wording by hand.
+
+### Rule 12: Inherited Workflows (classify, don't edit or delete)
+
+Upstream ships **repo infrastructure**, not just slicer code — workflows, bot
+integrations, and dependencies on external services (Claude, Statsig, Cloudflare
+R2, WinGet). Every sync pulls all of it in. Some of it cannot work here (it needs
+credentials only upstream has); some of it should not run here (it targets
+**upstream's** distribution channels). Rule 11 is the README-shaped instance of
+this; Rule 12 is the general case.
+
+`.github/helio-workflows.yml` records a decision for **every** workflow in the
+repo, and `helio-workflow-inventory.yml` fails a PR that introduces one nobody
+has classified, or that adds an undeclared dependency on a secret or repo
+variable. So a sync that brings in new infrastructure cannot merge silently.
+
+**When a sync adds or changes a workflow:**
+1. The inventory check fails with `E1` (unclassified) or `E4` (undeclared
+   dependency). That is working as intended — it is asking for a decision.
+2. Add or update the entry. Fill in `reason` properly; it is the decision record
+   the next person reviewing a sync will read.
+3. If the workflow should **not** run here, set `status: disabled` and disable it
+   at the repo level via the Actions API. **Do not edit or delete the file.**
+
+**Why not just delete it.** Deleting an upstream-owned file means a
+`modify/delete` conflict on every future sync that touches it; editing it means a
+content conflict. Disabling via the API leaves the file byte-identical to upstream
+forever and carries zero conflict surface. Encode fork policy in Helio-owned
+files, never inside files upstream owns.
+
+**Known live hazard — `winget_updater.yml`.** It triggers on
+`release: [released]` with **no repository guard** and publishes to
+`identifier: SoftFever.OrcaSlicer`, upstream's public WinGet package.
+`helio-release.yml` creates stable releases with `draft: false` and
+`prerelease: false`, so cutting one fires this workflow and it attempts to push a
+Helio build to upstream's WinGet entry under a `helio-v*` tag. The only thing
+preventing that today is `WINGET_TOKEN` being unset — which is a reason **not** to
+treat "missing secret" as a harmless condition to paper over.
+
+Its manifest entry is `disabled`: Helio does not publish to WinGet, and there is
+no configuration of this workflow that is correct on this fork. **That entry
+records the intent but does not enforce it** — the Actions-API reconciler does not
+exist yet, so the workflow is still enabled at the repo level. Until someone turns
+it off under **Settings → Actions**, an unset secret is the only control, and
+setting `WINGET_TOKEN` for any unrelated reason would arm the publish path without
+a code change. Do this by hand before cutting the next stable release.
+
+**Secret-presence (`W3`) reads names, never values.** The check needs to know
+which secrets exist on the repo, and the obvious way to answer that —
+`${{ toJSON(secrets) }}` — serialises every secret name *and value* into the
+runner environment. On a `pull_request` run that environment belongs to a job
+executing the PR's own copy of the validator, so anyone who can open a branch
+could rewrite the script to exfiltrate the lot. Instead the workflow splits in
+two: the `inventory` job holds no credentials and runs on every event, and a
+separate `secret-presence` job — excluded from `pull_request` — reads secret
+**names** from the Actions secrets REST API, which never returns values. Apply the
+same rule to anything added here later: never hand a credential to a job that
+executes pull-request-controlled code.
+
+### Rule 13: Profiles are taken verbatim from upstream (never merged)
+
+`resources/profiles/**` is **upstream data**. Helio has never customised it —
+every commit that has ever touched that tree is an upstream sync. So the sync
+workflow does not merge profiles at all; after each merge it overwrites the whole
+tree with upstream's:
+
+```bash
+rm -rf resources/profiles
+git checkout "$SYNC_REF" -- resources/profiles
+git add -A resources/profiles
+```
+
+**Do not hand-resolve a conflict under `resources/profiles/`.** If you are
+resolving a sync by hand, run the three lines above instead. A conflict there can
+only produce damage, because there is no Helio content to preserve.
+
+**Why, concretely.** Both known profile divergences were created by resolution,
+not by intent:
+
+- `Anycubic.json` was hand-resolved and came out with its JSON keys **reordered**.
+  The content was semantically identical to upstream — verified by parsing both
+  and comparing — but the 2468-line textual diff then conflicted again on *every*
+  subsequent sync. It appears in the conflict list of issues #88, #92 and #94:
+  three resolutions, each one creating the next.
+- A resolution failed to propagate an upstream **deletion**, leaving three
+  `Anet A8 Plus` files that Helio shipped and upstream did not — a genuine
+  product-level parity break.
+
+Overwriting makes profile conflicts structurally impossible and guarantees
+profile parity by construction. It also means upstream's own CI has already
+validated the exact tree Helio ships, which is why `check_profiles.yml` is left
+inert here rather than being wired to the parity branch (see below).
+
+**The `rm -rf` is load-bearing.** `git checkout <ref> -- <path>` adds and updates
+files but never deletes them, which is exactly how the stale Anet files survived
+several syncs.
+
+**If Helio ever needs a fork-specific profile**, this step must grow an exception
+path first — as written it will silently discard such a change. That is the one
+assumption Rule 13 depends on, and it is worth re-checking before adding any
+Helio printer or filament definition.
+
+#### Why `check_profiles.yml` / `check_locale.yml` stay inert
+
+Both are upstream workflows whose `pull_request` triggers are filtered to
+`branches: [main]`. This fork's base is `orca-latest-parity-bambu`, so **neither
+has ever run here** — a branch rename silently disabled them.
+
+They are deliberately left that way. The value of profile validation on a fork is
+catching damage introduced *by the merge*; Rule 13 removes the merge, so upstream's
+own CI already covers the exact tree. Wiring them up means adding a branch name to
+an upstream-owned file, and `build_all.yml` shows what that costs: Helio added its
+branch there, and it now appears in the conflict list of **8 of 13** sync issues.
+
+Both still have `workflow_dispatch`, so either can be run by hand against a sync
+branch if a specific sync warrants it.
 
 ## Upstream Sync: squash merges & the merge-base graft
 

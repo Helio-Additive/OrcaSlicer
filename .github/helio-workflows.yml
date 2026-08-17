@@ -1,0 +1,281 @@
+# Helio fork policy for GitHub Actions workflows.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Upstream OrcaSlicer ships repo infrastructure, not just slicer code: workflows,
+# bot integrations and dependencies on external services. Every upstream sync
+# pulls all of it into this fork wholesale. Some of it cannot work here (it needs
+# credentials only upstream has) and some of it should not run here (it targets
+# upstream's distribution channels). Historically nothing forced anyone to decide
+# which was which, so inherited workflows rotted silently for months.
+#
+# This file is that decision record, and `scripts/helio/check_workflow_inventory.py`
+# enforces it in CI. A sync that introduces a new workflow fails the check until
+# somebody classifies it here.
+#
+# It lives OUTSIDE the workflow files themselves on purpose. Encoding fork policy
+# by editing or deleting an upstream-owned file buys a merge conflict on every
+# future sync; a Helio-owned manifest upstream will never touch costs nothing.
+#
+# STATUS VALUES
+# -------------
+#   run        Wanted here. Expected to work.
+#   disabled   Deliberately not run on this fork. The file stays byte-identical
+#              to upstream (zero conflict surface); it is disabled at the repo
+#              level via the Actions API instead of being edited or deleted.
+#   undecided  Inherited, nobody has decided yet. Warns in CI; does not fail.
+#              This is the backlog — drive it to zero.
+#   deleted    Deliberately removed from this fork. The checker asserts the file
+#              is still absent, so a sync cannot quietly resurrect it.
+#
+# FIELDS
+# ------
+#   status            (required) one of the above
+#   owner             (required) `upstream` or `helio` — who authors the file
+#   requires_secrets  secrets the workflow references (GITHUB_TOKEN excluded)
+#   requires_vars     repo variables the workflow references
+#   reason            (required) why this status. This is the decision record;
+#                     write it for whoever reviews the next sync.
+#
+# The checker cross-checks requires_secrets/requires_vars against what each file
+# actually references, so a sync that introduces a NEW external dependency fails
+# here rather than at runtime months later.
+
+version: 1
+
+workflows:
+
+  # ---------------------------------------------------------------- build/release
+  build_all.yml:
+    status: run
+    owner: upstream
+    requires_vars: [SELF_HOSTED]
+    reason: >-
+      Core build matrix. The fork depends on it; verified green across all
+      platforms on the v2.4.2 sync (PR #96).
+
+  build_check_cache.yml:
+    status: run
+    owner: upstream
+    reason: Reusable dependency-cache stage called by build_all.yml and helio-release.yml.
+
+  build_deps.yml:
+    status: run
+    owner: upstream
+    requires_vars: [SELF_HOSTED]
+    reason: Reusable dependency-build stage.
+
+  build_orca.yml:
+    status: run
+    owner: upstream
+    requires_secrets:
+      - APPLE_DEV_ACCOUNT
+      - APP_PWD
+      - BUILD_CERTIFICATE_BASE64
+      - KEYCHAIN_PASSWORD
+      - MACOS_CERTIFICATE_ID
+      - ORCA_UPDATER_SIG_KEY
+      - P12_PASSWORD
+      - TEAM_ID
+    requires_vars: [ENABLE_SIGNING, SELF_HOSTED]
+    reason: >-
+      Reusable app-build stage. The macOS signing/notarisation secrets are only
+      consumed when the ENABLE_SIGNING repo variable is set, so they are expected
+      to be absent on an unsigned build.
+
+  helio-release.yml:
+    status: run
+    owner: helio
+    reason: >-
+      Helio's own release pipeline. Publishes Helio-prefixed assets under
+      helio-v{version} tags. Replaces upstream's publish_release.yml.
+
+  publish_release.yml:
+    status: disabled
+    owner: upstream
+    requires_vars: [RELEASE_PUBLISHER]
+    reason: >-
+      Upstream's draft-release publisher, superseded here by helio-release.yml.
+      Self-limiting for now: workflow_dispatch only, and the first step aborts
+      unless the actor matches the RELEASE_PUBLISHER variable (upstream sets it
+      to "SoftFever"). DECISION (2026-08-11): `disabled` — redundant on this fork
+      and disabled at the repo level the same day via `gh workflow disable`.
+
+  winget_updater.yml:
+    status: disabled
+    owner: upstream
+    requires_secrets: [WINGET_TOKEN]
+    reason: >-
+      Publishes to `identifier: SoftFever.OrcaSlicer` — UPSTREAM's public WinGet
+      package — and triggers on `release: [released]` with NO repository guard.
+      helio-release.yml creates stable releases with draft:false /
+      prerelease:false, so cutting one fires this workflow and it attempts to
+      push a Helio build to upstream's WinGet entry under a helio-v* tag. The
+      only thing preventing that today is WINGET_TOKEN being unset, which is
+      luck rather than design: setting that secret for any other reason would
+      arm it.
+
+      Helio does not publish to WinGet, so there is no version of this workflow
+      that is correct on this fork.
+
+      DECISION (2026-08-11): `disabled`, and disabled at the repo level the same
+      day via `gh workflow disable winget_updater.yml`. Note the repo-level state
+      is not tracked in git and can be undone by anyone clicking "Enable
+      workflow" — until the Actions-API reconciler exists, this entry and reality
+      can drift apart with nothing to catch it.
+
+  # ---------------------------------------------------------------- checks / CI
+  check_locale.yml:
+    status: run
+    owner: upstream
+    reason: >-
+      Validates .po catalogue format. SILENTLY INERT ON THIS FORK: its
+      pull_request trigger is filtered to `branches: [main]`, and this fork's
+      base branch is orca-latest-parity-bambu, so it has never fired on a Helio
+      PR. DECISION (2026-08-11): leave it inert. Wiring it up means adding a
+      branch name to an upstream-owned file, and build_all.yml shows the cost of
+      that pattern — Helio added its branch there and it now appears in the
+      conflict list of 8 of 13 sync issues. Translation work is not active here
+      yet (see #108); revisit if it starts. workflow_dispatch still works for a
+      one-off run. Do NOT count this as coverage.
+
+  check_profiles.yml:
+    status: run
+    owner: upstream
+    reason: >-
+      Validates printer/filament profile JSON. SILENTLY INERT ON THIS FORK —
+      `pull_request: branches: [main]` never matches a PR targeting
+      orca-latest-parity-bambu.
+
+      DECISION (2026-08-11): leave it inert, because Rule 13 removes the thing it
+      would protect against. The value of profile validation on a fork is
+      catching damage introduced BY THE MERGE; the sync workflow now takes
+      resources/profiles verbatim from upstream instead of merging it, so the
+      tree Helio ships is byte-identical to one upstream's own CI already
+      validated. Wiring this up would mean editing an upstream-owned file to add
+      a branch name, and build_all.yml shows what that costs (present in the
+      conflict list of 8 of 13 sync issues).
+
+      This calculus depends entirely on Rule 13 holding. If Helio ever adds a
+      fork-specific profile, verbatim-copy stops being safe and THIS CHECK
+      BECOMES NECESSARY — revisit both together. workflow_dispatch still works
+      for a one-off run against a sync branch.
+
+  check_profiles_comment.yml:
+    status: run
+    owner: upstream
+    reason: >-
+      Posts check_profiles results back onto the PR via workflow_run. Inert as
+      long as check_profiles.yml never fires here — it has nothing to report on.
+
+  shellcheck.yml:
+    status: run
+    owner: upstream
+    reason: Lints shell scripts. Fork-agnostic; observed passing.
+
+  # ---------------------------------------------------------------- Helio guards
+  helio-upstream-sync.yml:
+    status: run
+    owner: helio
+    requires_vars: [HELIO_RELEASE_BRANCH]
+    reason: Helio's upstream sync automation. See CLAUDE.md.
+
+  helio-upstream-watch.yml:
+    status: run
+    owner: helio
+    requires_vars: [HELIO_RELEASE_BRANCH]
+    reason: Watches upstream for new tags/releases and opens tracking issues.
+
+  pr-branding-guard.yml:
+    status: run
+    owner: helio
+    reason: >-
+      Blocks upstream branding/distribution markers (Flathub ids, upstream
+      release URLs) from leaking into README.md during syncs.
+      See HELIO_INTEGRATION.md Rule 11.
+
+  pr-sync-hygiene.yml:
+    status: run
+    owner: helio
+    reason: >-
+      Fails un-squashed upstream-sync PRs, which would otherwise subscribe ~100+
+      external upstream commit authors to this fork's PR notifications.
+
+  helio-workflow-inventory.yml:
+    status: run
+    owner: helio
+    requires_secrets: [WORKFLOW_INVENTORY_TOKEN]
+    reason: >-
+      Enforces this manifest. See scripts/helio/check_workflow_inventory.py.
+      WORKFLOW_INVENTORY_TOKEN is optional: a fine-grained token with read-only
+      "Secrets" permission, used ONLY to list secret NAMES for the W3 check (the
+      Actions secrets API never returns values, and the default GITHUB_TOKEN
+      cannot list them). When it is unset the secret-presence job skips and W3 is
+      simply not evaluated — so this workflow expects a W3 warning about its own
+      token until someone configures one.
+
+  # ---------------------------------------------------------------- issue triage
+  assign.yml:
+    status: run
+    owner: upstream
+    reason: Issue self-assignment via comment command. Fork-agnostic; observed passing.
+
+  pr-label-bot.yml:
+    status: run
+    owner: upstream
+    reason: Applies PR labels. Fork-agnostic; observed passing.
+
+  dedupe-issues.yml:
+    status: disabled
+    owner: upstream
+    requires_secrets: [CLAUDE_CODE_OAUTH_TOKEN, STATSIG_API_KEY]
+    reason: >-
+      Inherited from upstream in the v2.3 merge (2026-03-06). Upstream runs
+      Claude-based issue dedup and has the credential; this fork never has, so
+      the job has failed on every `issues: opened` event since March. Diagnosed
+      in PR #49 (2026-04-02) and left. DECISION (2026-08-11): Helio does not want
+      Claude-based issue dedup here, so this is `disabled` rather than having the
+      credential added. Turning it on would also activate auto-close-duplicates,
+      which auto-closes issues after 3 days — a behaviour nobody asked for.
+      PR #105 (which made the missing-credential failure quiet) is closed as
+      moot: a workflow that does not run needs no failure posture. All three of
+      the dedup family were disabled at the repo level on 2026-08-11.
+
+  auto-close-duplicates.yml:
+    status: disabled
+    owner: upstream
+    requires_secrets: [STATSIG_API_KEY]
+    reason: >-
+      Downstream of dedupe-issues.yml — scripts/auto-close-duplicates.ts scans
+      for bot comments containing "Found ... possible duplicate", which only the
+      dedupe run produces. Since dedupe has never run, this wakes daily, finds
+      nothing and reports success. DECISION (2026-08-11): `disabled` alongside
+      dedupe-issues.yml. Note this job CLOSES ISSUES automatically once a dedupe
+      comment is 3 days old — it has only ever been harmless because dedupe never
+      ran. Do not re-enable it independently of a deliberate choice to auto-close.
+
+  backfill-duplicate-comments.yml:
+    status: disabled
+    owner: upstream
+    reason: >-
+      Same family as dedupe-issues.yml; workflow_dispatch only, so it is not
+      firing on its own. DECISION (2026-08-11): `disabled` alongside the rest of
+      the dedup family.
+
+  # ---------------------------------------------------------------- upstream-only
+  doxygen-docs.yml:
+    status: run
+    owner: upstream
+    requires_secrets: [R2_ACCESS_KEY_ID, R2_ENDPOINT, R2_SECRET_ACCESS_KEY]
+    reason: >-
+      Correctly self-guarded by upstream — the job is gated on
+      `github.repository == 'OrcaSlicer/OrcaSlicer'`, so it is a no-op here and
+      the R2 credentials are never needed on this fork. Left as `run` because it
+      costs nothing and needs no fork-side intervention.
+
+  update-translation.yml:
+    status: undecided
+    owner: upstream
+    reason: >-
+      workflow_dispatch only, so it never fires unattended. Whether Helio wants
+      to run upstream's translation-sync tooling has not been decided.

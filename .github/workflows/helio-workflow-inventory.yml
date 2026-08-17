@@ -1,0 +1,272 @@
+name: Workflow inventory
+
+# Enforces .github/helio-workflows.yml — this fork's decision record for which
+# upstream-inherited workflows run here.
+#
+# Upstream ships repo infrastructure along with slicer code, and every sync pulls
+# it in wholesale. Without a forcing function, inherited workflows accumulate
+# unnoticed: some fail forever on credentials this fork has never had, some run
+# against upstream's distribution channels. This check fails a PR that introduces
+# a workflow nobody has classified, or that adds an undeclared dependency on an
+# external secret.
+#
+# Helio-owned file: upstream will never touch it, so it carries no sync conflict
+# surface. That is deliberate — see the header of .github/helio-workflows.yml.
+
+on:
+  # Deliberately NO `paths:` filter. GitHub evaluates path filters against only
+  # the first 300 changed files, and an upstream sync routinely changes far more
+  # (v2.4.2 changed 894). A sync that adds a workflow outside that truncated
+  # window would skip the check entirely — precisely the case E1 exists to catch.
+  # The job is a few seconds of Python, so running it on every PR is the cheap
+  # side of that trade.
+  pull_request:
+  push:
+    branches:
+      - orca-latest-parity-bambu
+  schedule:
+    # Weekly, so manifest drift and newly-missing credentials surface even when
+    # nobody is touching workflow files.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs on every event, including pull_request. Holds NO credentials of any
+  # kind, so it is safe for this job to execute the PR's own copy of the
+  # validator.
+  inventory:
+    name: Check workflow inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # Before the checker's verdict is trusted, confirm the checker works. Its
+      # expression scanner is the part that fails silently: a pattern that
+      # matches nothing produces no E4, so a broken scanner and a clean repo
+      # look identical in the output below.
+      - name: Test the inventory checker
+        run: python3 scripts/helio/test_check_workflow_inventory.py
+
+      - name: Check workflow inventory
+        run: python3 scripts/helio/check_workflow_inventory.py
+
+  # W3 ("a `run` workflow needs a secret this repo does not have") is the check
+  # that would have caught the dedupe-issues.yml breakage five months early, so
+  # it is worth keeping — but it needs to know which secrets exist, and that
+  # must never be answered by handing credentials to PR-controlled code.
+  #
+  # Three properties make this safe:
+  #   1. The `if:` gates on the REF, not just the event. The property that
+  #      matters is "is the code this job checks out already reviewed?", and
+  #      excluding pull_request alone does not establish it: workflow_dispatch
+  #      accepts any branch, so a collaborator could dispatch this job against
+  #      an unreviewed branch and run branch-controlled code while it holds the
+  #      token. Restricting to the release branch covers every trusted entry
+  #      point — push is already limited to it, schedule runs on it (it is the
+  #      default branch), and manual dispatch stays available there — while
+  #      skipping feature-branch dispatches.
+  #   2. The runner only ever sees secret NAMES, read from the Actions secrets
+  #      REST API, which does not return values. `toJSON(secrets)` — which
+  #      serialises every name AND value into the environment — is not used.
+  #   3. This job runs NO third-party actions and checks out NO code. It is
+  #      curl and jq against the API and nothing else. The token is therefore
+  #      never in scope alongside code from anywhere but this file. The earlier
+  #      version ran `actions/checkout` and `actions/setup-python` at mutable
+  #      major tags before the token step, so a retargeted tag would have
+  #      executed in the same job the token later lands in; SHA-pinning would
+  #      have narrowed that window, removing the actions closes it. Everything
+  #      that needs the repository happens in `secret-presence` below, which
+  #      has no credentials.
+  secret-names:
+    name: Read configured secret names
+    # The `if:` below is NOT the control. A `workflow_dispatch` runs the
+    # workflow definition from the ref it was dispatched against, so a feature
+    # branch supplies this file — including this condition, which that branch
+    # can simply delete. Any same-repository branch can equally add a new
+    # push-triggered workflow that reads a repository secret directly. No
+    # in-file guard can protect a repository-scoped secret from someone with
+    # write access, because the file is the thing they control.
+    #
+    # The control is `environment:`. Environment protection rules live in
+    # repository settings, not in this file, so branch code cannot alter them.
+    # With WORKFLOW_INVENTORY_TOKEN stored as an ENVIRONMENT secret of
+    # `workflow-inventory`, and that environment's deployment-branch rule
+    # restricted to `orca-latest-parity-bambu`, a job running from any other ref
+    # does not receive it — whatever the workflow file says.
+    #
+    # REQUIRED ADMIN SETUP before W3 can do anything (Settings → Environments):
+    #   1. create environment `workflow-inventory`
+    #   2. set its deployment branches to `orca-latest-parity-bambu` only
+    #   3. add WORKFLOW_INVENTORY_TOKEN as an *environment* secret there,
+    #      not a repository secret
+    # Until then the token resolves empty, the step skips, and W3 stays dormant
+    # — the current state, so this change is inert until someone configures it.
+    # A repository-scoped secret of the same name would still work here and
+    # would still be branch-reachable; the point of step 3 is that it must not
+    # be one.
+    environment: workflow-inventory
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/orca-latest-parity-bambu'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      available: ${{ steps.names.outputs.available }}
+      # Secret NAMES only — GitHub restricts them to letters, digits and
+      # underscores, so a space-separated list is unambiguous and stays a
+      # single-line job output.
+      names: ${{ steps.names.outputs.names }}
+    steps:
+      - name: Read configured secret names
+        id: names
+        env:
+          # A dedicated fine-grained token with read-only "Secrets" repository
+          # permission (and organization "Secrets: read" for the org-level
+          # names). The default GITHUB_TOKEN cannot list secrets. When this is
+          # unset the step degrades to a skip rather than failing — W3 is an
+          # advisory check and must not gate the release branch on a token
+          # nobody has configured yet.
+          INVENTORY_TOKEN: ${{ secrets.WORKFLOW_INVENTORY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          skip() {
+            echo "::${1}::${2} Skipping secret-presence (W3)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          if [ -z "${INVENTORY_TOKEN}" ]; then
+            skip notice "WORKFLOW_INVENTORY_TOKEN is not configured."
+          fi
+
+          # Both endpoints return names and metadata only — never values.
+          # Paginated: a repo with more than 100 secrets would otherwise have
+          # its tail silently reported as absent by W3.
+          # 50 pages is 5,000 names, far past any real repository. The bound is
+          # here so a malformed response can never spin this job for its whole
+          # timeout instead of failing.
+          # NOTE: every failure inside this function must `return 1` explicitly.
+          # It is called as `if ! collect ...`, and bash disables errexit inside
+          # a function invoked in a condition — so a failing command here does
+          # NOT abort the step. A silently-dropped page would publish a partial
+          # list as complete, and W3 would report perfectly-configured secrets
+          # as absent.
+          MAX_PAGES=50
+          collect() {
+            local path="$1" page=1 count
+            while [ "$page" -le "$MAX_PAGES" ]; do
+              local status
+              status=$(curl -sS -o /tmp/page.json -w '%{http_code}' \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${INVENTORY_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${GITHUB_API_URL}${path}?per_page=100&page=${page}") || {
+                  echo "curl-failed" > /tmp/http_status; return 1; }
+              [ "$status" = "200" ] || { echo "$status" > /tmp/http_status; return 1; }
+              # HTTP 200 does not guarantee the body is the shape we expect —
+              # a proxy error page, or a schema change, parses as 200 + junk.
+              # Shape is checked separately from extraction because an EMPTY
+              # `secrets` array is a perfectly valid answer (a repo with no
+              # secrets), and `jq -e` on a filter that produces no output exits
+              # non-zero — which would turn "none configured" into "skip W3".
+              #
+              # EVERY element is validated, not just the outer array. `{"secrets":
+              # [{}]}` satisfies `arrays`, and `.secrets[].name` then yields the
+              # string "null", so one malformed member among valid ones publishes
+              # a plausible-but-partial inventory as complete — and W3 reports
+              # correctly-configured secrets as absent, confidently.
+              jq -e '.secrets | arrays and all(.[]; (.name? | type) == "string" and (.name | length) > 0)' \
+                /tmp/page.json >/dev/null 2>&1 || {
+                echo "unparseable-body" > /tmp/http_status; return 1; }
+              count=$(jq -r '.secrets | length' /tmp/page.json) || {
+                echo "unparseable-body" > /tmp/http_status; return 1; }
+              case "$count" in
+                ''|*[!0-9]*) echo "unparseable-body" > /tmp/http_status; return 1;;
+              esac
+              if [ "$count" -gt 0 ]; then
+                jq -r '.secrets[].name' /tmp/page.json >> /tmp/secret-names.txt || {
+                  echo "unparseable-body" > /tmp/http_status; return 1; }
+              fi
+              [ "$count" -eq 100 ] || return 0
+              page=$((page + 1))
+            done
+            echo "::warning::Stopped after ${MAX_PAGES} pages of ${path}; the secret list may be incomplete."
+            return 1
+          }
+
+          : > /tmp/secret-names.txt
+          rm -f /tmp/http_status
+
+          if ! collect "/repos/${GITHUB_REPOSITORY}/actions/secrets"; then
+            skip warning "Reading repository secrets failed ($(cat /tmp/http_status 2>/dev/null || echo 'unknown reason'))."
+          fi
+
+          # Organization secrets available to this repository. A secret granted
+          # at the org level is present at runtime, so omitting these makes W3
+          # report a configured secret as absent. 404 means the owner is not an
+          # organization and there is nothing to add; any other failure means an
+          # incomplete picture, and a partial answer here produces confidently
+          # wrong warnings.
+          if ! collect "/repos/${GITHUB_REPOSITORY}/actions/organization-secrets"; then
+            org_status=$(cat /tmp/http_status 2>/dev/null || echo '?')
+            if [ "$org_status" = "404" ]; then
+              echo "::notice::No organization secrets endpoint (owner is not an org)."
+            else
+              skip warning "Reading organization secrets failed (${org_status}), so the secret list would be incomplete."
+            fi
+          fi
+
+          rm -f /tmp/page.json /tmp/http_status
+          # `|| true` on the filter: a repo with no secrets at all is a valid
+          # state, and grep exiting 1 there would fail the step under pipefail.
+          names=$(sort -u /tmp/secret-names.txt \
+            | { grep -E '^[A-Za-z_][A-Za-z0-9_]*$' || true; } \
+            | tr '\n' ' ')
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "names=${names}" >> "$GITHUB_OUTPUT"
+          echo "Read $(printf '%s' "${names}" | wc -w) configured secret name(s)."
+
+  # No credentials. Consumes the names produced above as ordinary data.
+  secret-presence:
+    name: Check declared secrets exist
+    needs: secret-names
+    if: needs.secret-names.outputs.available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check declared secrets exist
+        env:
+          # Names only, via env rather than script interpolation. No secret
+          # values exist anywhere in this job.
+          SECRET_NAMES: ${{ needs.secret-names.outputs.names }}
+        run: |
+          set -euo pipefail
+          tr ' ' '\n' <<< "${SECRET_NAMES}" \
+            | { grep -E '^[A-Za-z_][A-Za-z0-9_]*$' || true; } > /tmp/secret-names.txt
+          SECRET_NAMES_FILE=/tmp/secret-names.txt \
+            python3 scripts/helio/check_workflow_inventory.py
