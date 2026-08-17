@@ -56,9 +56,14 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 ### Build All (`build_all.yml`)
 - Triggers on push/PR to `main`, `release/*` and `orca-latest-parity-bambu`
 - Runs full build matrix + unit tests + Flatpak builds
-- **On `orca-latest-parity-bambu`, PR builds are opt-in**: every job carries an `if:`
-  requiring the PR to have the `ready-to-build` label. PRs to `main` / `release/*` are
-  not label-gated. This is how a reviewer asks for build artifacts on a parity PR.
+- **On `orca-latest-parity-bambu`, PR builds are opt-in**: the PR must carry the
+  `ready-to-build` label. PRs to `main` / `release/*` are not label-gated. This is how a
+  reviewer asks for build artifacts on a parity PR. Four jobs enforce it directly —
+  `build_linux`, `build_windows`, `build_macos_arch`, `flatpak` each carry the `if:`.
+  The other two do not: `build_macos_universal` (`needs: build_macos_arch`) and
+  `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
+  outcome today, but the gate on those two is inherited, not stated — dropping or
+  re-pointing a `needs:` would let them run unlabelled.
 - **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
   the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
   never starts the workflow at all and the `ready-to-build` label does nothing — the

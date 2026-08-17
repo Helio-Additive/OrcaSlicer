@@ -38,9 +38,13 @@ on:
      # triggers this workflow, so applying `ready-to-build` to such a PR is silently
      # inert (see PR #109, which had to be built by manual dispatch instead).
      #
-     # This does NOT make profile syncs build automatically: every job below is
-     # gated on `contains(labels.*.name, 'ready-to-build')` for PRs whose base is
-     # `orca-latest-parity-bambu`, so an unlabelled profile sync still skips.
+     # This does NOT make profile syncs build automatically: for PRs whose base is
+     # `orca-latest-parity-bambu` the build is gated on
+     # `contains(labels.*.name, 'ready-to-build')`, so an unlabelled profile sync
+     # still skips. Four jobs carry that `if:` themselves (build_linux,
+     # build_windows, build_macos_arch, flatpak); build_macos_universal and
+     # unit_tests skip transitively via `needs:` on build_macos_arch and
+     # build_linux respectively.
      #
      # The one real widening is a PR touching only these two paths that targets
      # `main` / `release/*` — either profiles or translations, on `opened`,
