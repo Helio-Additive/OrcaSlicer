@@ -32,16 +32,22 @@ jobs:
         run: |
           RELEASE_BRANCH="${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}"
 
-          # Find last-synced baseline
-          if git rev-parse "helio-last-synced" >/dev/null 2>&1; then
-            BASELINE_COMMIT=$(git rev-parse "helio-last-synced")
-            BASELINE_TAG=$(git tag -l 'v*' --points-at "$BASELINE_COMMIT" | head -1)
-            if [ -z "$BASELINE_TAG" ]; then
-              BASELINE_TAG="helio-last-synced"
-            fi
-          else
+          # Baseline: the upstream release this branch actually holds.
+          #
+          # This used to read the `helio-last-synced` tag. That tag points at an
+          # UPSTREAM commit, and GitHub refuses to let any App token create or
+          # update a ref that makes upstream's `.github/workflows/**` newly
+          # reachable without the `workflows` permission — which a workflow
+          # cannot grant itself. So the tag has never been movable from CI and
+          # sat at v2.3.2-rc2 across three releases, which meant this digest
+          # reported long-synced releases as new. `version.inc` records the same
+          # fact, is written by the sync merge itself, and needs no permission.
+          BASELINE_TAG="v$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc)"
+          if [ "$BASELINE_TAG" = "v" ] || ! git rev-parse -q --verify "$BASELINE_TAG^{commit}" >/dev/null; then
+            echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
             BASELINE_TAG="v2.3.2-rc2"
           fi
+          echo "Digest baseline: $BASELINE_TAG (from version.inc)"
 
           # New tags since baseline
           NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
