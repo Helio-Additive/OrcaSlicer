@@ -715,13 +715,31 @@ Two rules keep that true, and both are load-bearing:
    warning under `set -u`, where an unset variable aborts the step instead of
    warning and carrying on.
 
-   Candidates are ordered by **ancestry** (`git describe` on each successive
-   parent), not by tag date — tags sharing a timestamp sort arbitrarily, and a
-   base one release too new is the very thing being rejected.
+   The candidate records themselves are evaluated **newest-first by ancestry,
+   with fall-through**: strictly-held on any candidate beats degraded
+   acceptance on any, and the walk below a candidate begins only after every
+   newer candidate has failed. Record preference — version.inc, then the
+   tracking tag, then (when the records self-name the target) the target's
+   first parent, appended last — is *not* ancestry order, and evaluating in
+   record order let a stale tracking tag's walk-down defeat a strictly newer
+   candidate that validates: with the tree fully holding the target and the
+   tag stale at v2.3.2, the tag was base-ok-with-unknowns, its strict walk
+   grafted v2.3.0, and the expected-no-op verification merge conflicted on
+   content already on the branch — the weekly treadmill of #110 for an
+   already-merged release.
+
+   Within the walk, releases are ordered by **ancestry** (`git describe` on
+   each successive parent), not by tag date — tags sharing a timestamp sort
+   arbitrarily, and a base one release too new is the very thing being
+   rejected.
 
    A candidate that fails is not simply dropped: the run walks down to the newest
    commit whose content *is* present and grafts that, warning loudly and naming
-   the files that were never applied. Rejecting outright leaves no graft, and the
+   the files that were never applied. The walk prefers a provably-held base and
+   falls back to a merely base-ok one only when the strict walk exhausts
+   `MAX_WALK` — the fallback then carries undecidable paths by construction, so
+   the run emits the same warning naming them that the base-ok candidate case
+   emits. Rejecting outright leaves no graft, and the
    merge then runs against the ancient pre-squash ancestor and conflicts — the
    weekly treadmill rule 2 already had to undo once.
 

@@ -574,55 +574,104 @@ jobs:
           fi
 
           if [ "${#CANDS[@]}" -gt 0 ]; then
+            # NEWEST-FIRST, BY ANCESTRY, WITH FALL-THROUGH. The insertion order
+            # above is record preference (version.inc, then the tag, then the
+            # target's first parent), which is not ancestry order — the
+            # self-named case appends the target's first parent LAST, after a
+            # possibly ancient tracking tag. Evaluating in that order let a
+            # stale tag's walk-down win over a strictly newer candidate that
+            # validates: records self-name v2.4.2, tag stale at v2.3.2, the tag
+            # is base-ok-with-unknowns, and the strict walk below it grafts
+            # v2.3.0 — so the expected-no-op verification merge conflicts on
+            # content already on the branch, re-opening the weekly treadmill of
+            # #110 for an already-merged release. A newer candidate that
+            # validates must always beat any walk-down below an older one, so
+            # sort first (insertion sort; incomparable or equal pairs keep the
+            # record-preference order) and only walk below a candidate after
+            # every newer one has failed.
+            for (( i=1; i<${#CANDS[@]}; i++ )); do
+              c="${CANDS[$i]}"; d="${CDESC[$i]}"; j=$((i-1))
+              while [ "$j" -ge 0 ] && [ "${CANDS[$j]}" != "$c" ] && \
+                    git merge-base --is-ancestor "${CANDS[$j]}" "$c"; do
+                CANDS[j+1]="${CANDS[$j]}"; CDESC[j+1]="${CDESC[$j]}"
+                j=$((j-1))
+              done
+              CANDS[j+1]="$c"; CDESC[j+1]="$d"
+            done
+
+            # 1. Nothing missing AND nothing undecidable. Take the newest such.
             for idx in "${!CANDS[@]}"; do
               c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
-
-              # 1. Nothing missing AND nothing undecidable. Take it.
               if "$CONTENT" holds "$c"; then
                 PREV="$c"
                 echo "$d names $c and this tree holds its inherited content — using it as the merge base."
                 break
               fi
+            done
 
-              # 2. Nothing DEFINITIVELY missing, but some paths cannot be decided
-              #    from content (Helio's edit overlaps upstream's in the same
-              #    region, so the three-way merge conflicts and proves nothing).
-              #
-              #    `base-ok` used to accept this outright, on the reasoning that
-              #    a wrong rejection only costs conflict volume. That reasoning
-              #    is right about REJECTING and wrong about ACCEPTING: an
-              #    undecidable path in the BASE is exactly the shape that drops
-              #    upstream work without a conflict. If the base already carries
-              #    upstream's value for that path and the sync target has not
-              #    moved it since, the merge sees theirs == base, keeps ours, and
-              #    nobody is told. Prefer an older base where the path is still
-              #    in motion, so the merge either applies upstream's change or
-              #    conflicts — either way it is visible.
-              if "$CONTENT" base-ok "$c"; then
-                undecided=$("$CONTENT" unknown "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
-                clean=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
-                if [ -n "$clean" ]; then
-                  PREV="$clean"
-                  echo "::notice title=Using an older merge base::$d names \`$c\`, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content. Using \`$clean\` instead — the newest release below it whose content is provably present — so those paths are still presented by the merge instead of being resolved in Helio's favour in silence. This costs conflict volume; grafting \`$c\` would cost upstream changes without saying so."
+            # 2. Nothing DEFINITIVELY missing, but some paths cannot be decided
+            #    from content (Helio's edit overlaps upstream's in the same
+            #    region, so the three-way merge conflicts and proves nothing).
+            #
+            #    `base-ok` used to accept this outright, on the reasoning that
+            #    a wrong rejection only costs conflict volume. That reasoning
+            #    is right about REJECTING and wrong about ACCEPTING: an
+            #    undecidable path in the BASE is exactly the shape that drops
+            #    upstream work without a conflict. If the base already carries
+            #    upstream's value for that path and the sync target has not
+            #    moved it since, the merge sees theirs == base, keeps ours, and
+            #    nobody is told. Prefer an older base where the path is still
+            #    in motion, so the merge either applies upstream's change or
+            #    conflicts — either way it is visible.
+            if [ -z "$PREV" ]; then
+              for idx in "${!CANDS[@]}"; do
+                c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+                if "$CONTENT" base-ok "$c"; then
+                  undecided=$("$CONTENT" unknown "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                  clean=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
+                  if [ -n "$clean" ]; then
+                    PREV="$clean"
+                    echo "::notice title=Using an older merge base::$d names \`$c\`, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content. Using \`$clean\` instead — the newest release below it whose content is provably present — so those paths are still presented by the merge instead of being resolved in Helio's favour in silence. This costs conflict volume; grafting \`$c\` would cost upstream changes without saying so."
+                    break
+                  fi
+                  PREV="$c"
+                  echo "::warning title=Merge base accepted with undecidable paths::$d names \`$c\` and nothing is definitively missing, but ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps below it. Using it anyway, because leaving no graft conflicts against the pre-squash ancestor on every run — but if upstream changed those paths at or below \`$c\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
                   break
                 fi
-                PREV="$c"
-                echo "::warning title=Merge base accepted with undecidable paths::$d names \`$c\` and nothing is definitively missing, but ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps below it. Using it anyway, because leaving no graft conflicts against the pre-squash ancestor on every run — but if upstream changed those paths at or below \`$c\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
-                break
-              fi
+              done
+            fi
 
-              # 3. Content definitively missing.
-              # Name the files, not just the verdict: "the tree does not hold
-              # v2.4.2" is not actionable, "src/mid.c was never applied" is.
-              rejected=$("$CONTENT" missing "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
-              held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" || true)
-              if [ -n "$held" ]; then
-                PREV="$held"
-                echo "::warning title=Records do not match the tree::$d names \`$c\`, but this tree does not hold that release's inherited content (never applied: ${rejected:-see log}). Using \`$held\` instead — the newest commit whose content is actually present. Grafting \`$c\` would make git read the missing changes as deliberate reversions and drop them from this sync. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
-                break
-              fi
-              echo "::warning title=Merge base candidate rejected::$d names \`$c\`, but this tree does not hold its content (never applied: ${rejected:-see log}) and no validated older base was found within $MAX_WALK steps."
-            done
+            # 3. Every candidate has content definitively missing. Walk down
+            #    below each in turn, and name the files, not just the verdict:
+            #    "the tree does not hold v2.4.2" is not actionable,
+            #    "src/mid.c was never applied" is.
+            #
+            #    The walk mirrors case 2's preference: a provably-held base
+            #    first, and only on failure the permissive one — which then by
+            #    construction carries undecidable paths, the shape that keeps
+            #    Helio's value without a conflict, so it gets the same warning
+            #    naming them that case 2 emits. The permissive walk alone used
+            #    to be silent about exactly that.
+            if [ -z "$PREV" ]; then
+              for idx in "${!CANDS[@]}"; do
+                c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+                rejected=$("$CONTENT" missing "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
+                if [ -z "$held" ]; then
+                  held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" || true)
+                  if [ -n "$held" ]; then
+                    undecided=$("$CONTENT" unknown "$held" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                    echo "::warning title=Merge base accepted with undecidable paths::The fallback base \`$held\` has nothing definitively missing, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps. If upstream changed those paths at or below \`$held\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
+                  fi
+                fi
+                if [ -n "$held" ]; then
+                  PREV="$held"
+                  echo "::warning title=Records do not match the tree::$d names \`$c\`, but this tree does not hold that release's inherited content (never applied: ${rejected:-see log}). Using \`$held\` instead — the newest commit whose content is actually present. Grafting \`$c\` would make git read the missing changes as deliberate reversions and drop them from this sync. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
+                  break
+                fi
+                echo "::warning title=Merge base candidate rejected::$d names \`$c\`, but this tree does not hold its content (never applied: ${rejected:-see log}) and no validated older base was found within $MAX_WALK steps."
+              done
+            fi
           fi
 
           # Graft only when PREV is a real, newer common ancestor that git does

@@ -133,6 +133,16 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
     def verinc(v):
         return 'set(SoftFever_VERSION "%s")\n' % v
 
+    def cfg(state):
+        # 20 lines with one contested region at line 10. `state` is upstream's
+        # successive rewrite of that region; the fork's own edit lands on the
+        # same line, so any window straddling one of upstream's rewrites is
+        # undecidable (the three-way merge conflicts) without anything being
+        # definitively missing.
+        lines = ["line %d" % i for i in range(1, 21)]
+        lines[9] = ("line 10 " + state).rstrip()
+        return "\n".join(lines) + "\n"
+
     if chain == "thin":
         commit("2.4.0", {"version.inc": verinc("2.4.0"), "src/core.c": "int main(){}\n"})
         sh("git tag v2.4.0", up)
@@ -193,6 +203,84 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         sh("git tag v2.4.1", up)
         commit("2.4.2", {"src/core.c": "int main(){return 0;}\n"})
         sh("git tag v2.4.2", up)
+    elif chain == "prefer_newer":
+        # Round 9: the candidate-ORDER hole. Upstream rewrites the same cfg
+        # region every CONTENT_DEPTH (=4) releases, so every window a strict
+        # walk can ask about below v2.4.1 straddles one rewrite and `holds`
+        # keeps answering unknown — the walk exhausts MAX_WALK instead of
+        # finding a provably-held base. version.inc (written once, so it never
+        # re-enters any window diff) self-names the target, which puts the
+        # target's first parent in the candidate list; the tracking tag is
+        # stale at v2.3.2. Evaluating the stale tag first sends its case-2
+        # walk-down to v2.3.0 and the verification merge conflicts on content
+        # already on the branch; evaluating the strictly newer target^1 first
+        # accepts it (undecidable tolerated, nothing newer left to try) and
+        # the merge is the designed clean no-op.
+        commit("2.3.0", {"version.inc": verinc("2.4.2"),
+                         "src/core.c": "int main(){}\n", "src/cfg.ini": cfg("")})
+        sh("git tag v2.3.0", up)
+        commit("2.3.1", {"src/cfg.ini": cfg("v1")})
+        sh("git tag v2.3.1", up)
+        for n in (2, 3, 4):
+            commit("2.3.%d" % n, {"src/f%d.c" % n: "// f%d\n" % n})
+            sh("git tag v2.3.%d" % n, up)
+        commit("2.3.5", {"src/cfg.ini": cfg("v2")})
+        sh("git tag v2.3.5", up)
+        for n in (6, 7, 8):
+            commit("2.3.%d" % n, {"src/f%d.c" % n: "// f%d\n" % n})
+            sh("git tag v2.3.%d" % n, up)
+        commit("2.3.9", {"src/cfg.ini": cfg("v3")})
+        sh("git tag v2.3.9", up)
+        commit("2.4.1", {"src/f10.c": "// f10\n"})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
+        commit("2.4.2", {"src/f11.c": "// f11\n"})
+        sh("git tag v2.4.2", up)
+    elif chain == "case3_strict":
+        # Round 9: version.inc names v2.4.3, whose mid.c the fork never got
+        # (case 3). Below it, v2.4.2 is base-ok but undecidable (the fork's
+        # cfg edit overlaps v2.4.1's rewrite) while v2.4.0 is provably held.
+        # The permissive walk stops at v2.4.2 — and if the fork's cfg edit in
+        # fact replaced upstream's v2.4.1 content, that base silently drops
+        # the rewrite from the sync. The strict walk lands on v2.4.0, where
+        # the merge has to present it.
+        commit("2.4.0", {"version.inc": verinc("2.4.3"),
+                         "src/core.c": "int main(){}\n", "src/cfg.ini": cfg("")})
+        sh("git tag v2.4.0", up)
+        commit("2.4.1", {"src/cfg.ini": cfg("v1")})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.1", up)
+        commit("2.4.2", {"src/f242.c": "// f242\n"})
+        sh("git tag v2.4.2", up)
+        commit("2.4.3", {"src/mid.c": "// content that only v2.4.3 introduced\n"})
+        sh("git tag v2.4.3", up)
+        commit("2.4.4", {"src/newfile.c": "// genuinely new upstream work\n"})
+        sh("git tag v2.4.4", up)
+    elif chain == "case3_fallback":
+        # Round 9: same case-3 entry, but the rewrite ladder (see
+        # prefer_newer) makes the strict walk below v2.4.0 exhaust MAX_WALK,
+        # so the permissive fallback is the only base left — and it carries
+        # the undecidable cfg path, which the run must now say out loud.
+        commit("2.3.0", {"version.inc": verinc("2.4.0"),
+                         "src/core.c": "int main(){}\n", "src/cfg.ini": cfg("")})
+        sh("git tag v2.3.0", up)
+        commit("2.3.1", {"src/cfg.ini": cfg("v1")})
+        sh("git tag v2.3.1", up)
+        for n in (2, 3, 4):
+            commit("2.3.%d" % n, {"src/f%d.c" % n: "// f%d\n" % n})
+            sh("git tag v2.3.%d" % n, up)
+        commit("2.3.5", {"src/cfg.ini": cfg("v2")})
+        sh("git tag v2.3.5", up)
+        for n in (6, 7, 8):
+            commit("2.3.%d" % n, {"src/f%d.c" % n: "// f%d\n" % n})
+            sh("git tag v2.3.%d" % n, up)
+        commit("2.3.9", {"src/cfg.ini": cfg("v3")})
+        sh("git tag v2.3.9", up)
+        commit("2.4.0", {"src/mid.c": "// content that only v2.4.0 introduced\n"})
+        v241 = git(up, "rev-parse", "HEAD")
+        sh("git tag v2.4.0", up)
+        commit("2.4.1", {"src/newfile.c": "// genuinely new upstream work\n"})
+        sh("git tag v2.4.1", up)
     else:
         commit("base", {"version.inc": verinc("2.4.1"), "src/core.c": "int main(){}\n"})
         v241 = git(up, "rev-parse", "HEAD")
@@ -222,6 +310,14 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         wide_path = os.path.join(fork, "src", "wide.c")
         body = open(wide_path).read()
         open(wide_path, "w").write(body.replace("line 38\n", "line 38 helio thermal_index\n"))
+    if chain in ("prefer_newer", "case3_strict", "case3_fallback"):
+        # Helio rewrites the contested cfg region on top of whatever state the
+        # fork's base release carries. Indistinguishable from never having
+        # received upstream's rewrite of the same line — that is the point.
+        cfg_path = os.path.join(fork, "src", "cfg.ini")
+        body = open(cfg_path).read()
+        open(cfg_path, "w").write(
+            re.sub(r"^line 10.*$", "line 10 helio", body, flags=re.M))
     open(os.path.join(fork, "version.inc"), "w").write(verinc(version))
     sh("git add -A && git commit -q -m 'Upstream sync: v2.4.2 (squashed)'", fork)
 
@@ -300,7 +396,7 @@ def run_graft_and_merge(fork, target, sync_sha):
 
 def scenario(name, expect_skip, expect_noop, expect_file=None,
              no_silent_drop=False, expect_text=None, expect_file_extra=None,
-             expect_graft_warning=None, **kw):
+             expect_graft_warning=None, expect_base_tag=None, **kw):
     """no_silent_drop: pass if the merge conflicts (safe — a human resolves it)
     OR completes cleanly with every expected file present. Fail only on the
     dangerous combination: a clean merge that quietly omits upstream content."""
@@ -335,17 +431,32 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
             results.append("grafted=%s" % gout.get("grafted"))
             results.append("merge=%s" % status)
             results.append("noop=%s" % noop)
+            # WHICH base was grafted, not merely that one was. The round-9
+            # findings are precisely about the loop choosing a wrong-but-
+            # functional base, which every outcome-only assertion here forgives
+            # when the merge happens to succeed anyway.
+            if expect_base_tag:
+                want_base = git(fork, "rev-list", "-n1", expect_base_tag)
+                got_base = gout.get("prev_upstream", "")
+                results.append("base==%s=%s" % (expect_base_tag, got_base == want_base))
+                if got_base != want_base:
+                    ok_files = False
+                    FAILURES.append(name + " / base != " + expect_base_tag)
             # Asserting the WARNING TEXT, not just that the step survived.
             # Without it this scenario passes for any route through the loop,
             # including one that never reaches the branch it exists to cover.
             if expect_graft_warning:
                 blob = gp.stdout + gp.stderr
-                got = expect_graft_warning in blob
-                results.append("graft warns %r=%s" % (expect_graft_warning, got))
-                if not got:
-                    results.append("MISSING -> did not reach the intended branch")
-                    ok_files = False
-                    FAILURES.append(name + " / graft warning")
+                needles = ([expect_graft_warning]
+                           if isinstance(expect_graft_warning, str)
+                           else expect_graft_warning)
+                for needle in needles:
+                    got = needle in blob
+                    results.append("graft warns %r=%s" % (needle, got))
+                    if not got:
+                        results.append("MISSING -> did not reach the intended branch")
+                        ok_files = False
+                        FAILURES.append(name + " / graft warning")
             # ok_steps guards this: a conflict is only "safe" when it is the
             # conflict Actions would actually have reached.
             if ok_steps and ok_files and no_silent_drop and status == "conflict":
@@ -706,6 +817,33 @@ r.append(scenario(
     version="2.4.7", chain="deep", fork_at="v2.4.0", tag_at="v2.4.7",
     target_tag="v2.4.8", no_silent_drop=True,
     expect_graft_warning="no validated older base was found within 6 steps"))
+
+# Round 9 (review of PR #111 itself). The graft loop evaluated candidates in
+# RECORD order (version.inc, tag, then target^1 appended last), so a stale
+# tracking tag's walk-down could beat a strictly newer candidate that
+# validates; and case 3's walk-down was permissive-only, silently grafting a
+# base with undecidable paths even when a provably-held one existed below it.
+print()
+r.append(scenario(
+    "ROUND 9: records self-name the target, tag stale at v2.3.2 -> the newer"
+    " target^1 candidate must win and the verification merge must be the"
+    " designed no-op, not a conflict",
+    expect_skip=False, expect_noop=True, expect_base_tag="v2.4.1",
+    version="2.4.2", chain="prefer_newer", fork_at="v2.4.2", tag_at="v2.3.2"))
+r.append(scenario(
+    "ROUND 9: case-3 walk-down prefers a provably-held base (v2.4.0) over a"
+    " nearer undecidable one (v2.4.2), so the overlapped path is presented",
+    expect_skip=False, expect_noop=None, expect_base_tag="v2.4.0",
+    version="2.4.3", chain="case3_strict", fork_at="v2.4.2", no_tag=True,
+    target_tag="v2.4.4", no_silent_drop=True))
+r.append(scenario(
+    "ROUND 9: case-3 falls back to an undecidable base only after the strict"
+    " walk fails, and then the run names the undecidable paths",
+    expect_skip=False, expect_noop=False, expect_base_tag="v2.3.9",
+    expect_file=["src/mid.c", "src/newfile.c"],
+    expect_graft_warning=["The fallback base", "src/cfg.ini"],
+    version="2.4.0", chain="case3_fallback", fork_at="v2.3.9", no_tag=True,
+    target_tag="v2.4.1"))
 
 
 # ---------------------------------------------------------------------------
