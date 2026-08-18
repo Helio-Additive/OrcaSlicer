@@ -590,11 +590,12 @@ work**, with every later run reaching the same wrong conclusion. That failure is
 invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
 baseline and sets an expectation, and the merged-tree comparison decides.
 
-Two rules keep that true, and both are load-bearing:
+Three rules keep that true, and all of them are load-bearing:
 
 1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
-   a clean no-diff trial merge, or an identical merged tree. That is what lets the
-   tag (unlike `version.inc`) skip a run on its own.
+   a clean no-diff trial merge, the tree-level content test, a merged resolution
+   PR for the exact target commit, or an identical merged tree. That is what lets
+   the tag (unlike `version.inc`) skip a run on its own.
 
    "A sync PR was opened" is **not** such evidence, and the workflow used to treat
    it as if it were: the tag advanced as soon as the PR was created. That made the
@@ -603,7 +604,7 @@ Two rules keep that true, and both are load-bearing:
    release the branch never received, so the `check` step skipped it for good; and
    while the PR merely sat open, the next release grafted that unreceived commit as
    the merge base. The tag now moves only once the content is on the target branch —
-   the first run after the sync PR merges takes one of the three paths above and
+   the first run after the sync PR merges takes one of the paths above and
    advances it there. Until then each run redoes the merge and refreshes the same
    PR, which is the honest description of the state: not synced yet.
 2. **The graft base must be a *strict* ancestor of the sync target.**
@@ -708,12 +709,15 @@ Two rules keep that true, and both are load-bearing:
    Preferring an older base costs conflict volume, which is the direction this
    whole mechanism chooses everywhere else.
 
-   `MAX_WALK` and `CONTENT_DEPTH` are set in the `check` and `graft` steps' own
-   `env:` blocks, not only inside `upstream_content.sh`. The script runs as a
-   separate process, so a value defined only there is invisible to the workflow's
-   shell — and the graft step interpolates `$MAX_WALK` into its rejection
-   warning under `set -u`, where an unset variable aborts the step instead of
-   warning and carrying on.
+   `MAX_WALK` is set in the `check` and `graft` steps' own `env:` blocks, not
+   only inside `upstream_content.sh`. The script runs as a separate process, so
+   a value defined only there is invisible to the workflow's shell — and the
+   graft step interpolates `$MAX_WALK` into its rejection warnings under
+   `set -u`, where an unset variable aborts the step instead of warning and
+   carrying on. `CONTENT_DEPTH` deliberately has no such duplication: no step
+   body expands it, so it lives only in the script, whose
+   `CONTENT_DEPTH="${CONTENT_DEPTH:-4}"` default is the single source — both
+   steps call the same script and therefore always validate at the same depth.
 
    The candidate records themselves are evaluated **newest-first by ancestry,
    with fall-through**: strictly-held on any candidate beats degraded
@@ -739,9 +743,9 @@ Two rules keep that true, and both are load-bearing:
    falls back to a merely base-ok one only when the strict walk exhausts
    `MAX_WALK` — the fallback then carries undecidable paths by construction, so
    the run emits the same warning naming them that the base-ok candidate case
-   emits. Rejecting outright leaves no graft, and the
-   merge then runs against the ancient pre-squash ancestor and conflicts — the
-   weekly treadmill rule 2 already had to undo once.
+   emits. Rejecting outright leaves no graft, and the merge then runs against
+   the ancient pre-squash ancestor and conflicts — the weekly treadmill rule 2
+   already had to undo once.
 
    The window is four releases. Any finite window has a floor — a change older
    than the base is outside the diff and invisible — so this is a depth/cost
