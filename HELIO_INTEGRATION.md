@@ -521,6 +521,54 @@ branch there, and it now appears in the conflict list of **8 of 13** sync issues
 Both still have `workflow_dispatch`, so either can be run by hand against a sync
 branch if a specific sync warrants it.
 
+### Rule 15: Upstream code defects are upstream's (do not patch them here)
+
+Numbered 15 to leave room for #113's Rule 14.
+
+Rules 11, 12 and 13 each say "upstream owns this, do not diverge" about one asset
+class — branding docs, workflows, profiles. **The same answer applies to upstream
+source code, and this rule says so explicitly**, because its absence is what let
+PR #116 get opened: a two-line patch to `src/libslic3r/Print.hpp`, which is
+upstream code carrying an upstream bug that upstream had *already fixed*.
+
+**This fork maintains Helio code.** A defect in a file Helio has never touched is
+not ours to fix, however well diagnosed and however small the patch looks.
+
+**The cost is not the two lines, it is the divergence.** Rule 12's argument
+applies verbatim: a local edit to an upstream-owned file has to be reconciled at
+every future sync, forever. It also silently adds a Helio touchpoint to the map
+below that nobody decided to take on. Paying that indefinitely to front-run a fix
+upstream has already written — and will deliver on its own with the next sync — is
+a bad trade even when the patch is correct.
+
+**The test, and it is cheap:** is the file in the touchpoint map in this document?
+`grep` it. If the file has no Helio changes, it is not ours. `Print.hpp` appears
+zero times in that map; the map already answered the question before #116 was
+opened.
+
+**"But it is breaking our CI" is not an exception.** That was exactly #116's
+reasoning: an upstream defect made a test fail intermittently, the red check
+blocked a Helio PR, and fixing upstream's code looked like the direct route to
+green. The blocker was real; the conclusion did not follow. When an upstream
+defect costs us something:
+
+1. Confirm our diff did not cause it —
+   `git diff --stat <base> <head> -- src/ tests/ deps/ resources/ CMakeLists.txt version.inc`.
+   Empty means the build inputs are identical and the failure is inherited.
+2. Record it as an issue so the next person does not re-investigate it (#115 is
+   the worked example), including the upstream commit that fixes it if there is one.
+3. Rebuild, or wait for the sync that carries the fix. Do not patch, and do not
+   quarantine a test to make it quiet either.
+
+**Do not report it upstream on Helio's behalf** unless doing so serves Helio.
+Filing issues or PRs upstream is a maintenance commitment — follow-up, review
+rounds, defending the change — and this fork has not taken that on.
+
+**Where this genuinely is ours**, and the boundary is not subtle: the file already
+carries Helio changes (it is in the touchpoint map), the defect is in Helio code,
+or the defect is in Helio-owned CI (`.github/workflows/helio-*.yml`,
+`scripts/helio/**`). Those we own outright.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a

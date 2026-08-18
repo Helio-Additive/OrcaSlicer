@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, conflict resolution rules during upstream syncs, and the complete file-by-file modification map, see **`HELIO_INTEGRATION.md`**.
 
+### Scope: this fork maintains Helio code
+
+**A bug in upstream code is not ours to fix, even when it costs us.** Before changing any file, check whether it carries Helio changes — the touchpoint map in `HELIO_INTEGRATION.md` is the list. If it has none, it is upstream's, and a local patch buys a divergence to reconcile at every future sync forever, usually to front-run a fix upstream has already written.
+
+This applies to a failing test, a broken build, or a red check that is blocking a Helio PR. "It is breaking our CI" is the reasoning that produced PR #116 — a patch to `src/libslic3r/Print.hpp`, a file with zero Helio changes, for a defect upstream had already fixed. It was closed, not merged. Confirm our diff did not cause it, record it as an issue (#115 is the worked example), then rebuild or wait for the sync. Do not patch it, do not quarantine the test, and do not file it upstream on Helio's behalf.
+
+Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), Helio code, and files already in the touchpoint map are ours outright. See `HELIO_INTEGRATION.md` → Rule 15.
+
 ## CI/CD Workflows
 
 ### Upstream Sync (`helio-upstream-sync.yml`)
