@@ -83,6 +83,9 @@ jobs:
             # The regex tolerates both `-rc2`-style and dotted `-rc.1`-style
             # SemVer suffixes. `|| true` keeps pipefail happy when grep finds
             # nothing (only prereleases exist) — handled by the empty-check below.
+            # Must stay byte-identical to PRERELEASE_RE in
+            # scripts/helio/upstream_content.sh, whose ancestry walk uses the
+            # same exclusion (drift is pinned by test_sync_noop_guards.py).
             LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
               | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)

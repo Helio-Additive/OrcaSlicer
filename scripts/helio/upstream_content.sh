@@ -65,6 +65,8 @@ EMPTY_BLOB="0000000000000000000000000000000000000000"
 # release family: `base_below v2.4.2 2` would return v2.4.2-rc1 rather than
 # v2.4.0, the diff would not span the release that was actually skipped, and the
 # depth guarantee this file rests on would be silently worth nothing.
+# Must stay byte-identical to the grep in helio-upstream-sync.yml's "Resolve
+# sync target" step (drift is pinned by test_sync_noop_guards.py).
 PRERELEASE_RE='-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$'
 
 # base_below <ref> <n>: the nth release tag strictly older than <ref> on its

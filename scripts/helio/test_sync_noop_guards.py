@@ -540,9 +540,33 @@ def expr_guard_selftest():
     return False
 
 
+def prerelease_re_drift():
+    """upstream_content.sh's PRERELEASE_RE and the workflow's sync-target grep
+    must be byte-identical.
+
+    Their agreement is load-bearing with no shared source: the sync target is
+    chosen by the workflow's grep, and base_below walks releases using
+    PRERELEASE_RE. If the two drift, a tag one of them counts and the other
+    skips puts the walk one release off — the window stops spanning the
+    release that was actually skipped, and the depth guarantee is silently
+    worth nothing.
+    """
+    label = "harness: PRERELEASE_RE matches the workflow's sync-target grep"
+    m = re.search(r"^PRERELEASE_RE='([^']+)'", open(CONTENT_SH).read(), re.M)
+    ok = bool(m) and ("grep -Evi -- '%s'" % m.group(1)) in open(WF).read()
+    print(("  PASS  " if ok else "  FAIL  ") + label)
+    if not ok:
+        print("        the prerelease exclusion in upstream_content.sh and the"
+              " target-selection grep in helio-upstream-sync.yml have drifted"
+              " apart — change both together, they are one invariant")
+        FAILURES.append(label)
+    return ok
+
+
 print("Harness self-checks\n")
 r = []
 r.append(expr_guard_selftest())
+r.append(prerelease_re_drift())
 
 print("\nScenarios (fork tree holds v2.4.2 via a squashed commit; tag stale at v2.4.1)\n")
 # Was expect_skip=False/noop=True: the run merged, then discovered the merge
