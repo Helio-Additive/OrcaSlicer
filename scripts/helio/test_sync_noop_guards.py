@@ -868,6 +868,52 @@ b.append(boundary("`first-held` (permissive) still stops at the undecidable cand
 
 r += b
 
+
+def classify_cache():
+    """The classify cache must answer repeats and miss the moment any input
+    changes.
+
+    Poisoning the entry proves the second call really came from the cache
+    (determinism alone cannot tell a cache from a recomputation); committing to
+    the fork changes HEAD's tree, which is one of the three content ids in the
+    key, so the poisoned entry must stop being consulted.
+    """
+    label = "classify cache: identical inputs reuse the answer, a changed tree recomputes"
+    tmp = tempfile.mkdtemp()
+    try:
+        fork, _ = content_repo(tmp, overlap=True)
+        cachedir = os.path.join(tmp, "cache")
+        os.makedirs(cachedir)
+        env = {"TMPDIR": cachedir}
+        cmd = "scripts/helio/upstream_content.sh unknown v2.4.1"
+        p1 = sh(cmd, fork, env, check=False)
+        p2 = sh(cmd, fork, env, check=False)
+        entries = os.listdir(cachedir)
+        detail = ["deterministic=%s" % (p1.stdout == p2.stdout),
+                  "entries=%d" % len(entries)]
+        ok = p1.stdout == p2.stdout and "cfg.ini" in p1.stdout and bool(entries)
+        for f in entries:
+            open(os.path.join(cachedir, f), "w").write("unknown\tPOISONED\n")
+        p3 = sh(cmd, fork, env, check=False)
+        detail.append("consulted=%s" % ("POISONED" in p3.stdout))
+        ok = ok and "POISONED" in p3.stdout
+        open(os.path.join(fork, "unrelated.txt"), "w").write("x\n")
+        sh("git add -A && git commit -q -m helio-edit", fork)
+        p4 = sh(cmd, fork, env, check=False)
+        recomputed = "POISONED" not in p4.stdout and "cfg.ini" in p4.stdout
+        detail.append("recomputed=%s" % recomputed)
+        ok = ok and recomputed
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        " + " | ".join(detail))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(classify_cache())
+
 # Round 7, CodeRabbit. Reaches the LAST branch of the graft step's candidate
 # loop — every candidate rejected AND no validated base within MAX_WALK steps
 # below it. Nothing else in this file got there, which is how a `$MAX_WALK` that

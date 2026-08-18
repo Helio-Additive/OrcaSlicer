@@ -159,7 +159,7 @@ _change_state() {
 # is text processing rather than a merge per path. Only the ambiguous remainder
 # — paths where our blob matches neither side, i.e. roughly Helio's own
 # touchpoints — costs a three-way merge.
-classify_paths() {
+_classify_paths() {
   local base="$1" cand="$2" meta path orig theirs ours
   declare -A U_ORIG U_NEW OURS
 
@@ -236,6 +236,31 @@ classify_paths() {
       unknown) printf 'unknown\t%s\n' "$path" ;;
     esac
   done
+}
+
+# The classification is a pure function of three trees — the base's, the
+# candidate's, and HEAD's — and the callers keep re-asking it: every verb runs
+# it, and the graft step's candidate phases plus the check step's warnings ask
+# about the same (base, candidate) pair several times per run, each costing two
+# full-tree raw diffs and a merge per ambiguous path. Cache each answer in a
+# file keyed on the three content ids. Keying on content is what makes a stale
+# entry impossible — any input changing changes the key, so a new HEAD, a
+# retagged candidate, or another repository all miss rather than mislead. The
+# write is atomic (mktemp + mv) so a killed run cannot leave a half answer for
+# the next one; an empty file is a valid answer (nothing missing or unknown).
+classify_paths() {
+  local base cand cache tmp
+  # No base: start of history, nothing underneath — same empty answer the
+  # uncached diff produced for it.
+  [ -n "${1:-}" ] || return 0
+  base=$(git rev-parse "$1^{commit}")
+  cand=$(git rev-parse "$2^{commit}")
+  cache="${TMPDIR:-/tmp}/helio-upstream-content-${base}-${cand}-$(git rev-parse 'HEAD^{tree}')"
+  if [ -f "$cache" ]; then cat "$cache"; return 0; fi
+  tmp=$(mktemp "${cache}.XXXXXX")
+  _classify_paths "$base" "$cand" > "$tmp"
+  mv -f "$tmp" "$cache"
+  cat "$cache"
 }
 
 missing_paths()  { classify_paths "$1" "$2" | sed -n 's/^missing\t//p'; }
