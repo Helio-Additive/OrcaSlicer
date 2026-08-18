@@ -564,8 +564,24 @@ release shows a non-empty diff, reads as Helio-owned, and this rule then waves
 through exactly the patch it exists to prevent.
 
 **Empty output means the file is byte-identical to upstream's** — no Helio content
-in it, so a defect in it is not ours. Non-empty means we carry changes there and
-it is at least partly ours; read the diff before deciding.
+in it, so a defect in it is not ours. Non-empty means *something* differs, which
+is a prompt to read the diff, **not** by itself proof of Helio ownership: check
+whether the hunks are Helio's or upstream changes made after the baseline.
+
+**`version.inc` names a tagged release, so it is the right baseline only for a
+tag-mode sync.** Two cases break it, both in the dangerous direction — content we
+merely inherited shows as a difference and reads as Helio-owned:
+
+- After a **`main`-mode sync** (`sync_target: main`) the tree holds upstream commits
+  newer than any tag, while `version.inc` may still name the last release.
+- A **local version bump** landing before the content it names — a case the sync
+  workflow already guards against for its own baseline.
+
+When either applies, compare against the upstream **commit** the branch actually
+holds rather than the tag: the sync PR that brought it records that sha. If you
+cannot establish the baseline confidently, treat ownership as unresolved and ask
+— an unresolved answer is recoverable, a wrong "this is ours" becomes a permanent
+divergence.
 
 Use the map as a quick first look and for the *why* (it records what each
 touchpoint is for), but let the git comparison settle disagreements — it cannot go
@@ -595,8 +611,17 @@ defect costs us something:
    `build_*.bat` scripts, `.github/workflows/build_*.yml`, and `scripts/` all
    reach the built or tested artifact.
 
-   Inherited means the changed files **cannot** affect the artifact — in practice
-   only documentation. Anything else, assume ours until shown otherwise.
+   Inherited means the changed files **cannot** affect the artifact — documentation
+   and repo metadata that no build or test step reads. Anything else, assume ours
+   until shown otherwise.
+
+   "Assume ours" means **look before concluding inherited**, not block or escalate.
+   The look is bounded: does the failing job read any of the changed paths? For a
+   PR that touched only an unrelated workflow, answering that takes a minute and
+   the answer is usually no. Spending that minute unnecessarily is the cost this
+   default deliberately accepts, because the opposite error — filing our own
+   regression as upstream's, where step 3 then tells everyone not to fix it — is
+   the one that leaves a real bug unowned.
 
    Use the three-dot form: it diffs from the **merge base**, so a release branch
    that moved on after the branch was cut does not show up as changes this PR
