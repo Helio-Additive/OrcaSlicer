@@ -42,8 +42,17 @@ jobs:
           # sat at v2.3.2-rc2 across three releases, which meant this digest
           # reported long-synced releases as new. `version.inc` records the same
           # fact, is written by the sync merge itself, and needs no permission.
-          BASELINE_TAG="v$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc)"
-          if [ "$BASELINE_TAG" = "v" ] || ! git rev-parse -q --verify "$BASELINE_TAG^{commit}" >/dev/null; then
+          # `|| true` and the readability test matter: this step runs under
+          # `bash -e -o pipefail`, so an unreadable version.inc would abort here
+          # and the fallback below — the whole reason it exists — would never
+          # run. `head -1` keeps a second matching line from splicing a newline
+          # into the ref name.
+          BASELINE_VER=""
+          if [ -r version.inc ]; then
+            BASELINE_VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1 || true)
+          fi
+          BASELINE_TAG="v$BASELINE_VER"
+          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "$BASELINE_TAG^{commit}" >/dev/null; then
             echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
             BASELINE_TAG="v2.3.2-rc2"
           fi
