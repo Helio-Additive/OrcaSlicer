@@ -608,6 +608,21 @@ jobs:
               if "$CONTENT" holds "$c"; then
                 PREV="$c"
                 echo "$d names $c and this tree holds its inherited content — using it as the merge base."
+                # Every candidate ordered ahead of this one is strictly newer
+                # and lost. Picking the right base is not the same as saying
+                # why: without this the only trace of a record that disagrees
+                # with the tree is a line naming some other commit, and a
+                # version.inc bumped ahead of its content stays wrong for ever
+                # because each run silently routes around it.
+                for (( k=0; k<idx; k++ )); do
+                  skipped_missing=$("$CONTENT" missing "${CANDS[$k]}" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                  if [ -n "$skipped_missing" ]; then
+                    echo "::warning title=Records do not match the tree::${CDESC[$k]} names \`${CANDS[$k]}\`, which is newer, but this tree does not hold that release's inherited content (never applied: $skipped_missing). Using \`$c\` instead — the newest candidate whose content is provably present. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
+                  else
+                    skipped_unknown=$("$CONTENT" unknown "${CANDS[$k]}" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                    echo "::notice title=Newer candidate passed over::${CDESC[$k]} names \`${CANDS[$k]}\`, which is newer, but whether this tree holds upstream's version of ${skipped_unknown:-some paths} cannot be decided from content. Using \`$c\` instead, which is provably held."
+                  fi
+                done
                 break
               fi
             done
