@@ -111,6 +111,11 @@ PRS="$(fetch_prs)" || {
 # awkward to keep readable in jq, and python3 is present on every runner.
 # ---------------------------------------------------------------------------
 RESULT="$(
+  # The single quotes around the Python source are deliberate and load-bearing:
+  # this is Python, not shell, and `$` in it must reach the interpreter intact.
+  # Every shell value it needs is passed as an explicit argv entry below, which
+  # is also what keeps a branch name or sha from being interpolated into source.
+  # shellcheck disable=SC2016
   printf '%s' "$PRS" | python3 -c '
 import json, sys
 
