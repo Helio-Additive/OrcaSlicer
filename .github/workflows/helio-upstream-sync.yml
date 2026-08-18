@@ -139,8 +139,17 @@ jobs:
           # and every decision below has a fallback that does not need it. It
           # does need to be LOUD, because a tag that silently never moves is how
           # this workflow came to re-propose an already-merged release (#110).
+          # Callers write `skip=true` to $GITHUB_OUTPUT BEFORE calling this: the
+          # skip decision is the run's product and the tag is bookkeeping, so a
+          # tag failure must never cost a run whose conclusion was already
+          # reached. The local write is guarded for the same reason the noop
+          # step guards its own — under the Actions default `-e` an unguarded
+          # `git tag -f` failing here would abort the step instead of warning.
           update_tracking_tag() {
-            git tag -f "$TRACKING_TAG" "$1"
+            git tag -f "$TRACKING_TAG" "$1" || {
+              echo "::warning title=Tracking tag not updated::Could not write $TRACKING_TAG locally."
+              return 0
+            }
             if git push origin "refs/tags/$TRACKING_TAG" --force; then
               echo "Updated $TRACKING_TAG -> $1"
             else
@@ -305,8 +314,8 @@ jobs:
           # done out-of-band (e.g. a manual PR).  Update the tracking tag and skip.
           if git merge-base --is-ancestor "$SYNC_SHA" HEAD; then
             echo "Target $SYNC_LABEL ($SYNC_SHA) is already merged into HEAD — updating tracking tag and skipping"
-            update_tracking_tag "$SYNC_SHA"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
             exit 0
           fi
 
@@ -330,8 +339,8 @@ jobs:
             if git diff --cached --quiet 2>/dev/null; then
               echo "Target $SYNC_LABEL already incorporated (squash merge detected) — updating tracking tag and skipping"
               git merge --abort 2>/dev/null || git reset --hard HEAD
-              update_tracking_tag "$SYNC_SHA"
               echo "skip=true" >> "$GITHUB_OUTPUT"
+              update_tracking_tag "$SYNC_SHA"
               exit 0
             fi
           fi
@@ -356,8 +365,8 @@ jobs:
           # the conflict path, the out-of-band merge, and the ordinary one alike.
           if "$CONTENT" holds "$SYNC_SHA"; then
             echo "Target $SYNC_LABEL is already present in this branch's content — updating tracking tag and skipping"
-            update_tracking_tag "$SYNC_SHA"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
             exit 0
           fi
 
@@ -403,8 +412,8 @@ jobs:
               "$CONTENT" unknown "$SYNC_SHA" 2>/dev/null | sed 's/^/unknown: /' | head -40 || true
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            update_tracking_tag "$SYNC_SHA"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
             exit 0
           fi
 
