@@ -12,7 +12,7 @@ This is the Helio-Additive fork of OrcaSlicer. For Helio integration details, co
 
 This applies to a failing test, a broken build, or a red check that is blocking a Helio PR. "It is breaking our CI" is the reasoning that produced PR #116 — a patch to `src/libslic3r/Print.hpp`, a file with zero Helio changes, for a defect upstream had already fixed. It was closed, not merged. Confirm our diff did not cause it, record it as an issue (#115 is the worked example), then rebuild or wait for the sync. Do not patch it, do not quarantine the test, and do not file it upstream on Helio's behalf.
 
-Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), Helio code, and files already in the touchpoint map are ours outright. See `HELIO_INTEGRATION.md` → Rule 15.
+Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), Helio code, and files the diff above confirms still carry Helio changes are ours outright — the touchpoint map is the quick first look, not the qualifier, since a file can stay listed after its Helio content is reverted or absorbed upstream. See `HELIO_INTEGRATION.md` → Rule 15.
 
 ## CI/CD Workflows
 
