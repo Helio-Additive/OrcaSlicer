@@ -636,10 +636,18 @@ defect costs us something:
 Filing issues or PRs upstream is a maintenance commitment — follow-up, review
 rounds, defending the change — and this fork has not taken that on.
 
-**Where this genuinely is ours**, and the boundary is not subtle: the file already
-carries Helio changes (it is in the touchpoint map), the defect is in Helio code,
-or the defect is in Helio-owned CI (`.github/workflows/helio-*.yml`,
+**Where this genuinely is ours:** the file still carries Helio changes, the defect
+is in Helio code, or the defect is in Helio-owned CI (`.github/workflows/helio-*.yml`,
 `scripts/helio/**`). Those we own outright.
+
+For the first of those, **map membership is not the qualifier — the diff above
+is.** A file can sit in the map having lost its Helio content, because the change
+was reverted or upstream absorbed an equivalent one, and the map is not updated
+when that happens. Taking the listing as proof would have someone patching
+upstream-identical code on the strength of a stale line in a document, which is
+the divergence this rule exists to stop. The map says *where to look and what the
+touchpoint was for*; `git diff` against the synced baseline says whether it is
+still there.
 
 ## Upstream Sync: squash merges & the merge-base graft
 
