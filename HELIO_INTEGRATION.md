@@ -523,7 +523,10 @@ branch if a specific sync warrants it.
 
 ### Rule 15: Upstream code defects are upstream's (do not patch them here)
 
-Numbered 15 to leave room for #113's Rule 14.
+There is deliberately no Rule 14 in this file yet. It is reserved for the rule
+added by #113 (inherited CI trigger filters), which was written first but has not
+merged; numbering this 15 keeps both stable whichever lands first. If #113 is
+closed unmerged, 14 should be reused rather than left as a hole.
 
 Rules 11, 12 and 13 each say "upstream owns this, do not diverge" about one asset
 class — branding docs, workflows, profiles. **The same answer applies to upstream
@@ -541,10 +544,26 @@ below that nobody decided to take on. Paying that indefinitely to front-run a fi
 upstream has already written — and will deliver on its own with the next sync — is
 a bad trade even when the patch is correct.
 
-**The test, and it is cheap:** is the file in the touchpoint map in this document?
-`grep` it. If the file has no Helio changes, it is not ours. `Print.hpp` appears
-zero times in that map; the map already answered the question before #116 was
-opened.
+**The test — ask git, not the map.** The touchpoint map below is a hand-maintained
+snapshot and it drifts; treating it as the authority fails in both directions,
+and one of them is dangerous (a file Helio has since changed, missing from the
+map, gets disowned as upstream's). Ask the tree instead, against the upstream
+release this branch is synced to (`version.inc` names it):
+
+```bash
+git fetch upstream --tags                       # SoftFever/OrcaSlicer
+git diff --stat v2.4.2 HEAD -- <file>           # the synced release tag
+```
+
+**Empty output means the file is byte-identical to upstream's** — no Helio content
+in it, so a defect in it is not ours. Non-empty means we carry changes there and
+it is at least partly ours; read the diff before deciding.
+
+Use the map as a quick first look and for the *why* (it records what each
+touchpoint is for), but let the git comparison settle disagreements — it cannot go
+stale. For #116 both agreed: `Print.hpp` appears zero times in the map, and its
+blob is byte-identical to `v2.4.2`. The question was answered before the PR was
+opened; nothing had told anyone to ask it.
 
 **"But it is breaking our CI" is not an exception.** That was exactly #116's
 reasoning: an upstream defect made a test fail intermittently, the red check
@@ -552,9 +571,29 @@ blocked a Helio PR, and fixing upstream's code looked like the direct route to
 green. The blocker was real; the conclusion did not follow. When an upstream
 defect costs us something:
 
-1. Confirm our diff did not cause it —
-   `git diff --stat <base> <head> -- src/ tests/ deps/ resources/ CMakeLists.txt version.inc`.
-   Empty means the build inputs are identical and the failure is inherited.
+1. Confirm our diff did not cause it. From the PR's branch:
+
+   ```bash
+   git fetch helio orca-latest-parity-bambu
+   git diff --stat helio/orca-latest-parity-bambu...HEAD
+   ```
+
+   **List everything the branch changed and read it — do not filter by a path
+   list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
+   and the command prints nothing, the failure is filed as inherited, and step 3
+   then says not to fix it — so a regression we actually caused goes unowned. The
+   surface is wider than it looks: `src/`, `tests/`, `deps/`, `deps_src/`,
+   `resources/`, `cmake/`, `CMakeLists.txt`, `version.inc`, the `build_*.sh` /
+   `build_*.bat` scripts, `.github/workflows/build_*.yml`, and `scripts/` all
+   reach the built or tested artifact.
+
+   Inherited means the changed files **cannot** affect the artifact — in practice
+   only documentation. Anything else, assume ours until shown otherwise.
+
+   Use the three-dot form: it diffs from the **merge base**, so a release branch
+   that moved on after the branch was cut does not show up as changes this PR
+   made. Two-dot answers a different question and can implicate a PR that touched
+   nothing.
 2. Record it as an issue so the next person does not re-investigate it (#115 is
    the worked example), including the upstream commit that fixes it if there is one.
 3. Rebuild, or wait for the sync that carries the fix. Do not patch, and do not
