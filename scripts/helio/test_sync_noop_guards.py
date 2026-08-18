@@ -10,7 +10,13 @@ import yaml
 
 WF = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                   "..", "..", ".github", "workflows", "helio-upstream-sync.yml")
-EXPR = re.compile(r"\$\{\{\s*([^}]+?)\s*\}\}")
+# Up to the FIRST `}}`, not `[^}]+?` — a character class excluding `}` cannot
+# match any expression that contains one (`${{ format('{0}', x) }}`), which
+# would let such an expression survive extraction as literal shell text
+# instead of raising below. The non-greedy stop still truncates at a `}}`
+# inside a string literal, but a truncated key fails the MAP lookup and
+# RAISES, which is the safe direction: the guard fires rather than sleeps.
+EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}", re.DOTALL)
 
 # The `check` and `graft` steps take their inputs through `env:` (upstream tag
 # names must not be interpolated into shell source), so the harness supplies the
@@ -18,6 +24,16 @@ EXPR = re.compile(r"\$\{\{\s*([^}]+?)\s*\}\}")
 # expression left in a body is a mapping the harness does not know about, and is
 # raised rather than silently passed through as literal text.
 MAP: dict[str, str] = {}
+
+
+def _sub_exprs(name, body):
+    """Replace every `${{ }}` expression via MAP; raise on any unmapped one."""
+    def sub(m):
+        key = m.group(1)
+        if key in MAP:
+            return "${%s}" % MAP[key]
+        raise SystemExit("unmapped expression in %r: %s" % (name, key))
+    return EXPR.sub(sub, body)
 
 
 def step_body(name):
@@ -34,15 +50,10 @@ def step_body(name):
     for s in wf["jobs"]["sync"]["steps"]:
         if s.get("name") == name:
             body = s["run"]
-            def sub(m):
-                key = m.group(1)
-                if key in MAP:
-                    return "${%s}" % MAP[key]
-                raise SystemExit("unmapped expression in %r: %s" % (name, key))
             literal = {k: str(v) for k, v in (s.get("env") or {}).items()
                        if not EXPR.search(str(v))}
             # no-op once every input arrives via env
-            return EXPR.sub(sub, body), literal
+            return _sub_exprs(name, body), literal
     raise SystemExit("step not found: " + name)
 
 
@@ -71,6 +82,14 @@ def install_content_script(repo):
 
 def sh(cmd, cwd, env=None, check=True):
     e = dict(os.environ)
+    # Hermetic by construction: the step bodies invoke sync_completion.sh,
+    # which consults GITHUB_REPOSITORY and (through `gh`) GH_TOKEN /
+    # GITHUB_TOKEN / GH_REPO. An ambient token plus repo identity — act, a dev
+    # shell, a future workflow edit — would let LIVE GitHub API state flip a
+    # scenario's verdict. Scenarios that test the completion signal supply
+    # HELIO_PR_FIXTURE explicitly through `env`, which is applied after this.
+    for var in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GH_REPO"):
+        e.pop(var, None)
     e.update(env or {})
     # Match the shell GitHub Actions uses for `run:` bodies:
     # `bash --noprofile --norc -e -o pipefail`. The `check` step body has no
@@ -502,8 +521,30 @@ def scenario(name, expect_skip, expect_noop, expect_file=None,
 
 FAILURES: list[str] = []
 
-print("Scenarios (fork tree holds v2.4.2 via a squashed commit; tag stale at v2.4.1)\n")
+
+def expr_guard_selftest():
+    """The unmapped-expression guard must FIRE on expressions containing '}'.
+
+    With the old `[^}]+?` pattern, `${{ format('{0}', x) }}` matched nothing
+    and survived extraction as literal shell text — the guard slept on exactly
+    the expressions it existed to catch.
+    """
+    label = "harness: expression containing '}' raises unmapped-expression"
+    try:
+        _sub_exprs("selftest", "echo ${{ format('{0}', steps.x.outputs.y) }}")
+    except SystemExit:
+        print("  PASS  " + label)
+        return True
+    print("  FAIL  " + label + " (passed through as literal text)")
+    FAILURES.append(label)
+    return False
+
+
+print("Harness self-checks\n")
 r = []
+r.append(expr_guard_selftest())
+
+print("\nScenarios (fork tree holds v2.4.2 via a squashed commit; tag stale at v2.4.1)\n")
 # Was expect_skip=False/noop=True: the run merged, then discovered the merge
 # changed nothing. The content test in `check` now answers the same question
 # before merging, so the same invariant — NO PR for a release we already hold —
