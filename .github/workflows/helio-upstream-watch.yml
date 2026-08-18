@@ -52,11 +52,25 @@ jobs:
             BASELINE_VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1 || true)
           fi
           BASELINE_TAG="v$BASELINE_VER"
-          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "$BASELINE_TAG^{commit}" >/dev/null; then
+          BASELINE_SOURCE="version.inc"
+
+          # Verify through refs/tags/ explicitly. A bare name resolves branches
+          # too, and while git's disambiguation happens to prefer tags over
+          # heads, "happens to" is not what a baseline should rest on — upstream
+          # ships release/* branches alongside these tags.
+          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
             echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
             BASELINE_TAG="v2.3.2-rc2"
+            BASELINE_SOURCE="hardcoded fallback"
+            # If even the fallback is absent, stop. Handing an unresolved ref to
+            # the merge-base loop below silently yields a wrong digest, and a
+            # wrong digest is worse than none: it is read as "nothing to sync".
+            if ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+              echo "::error title=No usable digest baseline::Neither version.inc nor the v2.3.2-rc2 fallback resolves to an upstream tag. Refusing to compute a digest from an unresolved baseline."
+              exit 1
+            fi
           fi
-          echo "Digest baseline: $BASELINE_TAG (from version.inc)"
+          echo "Digest baseline: $BASELINE_TAG (source: $BASELINE_SOURCE)"
 
           # New tags since baseline
           NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
