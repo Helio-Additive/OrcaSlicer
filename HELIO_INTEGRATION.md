@@ -552,8 +552,16 @@ release this branch is synced to (`version.inc` names it):
 
 ```bash
 git fetch upstream --tags                       # SoftFever/OrcaSlicer
-git diff --stat v2.4.2 HEAD -- <file>           # the synced release tag
+SYNCED="v$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc)"
+git diff --stat "$SYNCED" HEAD -- <file>
 ```
+
+**Derive the tag, never hardcode it.** `version.inc` names the release this branch
+holds, so the command above follows the branch as it advances. A literal tag rots
+the moment a sync lands, and it rots in the dangerous direction: compared against
+a release older than the one we hold, a file we merely *inherited* from a later
+release shows a non-empty diff, reads as Helio-owned, and this rule then waves
+through exactly the patch it exists to prevent.
 
 **Empty output means the file is byte-identical to upstream's** — no Helio content
 in it, so a defect in it is not ours. Non-empty means we carry changes there and
