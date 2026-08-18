@@ -128,16 +128,31 @@ raw = sys.stdin.read().strip()
 if not raw:
     sys.exit(1)
 
+# `gh --paginate` concatenates pages: a list endpoint emits its pages as
+# back-to-back top-level arrays ("[...][...]"), which a single json.loads
+# rejects as trailing data. That is not a corner case — it is every run once
+# the release branch has more than one page of closed PRs, and the resolution
+# PR being looked for is by definition an old one. Decode value by value and
+# flatten: an array is a page, a lone object is a single PR. Anything
+# raw_decode cannot consume (truncated output, non-JSON) is still refused as
+# malformed — that reads as "cannot tell", never as "synced".
+decoder = json.JSONDecoder()
+prs = []
+pos = 0
 try:
-    prs = json.loads(raw)
-except json.JSONDecodeError:
+    while pos < len(raw):
+        value, pos = decoder.raw_decode(raw, pos)
+        if isinstance(value, list):
+            prs.extend(value)
+        elif isinstance(value, dict):
+            prs.append(value)
+        else:
+            raise ValueError("top-level %s" % type(value).__name__)
+        while pos < len(raw) and raw[pos] in " \t\r\n":
+            pos += 1
+except (json.JSONDecodeError, ValueError):
     print("MALFORMED", file=sys.stderr)
     sys.exit(1)
-
-# `gh --paginate` concatenates pages as separate arrays when the response is a
-# list; tolerate either shape.
-if isinstance(prs, dict):
-    prs = [prs]
 
 marker = "helio-sync-target: %s" % sync_sha
 

@@ -729,12 +729,20 @@ BRANCH = "helio-release-candidate-v2.4.2"
 
 
 def completion(prs, *, sync_sha=SHA, base=BASE_BR, branch=BRANCH):
-    """Run the real script against a fixture standing in for the API."""
+    """Run the real script against a fixture standing in for the API.
+
+    A string fixture is written VERBATIM, so a case can feed exactly the bytes
+    `gh` emits — concatenated pages, truncated output — rather than whatever
+    json.dump would round-trip them into.
+    """
     tmp = tempfile.mkdtemp()
     try:
         fx = os.path.join(tmp, "prs.json")
         with open(fx, "w") as fh:
-            json.dump(prs, fh)
+            if isinstance(prs, str):
+                fh.write(prs)
+            else:
+                json.dump(prs, fh)
         p = subprocess.run(
             ["bash", COMPLETION_SH, sync_sha, base, branch],
             capture_output=True, text=True,
@@ -830,6 +838,24 @@ c.append(comp_case("finds the marker PR among unmerged and unrelated ones",
 # Malformed / unreachable API must read as "cannot tell", never as "synced".
 c.append(comp_case("malformed API payload is refused, not treated as proof",
                    "not json at all", want_rc=1))
+
+# `gh --paginate` concatenates pages as back-to-back top-level arrays, which a
+# single json.loads rejects — so on a branch with >100 closed PRs the signal
+# would permanently degrade to "cannot tell" and the finished sync would be
+# re-proposed every Monday, the exact #110 shape this script exists to close.
+# The reader must consume concatenated documents, and still refuse real damage.
+c.append(comp_case("concatenated pages: marker PR in the SECOND page is accepted",
+                   json.dumps([pr(50, merged=False, body="noise"),
+                               pr(51, head="unrelated", body="")])
+                   + json.dumps([pr(96, body="Resolved v2.4.2.\n" + MARKER)]),
+                   want_rc=0, want_pr=96))
+c.append(comp_case("concatenated pages with no matching PR anywhere are refused",
+                   json.dumps([pr(50, merged=False, body=MARKER)])
+                   + json.dumps([pr(51, base="main", body=MARKER)]),
+                   want_rc=1))
+c.append(comp_case("truncated JSON is still refused as malformed",
+                   json.dumps([pr(96, body=MARKER)])[:-20],
+                   want_rc=1, want_stderr="MALFORMED"))
 
 r += c
 
