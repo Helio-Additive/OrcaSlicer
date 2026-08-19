@@ -70,11 +70,16 @@ jobs:
               exit 1
             fi
           fi
+          # Every git operation consuming the baseline goes through this, so
+          # what was verified above is what gets used. BASELINE_TAG stays bare
+          # for the string compare below (it matches `git tag -l` output) and
+          # for display.
+          BASELINE_REF="refs/tags/$BASELINE_TAG"
           echo "Digest baseline: $BASELINE_TAG (source: $BASELINE_SOURCE)"
 
           # New tags since baseline
           NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
-            if git merge-base --is-ancestor "$BASELINE_TAG" "$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
+            if git merge-base --is-ancestor "$BASELINE_REF" "refs/tags/$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
               COMMIT_DATE=$(git log -1 --format='%ci' "$tag" | cut -d' ' -f1)
               echo "- \`$tag\` ($COMMIT_DATE)"
             fi
