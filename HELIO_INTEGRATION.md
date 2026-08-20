@@ -552,9 +552,25 @@ release this branch is synced to (`version.inc` names it):
 
 ```bash
 git fetch upstream --tags                       # SoftFever/OrcaSlicer
-SYNCED="v$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc)"
+VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1)
+SYNCED=""
+for cand in "v$VER" "$VER"; do                  # upstream tags both forms
+  if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null; then
+    SYNCED="$cand"; break
+  fi
+done
+[ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
 git diff --stat "$SYNCED" HEAD -- <file>
 ```
+
+**Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
+tags consistently, so `helio-upstream-sync.yml` looks for `v$VER` *and* `$VER`
+(the `for cand in` loop appears twice in it) — this command mirrors that. Assuming
+the `v` prefix makes the check die on an unprefixed release, and a bare `$SYNCED`
+would let a *branch* of that name answer the question instead of the tag, so the
+lookup is pinned to `refs/tags/`. Bailing out when neither form exists is the
+point: a baseline that does not resolve must stop the check, not silently
+downgrade it to "everything differs, therefore ours".
 
 **Derive the tag, never hardcode it.** `version.inc` names the release this branch
 holds, so the command above follows the branch as it advances. A literal tag rots
