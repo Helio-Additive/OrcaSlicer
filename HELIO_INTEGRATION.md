@@ -653,8 +653,9 @@ merely inherited shows as a difference and reads as Helio-owned:
   commit we took and the one the tag now names is attributed to Helio.
 
 When any of these applies, compare against the upstream **commit** the branch
-actually holds rather than the tag. Two records carry that sha durably, so check
-them in this order:
+actually holds rather than the tag. Two records may carry that sha — **neither is
+immutable**, so check them in this order and treat what you find as evidence rather
+than proof:
 
 - **The auto-created `upstream-sync` issue**, whose resolution steps embed the
   literal sha as `git merge <sync_sha>` — and, when a graft was needed, the previous
@@ -856,8 +857,9 @@ target descends from B — the normal case — the test passes, `PREV=B` is acce
 the graft asserts our content is based on B while the tree still holds A. The merge
 then computes the B→C delta and silently keeps A's content for everything that
 changed in A→B. It is a sanity check against a wildly wrong baseline, not a retag
-guard, and it must not be relied on as one. Establish the prior sync commit from a
-durable record (see the two above) before grafting by hand. For `main` syncs the commit comes from
+guard, and it must not be relied on as one. Establish the prior sync commit from the
+recovery routes above before grafting by hand — noting that neither is immutable, so
+if they disagree or are missing, do not graft on a guess. For `main` syncs the commit comes from
 the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
