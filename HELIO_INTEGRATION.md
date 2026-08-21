@@ -561,6 +561,9 @@ git fetch upstream --tags --force || { echo "tag fetch failed — baseline may b
 VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1)
 SYNCED=""
 for cand in "v$VER" "$VER"; do                  # upstream tags both forms
+  # Must exist upstream *now*: --force updates a moved tag but never removes one
+  # upstream deleted, so a local leftover would otherwise answer the question.
+  git ls-remote --exit-code --tags upstream "refs/tags/$cand" >/dev/null 2>&1 || continue
   if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null; then
     SYNCED="refs/tags/$cand"; break          # carry the verified ref, not the name
   fi
@@ -597,6 +600,15 @@ merge-base graft exists. On `orca-latest-parity-bambu` today, `v2.4.2` shares **
 merge-base with `HEAD` even though the tree holds v2.4.2's content, so an
 `--is-ancestor` gate would reject every baseline and the check would never run.
 Content matches; ancestry does not. Do not add that guard.
+
+**Never add `--prune-tags` here.** It is the obvious companion to `--force` — the
+flag that *does* remove local tags upstream has deleted — and it would destroy
+this fork's own state. `helio-last-synced` and `helio-last-synced-main` exist only
+here, never upstream, so a prune deletes them: verified on a synthetic clone where
+`--tags --force --prune --prune-tags` left `v1.0` alone and took **both** Helio
+tracking tags with it. That is why the deletion case is handled with a read-only
+`git ls-remote` check per candidate instead. Same shape as the ancestry guard
+above — the reasonable-looking fix is the destructive one.
 
 **Fetch with `--force`, and stop if the fetch fails.** Plain `git fetch --tags`
 refuses to move a tag that already exists locally — it reports
