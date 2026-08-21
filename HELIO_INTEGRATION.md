@@ -576,6 +576,27 @@ the `v` prefix makes the check die on an unprefixed release. Bailing out when
 neither form exists is the point: a baseline that does not resolve must stop the
 check, not silently downgrade it to "everything differs, therefore ours".
 
+**A tag that resolves is still only an expectation.** Tags are mutable pointers,
+so `version.inc` naming a release says what we *expect* to hold, never what we *do*
+hold. If upstream retags that release onto a commit we never synced, the lookup
+succeeds and every upstream change between the two commits reads as a Helio
+difference — the rule would authorise exactly the divergence it exists to prevent.
+Demonstrated on a synthetic upstream: before a retag the diff reports the one Helio
+file; after, two, the extra one purely upstream's. **Add a retagged release to the
+list of cases below where the tag is the wrong baseline and the sync PR's recorded
+sha is the right one.**
+
+There is no ancestry check available to catch this automatically here, and it is
+worth saying why, because the obvious guard looks correct and is not.
+`helio-upstream-sync.yml` validates its own candidates with
+`git merge-base --is-ancestor`, but it runs that against the *upstream* commit it
+is about to merge, not against our branch. Our branch cannot answer it: sync PRs
+are squash-merged, which discards upstream ancestry — the very reason the
+merge-base graft exists. On `orca-latest-parity-bambu` today, `v2.4.2` shares **no**
+merge-base with `HEAD` even though the tree holds v2.4.2's content, so an
+`--is-ancestor` gate would reject every baseline and the check would never run.
+Content matches; ancestry does not. Do not add that guard.
+
 **Fetch with `--force`, and stop if the fetch fails.** Plain `git fetch --tags`
 refuses to move a tag that already exists locally — it reports
 `! [rejected] … (would clobber existing tag)` and leaves the old commit in place.
@@ -608,15 +629,18 @@ is a prompt to read the diff, **not** by itself proof of Helio ownership: check
 whether the hunks are Helio's or upstream changes made after the baseline.
 
 **`version.inc` names a tagged release, so it is the right baseline only for a
-tag-mode sync.** Two cases break it, both in the dangerous direction — content we
+tag-mode sync.** Three cases break it, all in the dangerous direction — content we
 merely inherited shows as a difference and reads as Helio-owned:
 
 - After a **`main`-mode sync** (`sync_target: main`) the tree holds upstream commits
   newer than any tag, while `version.inc` may still name the last release.
 - A **local version bump** landing before the content it names — a case the sync
   workflow already guards against for its own baseline.
+- A **retagged release**: upstream moves the tag we synced onto a different commit.
+  The name still resolves, so nothing looks wrong, and the whole delta between the
+  commit we took and the one the tag now names is attributed to Helio.
 
-When either applies, compare against the upstream **commit** the branch actually
+When any of these applies, compare against the upstream **commit** the branch actually
 holds rather than the tag: the sync PR that brought it records that sha. If you
 cannot establish the baseline confidently, treat ownership as unresolved and ask
 — an unresolved answer is recoverable, a wrong "this is ours" becomes a permanent
