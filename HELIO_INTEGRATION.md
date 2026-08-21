@@ -586,9 +586,8 @@ succeeds and every upstream change between the two commits reads as a Helio
 difference — the rule would authorise exactly the divergence it exists to prevent.
 Demonstrated on a synthetic upstream: before a retag the diff reports the one Helio
 file; after, two, the extra one purely upstream's. **A retagged release is listed
-below with the other cases where the tag is the wrong baseline** — and note there
-especially that recovering the commit we actually synced may not be possible after
-the fact, so this is the case most likely to end in "unresolved, ask".
+below with the other cases where the tag is the wrong baseline**, along with the two
+records that do preserve the sha the tag has moved away from.
 
 There is no ancestry check available to catch this automatically here, and it is
 worth saying why, because the obvious guard looks correct and is not.
@@ -654,24 +653,40 @@ merely inherited shows as a difference and reads as Helio-owned:
   commit we took and the one the tag now names is attributed to Helio.
 
 When any of these applies, compare against the upstream **commit** the branch
-actually holds rather than the tag — but be aware that **nothing durable records
-that sha today**, so this is a search, not a lookup:
+actually holds rather than the tag. Two records carry that sha durably, so check
+them in this order:
 
-- The **sync commit message** names the tag only. The workflow's own resolver
-  template squashes with `-m "Upstream sync: <tag> into <target-branch> (squashed)"`,
-  and `ce472ef4` (the v2.4.2 sync) carries no sha anywhere in its body.
-- The **`helio-last-synced` tracking tag** is frozen. It points at `v2.3.2-rc2`
-  (2026-03-06) while the branch holds v2.4.2 — five months and two releases behind,
-  because the workflow's token cannot update it. `helio-last-synced-main` is stale
-  the same way. Read either as a historical marker, never as the current baseline.
-- The **workflow run log** echoes `Sync target: … -> $SYNC_SHA`, which is the real
-  answer while it lasts, but Actions logs expire.
+- **The auto-created `upstream-sync` issue**, whose resolution steps embed the
+  literal sha as `git merge <sync_sha>` — and, when a graft was needed, the previous
+  upstream commit as well. Issue #98 is the worked example: it names
+  `8500fcdccaa10b5099ac20d252af3a7c560046f1` for v2.4.2 (verified to match what
+  `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **This
+  is the route that works today.**
+- **A clean sync's own commit**, in principle: the workflow squashes with
+  `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`.
+  Grep it with `git log --grep='Squashed single-commit sync'` — but **verify the
+  match actually contains a 40-hex sha**, because no sync has yet taken that path.
+  Every sync so far hit conflicts and was squashed by hand following step 4 below,
+  and those commits reproduce the same opening sentence *without* the sha. Both
+  `ce472ef4` (v2.4.2) and `eaf3cb948e` (v2.4.1) match that grep and contain no sha
+  at all. A matching subject line is not the record; the sha is.
 
-So for a retagged release specifically, there may be **no** way to recover the
-original commit after the fact. That is a gap in our tooling, not a step you have
-missed. If you cannot establish the baseline confidently, treat ownership as
-unresolved and ask — an unresolved answer is recoverable, a wrong "this is ours"
-becomes a permanent divergence.
+Two things do **not** answer this, and both look like they should:
+
+- **The resolver's squash commit.** Step 4 of those same issue instructions squashes
+  with `-m "Upstream sync: <tag> into <target-branch> (squashed)"` — tag only. So a
+  conflict-resolved sync loses the sha at exactly the step where the clean path keeps
+  it, and `ce472ef4` (v2.4.2, conflict-resolved) has no sha in its body. The issue is
+  the record there, not the commit.
+- **The tracking tags.** `helio-last-synced` points at `v2.3.2-rc2` (2026-03-06)
+  while the branch holds v2.4.2 — five months and two releases behind, because the
+  workflow's token cannot update it. `helio-last-synced-main` is stale the same way.
+  Historical markers, never the current baseline.
+
+If the sync predates these records, or the issue has been deleted, and you cannot
+establish the baseline confidently, treat ownership as unresolved and ask — an
+unresolved answer is recoverable, a wrong "this is ours" becomes a permanent
+divergence.
 
 Use the map as a quick first look and for the *why* (it records what each
 touchpoint is for), but let the git comparison settle disagreements — it cannot go
@@ -778,9 +793,14 @@ to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
 workflow ephemerally grafts the upstream commit our content is based on onto the
-branch tip. For tag-release syncs that commit is derived from `version.inc`
-(authoritative — it names the synced release); for `main` syncs it comes from the
-`helio-last-synced-main` tracking tag (`version.inc` would name an older release
+branch tip. For tag-release syncs that commit is derived from `version.inc` — which
+names the *expected* release, not a proven commit, so the Rule 15 caveats apply here
+too: after a retag it resolves to a commit the branch never received, and grafting
+that makes the next sync compute its merge base from content we never had. The
+workflow guards this with `git merge-base --is-ancestor` against the upstream commit
+being merged and simply declines to graft when it fails; a hand-run graft has no such
+guard, so check the candidate before using it. For `main` syncs the commit comes from
+the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
 ```bash
