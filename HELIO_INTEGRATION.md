@@ -662,14 +662,25 @@ them in this order:
   `8500fcdccaa10b5099ac20d252af3a7c560046f1` for v2.4.2 (verified to match what
   `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **This
   is the route that works today.**
-- **A clean sync's own commit**, in principle: the workflow squashes with
-  `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`.
-  Grep it with `git log --grep='Squashed single-commit sync'` — but **verify the
-  match actually contains a 40-hex sha**, because no sync has yet taken that path.
-  Every sync so far hit conflicts and was squashed by hand following step 4 below,
-  and those commits reproduce the same opening sentence *without* the sha. Both
-  `ce472ef4` (v2.4.2) and `eaf3cb948e` (v2.4.1) match that grep and contain no sha
-  at all. A matching subject line is not the record; the sha is.
+- **A clean sync's own commit** — with two caveats that currently make it the weaker
+  route. The workflow squashes the sync branch with
+  `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`, so grep
+  with `git log --grep='Squashed single-commit sync'`. But:
+
+  **The sha may not be there.** No sync has yet taken the clean path — every one so
+  far hit conflicts and was squashed by hand via step 4 below, whose template carries
+  the tag only, and those commits reproduce the same opening sentence *without* the
+  sha. `ce472ef4` (v2.4.2) and `eaf3cb948e` (v2.4.1) both match the grep and contain
+  no sha at all. A matching subject line is not the record; the sha is.
+
+  **And that commit is not on the release branch.** The workflow's commit lives on
+  the sync branch, which is then *squash-merged* — mandated, for the verified-
+  signatures rule — producing a fresh commit with the release-branch tip as its only
+  parent. `ce472ef4` has exactly one parent for this reason. GitHub's squash normally
+  copies a single commit's message into the new one, but the merger can edit it
+  freely, so survival is a default rather than a guarantee. Once the sync branch is
+  deleted, whatever the squash did not copy is gone. Grep the release branch, and if
+  the sha is not in the commit you find, go back to the issue.
 
 Two things do **not** answer this, and both look like they should:
 
@@ -762,11 +773,26 @@ defect costs us something:
 Filing issues or PRs upstream is a maintenance commitment — follow-up, review
 rounds, defending the change — and this fork has not taken that on.
 
-**Where this genuinely is ours:** the file still carries Helio changes, the defect
-is in Helio code, or the defect is in Helio-owned CI (`.github/workflows/helio-*.yml`,
-`scripts/helio/**`). Those we own outright.
+**Where this genuinely is ours:** the defect is in Helio code, the defect is in
+Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), or **the
+defect sits in a Helio hunk of a shared file — or is caused by one.**
 
-For the first of those, **map membership is not the qualifier — the diff above
+That last one is deliberately about the *hunk*, not the file, and the distinction
+does real work. A Helio touchpoint is usually a handful of lines inside a mostly
+upstream file: `src/slic3r/GUI/Plater.cpp` is our heaviest at +2319/-182, and it is
+still overwhelmingly upstream code. "The file carries Helio changes, therefore the
+defect in it is ours" would hand us every upstream bug in every file we have ever
+touched — which is the patch this rule exists to prevent, arriving through its own
+exception. It would also contradict the diff test above, which says outright that a
+non-empty diff is a prompt to read the hunks, not proof of ownership.
+
+So read the hunks and ask where the defect lives. Inside Helio's lines, or produced
+by them (an upstream function misbehaving *because* of what we changed) — ours. In a
+region byte-identical to upstream, in a file that happens to carry Helio changes
+elsewhere — upstream's, and the fact that we edited another part of the same file
+does not alter that.
+
+For the hunk test, **map membership is not the qualifier — the diff above
 is.** A file can sit in the map having lost its Helio content, because the change
 was reverted or upstream absorbed an equivalent one, and the map is not updated
 when that happens. Taking the listing as proof would have someone patching
