@@ -551,7 +551,8 @@ map, gets disowned as upstream's). Ask the tree instead, against the upstream
 release this branch is synced to (`version.inc` names it):
 
 ```bash
-git fetch upstream --tags                       # SoftFever/OrcaSlicer
+# SoftFever/OrcaSlicer. --force, or a retagged release leaves a stale local tag.
+git fetch upstream --tags --force || { echo "tag fetch failed — baseline may be stale" >&2; exit 1; }
 VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1)
 SYNCED=""
 for cand in "v$VER" "$VER"; do                  # upstream tags both forms
@@ -569,6 +570,17 @@ tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
 the `v` prefix makes the check die on an unprefixed release. Bailing out when
 neither form exists is the point: a baseline that does not resolve must stop the
 check, not silently downgrade it to "everything differs, therefore ours".
+
+**Fetch with `--force`, and stop if the fetch fails.** Plain `git fetch --tags`
+refuses to move a tag that already exists locally — it reports
+`! [rejected] … (would clobber existing tag)` and leaves the old commit in place.
+So if upstream retags a release, a repo that fetched the earlier tag keeps
+diffing against it, and the ownership verdict is computed from a baseline that no
+longer exists upstream. Both `helio-upstream-sync.yml` and `helio-upstream-watch.yml`
+already fetch `--tags --force`; this command matches them. The rejection does exit
+non-zero, so the guard catches it — without one the script runs on regardless and
+answers from whatever stale tags happen to be local, which is the wrong-baseline
+failure this rule exists to prevent.
 
 **`$SYNCED` carries the verified `refs/tags/` ref, not the bare tag name**, so the
 ref that was checked is the ref the diff uses. Verifying `refs/tags/$cand` and then
