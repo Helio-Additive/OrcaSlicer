@@ -688,18 +688,30 @@ defect costs us something:
 1. Confirm our diff did not cause it. From the PR's branch:
 
    ```bash
-   BASE=refs/remotes/helio/orca-latest-parity-bambu   # pinned: the shorthand is shadowable
-   git fetch helio orca-latest-parity-bambu || { echo "fetch failed — base may be stale" >&2; exit 1; }
-   git diff --stat "$BASE"...HEAD
+   git fetch helio orca-latest-parity-bambu || { echo "fetch failed — base unknown" >&2; exit 1; }
+   git diff --stat FETCH_HEAD...HEAD          # what this fetch just brought, nothing else
    ```
 
-   **Fail closed, and pin the ref** — the same two hazards as the ownership command
-   above, for the same reasons. An unguarded fetch leaves a stale remote-tracking
-   ref answering the question, and `helio/orca-latest-parity-bambu` is a shorthand
-   git resolves as `refs/<name>` → `refs/tags/<name>` → `refs/heads/<name>` →
-   `refs/remotes/<name>`, so a stray `refs/helio/orca-latest-parity-bambu` wins over
-   the ref the fetch just updated. Both fail toward "nothing of ours changed", which
-   files a regression we caused as inherited and then step 3 says not to fix it.
+   **Fail closed, and diff `FETCH_HEAD` — not a named ref.** Both hazards here point
+   at "nothing of ours changed", which files a regression we caused as inherited and
+   then step 3 says not to fix it, so this step must never answer from anything the
+   fetch did not just produce.
+
+   Naming the branch is wrong twice over. `helio/orca-latest-parity-bambu` is a
+   shorthand git resolves as `refs/<name>` → `refs/tags/<name>` → `refs/heads/<name>`
+   → `refs/remotes/<name>`, so a stray `refs/helio/orca-latest-parity-bambu` outranks
+   the remote-tracking ref. Spelling out `refs/remotes/helio/…` fixes that and still
+   fails, because **the fetch may never write that ref**: if `remote.helio.fetch` is
+   restricted — a clone made with `git remote add -t <branch>`, for instance — then
+   `git fetch helio orca-latest-parity-bambu` updates only `FETCH_HEAD` and **exits
+   0**, so the guard does not fire and a remote-tracking ref left over from some
+   earlier, broader fetch quietly supplies the baseline. Verified: with
+   `+refs/heads/feature:refs/remotes/helio/feature` configured, that fetch returned 0
+   and `refs/remotes/helio/orca-latest-parity-bambu` did not exist afterwards.
+
+   `FETCH_HEAD` is written by the fetch on the line above, so it is neither
+   shadowable nor stale. Simpler than the pinned ref, and correct in cases the
+   pinned ref is not.
 
    **List everything the branch changed and read it — do not filter by a path
    list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
