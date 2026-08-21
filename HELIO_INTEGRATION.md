@@ -582,9 +582,10 @@ hold. If upstream retags that release onto a commit we never synced, the lookup
 succeeds and every upstream change between the two commits reads as a Helio
 difference — the rule would authorise exactly the divergence it exists to prevent.
 Demonstrated on a synthetic upstream: before a retag the diff reports the one Helio
-file; after, two, the extra one purely upstream's. **Add a retagged release to the
-list of cases below where the tag is the wrong baseline and the sync PR's recorded
-sha is the right one.**
+file; after, two, the extra one purely upstream's. **A retagged release is listed
+below with the other cases where the tag is the wrong baseline** — and note there
+especially that recovering the commit we actually synced may not be possible after
+the fact, so this is the case most likely to end in "unresolved, ask".
 
 There is no ancestry check available to catch this automatically here, and it is
 worth saying why, because the obvious guard looks correct and is not.
