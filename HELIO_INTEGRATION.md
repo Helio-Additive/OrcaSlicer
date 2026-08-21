@@ -1,7 +1,12 @@
 # Helio Integration Map
 
-> Auto-generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2`
-> This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
+> Generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2` — the baseline at the
+> time of generation, which is **older than the release this branch now holds**. Treat the
+> file counts and line totals below as a snapshot of that moment, not a current measurement.
+> **Git is authoritative, not this map.** This is the starting point for AI agents resolving
+> merge conflicts or build fixes — it records what each touchpoint is *for*, which git cannot
+> tell you. But it is hand-maintained and it drifts, so where the map and the tree disagree,
+> the tree wins. See **Rule 15** for the command that settles ownership.
 > Updated for the v2.4.0-beta upstream sync: upstream added `acceleration` and `jerk`
 > visualization fields that sit **between** `pressure_advance` and the Helio
 > `thermal_index_*` fields in `PathVertex` (libvgcode) and `MoveVertex` (GCodeProcessor).
