@@ -556,7 +556,7 @@ VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc |
 SYNCED=""
 for cand in "v$VER" "$VER"; do                  # upstream tags both forms
   if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null; then
-    SYNCED="$cand"; break
+    SYNCED="refs/tags/$cand"; break          # carry the verified ref, not the name
   fi
 done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
@@ -564,13 +564,19 @@ git diff --stat "$SYNCED" HEAD -- <file>
 ```
 
 **Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
-tags consistently, so `helio-upstream-sync.yml` looks for `v$VER` *and* `$VER`
-(the `for cand in` loop appears twice in it) — this command mirrors that. Assuming
-the `v` prefix makes the check die on an unprefixed release, and a bare `$SYNCED`
-would let a *branch* of that name answer the question instead of the tag, so the
-lookup is pinned to `refs/tags/`. Bailing out when neither form exists is the
-point: a baseline that does not resolve must stop the check, not silently
-downgrade it to "everything differs, therefore ours".
+tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
+`for cand in "v$VER" "$VER"` loop — this command mirrors that. Assuming
+the `v` prefix makes the check die on an unprefixed release. Bailing out when
+neither form exists is the point: a baseline that does not resolve must stop the
+check, not silently downgrade it to "everything differs, therefore ours".
+
+**`$SYNCED` carries the verified `refs/tags/` ref, not the bare tag name**, so the
+ref that was checked is the ref the diff uses. Verifying `refs/tags/$cand` and then
+handing a bare `$cand` to `git diff` makes the verification decorative: git resolves
+`refs/` before `refs/tags/`, so a stray `refs/<tag>` answers the ownership question
+from a different commit. A same-named *branch* is not the hazard — `refs/tags/`
+outranks `refs/heads/` — which is exactly why the bare form looks safe until it
+isn't. Same defect as the one fixed in `helio-upstream-watch.yml` (#118).
 
 **Derive the tag, never hardcode it.** `version.inc` names the release this branch
 holds, so the command above follows the branch as it advances. A literal tag rots
