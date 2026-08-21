@@ -796,10 +796,18 @@ workflow ephemerally grafts the upstream commit our content is based on onto the
 branch tip. For tag-release syncs that commit is derived from `version.inc` — which
 names the *expected* release, not a proven commit, so the Rule 15 caveats apply here
 too: after a retag it resolves to a commit the branch never received, and grafting
-that makes the next sync compute its merge base from content we never had. The
-workflow guards this with `git merge-base --is-ancestor` against the upstream commit
-being merged and simply declines to graft when it fails; a hand-run graft has no such
-guard, so check the candidate before using it. For `main` syncs the commit comes from
+that makes the next sync compute its merge base from content we never had.
+
+**Nothing currently catches that.** The workflow does test each candidate with
+`git merge-base --is-ancestor "$c" "$SYNC_SHA"`, but read what that proves: the
+candidate is an ancestor of the **incoming sync target**, not that it is the commit
+this branch actually holds. If a release is retagged from A to B and the next sync
+target descends from B — the normal case — the test passes, `PREV=B` is accepted, and
+the graft asserts our content is based on B while the tree still holds A. The merge
+then computes the B→C delta and silently keeps A's content for everything that
+changed in A→B. It is a sanity check against a wildly wrong baseline, not a retag
+guard, and it must not be relied on as one. Establish the prior sync commit from a
+durable record (see the two above) before grafting by hand. For `main` syncs the commit comes from
 the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
