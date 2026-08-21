@@ -724,7 +724,7 @@ defect costs us something:
 1. Confirm our diff did not cause it. From the PR's branch:
 
    ```bash
-   git fetch helio orca-latest-parity-bambu || { echo "fetch failed — base unknown" >&2; exit 1; }
+   git fetch helio refs/heads/orca-latest-parity-bambu || { echo "fetch failed — base unknown" >&2; exit 1; }
    git diff --stat FETCH_HEAD...HEAD          # what this fetch just brought, nothing else
    ```
 
@@ -748,6 +748,20 @@ defect costs us something:
    `FETCH_HEAD` is written by the fetch on the line above, so it is neither
    shadowable nor stale. Simpler than the pinned ref, and correct in cases the
    pinned ref is not.
+
+   **Fetch `refs/heads/…`, not the bare branch name.** `FETCH_HEAD` fixes which ref
+   answers *locally*; the fetch's **source** argument is a refspec resolved against
+   the remote and is separately ambiguous. Give it a bare name and a same-named tag
+   on `helio` wins — so `FETCH_HEAD` holds the tag, and the three-dot diff below
+   compares against it. Verified on a synthetic remote carrying both:
+
+   ```
+   fetch 'orca-latest-parity-bambu'            -> 7b7daf44c6   (the tag)
+   fetch 'refs/heads/orca-latest-parity-bambu' -> 2605974be6   (the branch)
+   ```
+
+   Both fetches exit 0, so the guard catches neither. Every ref this rule consumes is
+   now fully qualified — `refs/tags/` for the ownership baseline, `refs/heads/` here.
 
    **List everything the branch changed and read it — do not filter by a path
    list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
