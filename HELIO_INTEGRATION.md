@@ -632,9 +632,18 @@ defect costs us something:
 1. Confirm our diff did not cause it. From the PR's branch:
 
    ```bash
-   git fetch helio orca-latest-parity-bambu
-   git diff --stat helio/orca-latest-parity-bambu...HEAD
+   BASE=refs/remotes/helio/orca-latest-parity-bambu   # pinned: the shorthand is shadowable
+   git fetch helio orca-latest-parity-bambu || { echo "fetch failed — base may be stale" >&2; exit 1; }
+   git diff --stat "$BASE"...HEAD
    ```
+
+   **Fail closed, and pin the ref** — the same two hazards as the ownership command
+   above, for the same reasons. An unguarded fetch leaves a stale remote-tracking
+   ref answering the question, and `helio/orca-latest-parity-bambu` is a shorthand
+   git resolves as `refs/<name>` → `refs/tags/<name>` → `refs/heads/<name>` →
+   `refs/remotes/<name>`, so a stray `refs/helio/orca-latest-parity-bambu` wins over
+   the ref the fetch just updated. Both fail toward "nothing of ours changed", which
+   files a regression we caused as inherited and then step 3 says not to fix it.
 
    **List everything the branch changed and read it — do not filter by a path
    list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
