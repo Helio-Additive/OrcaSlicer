@@ -640,11 +640,25 @@ merely inherited shows as a difference and reads as Helio-owned:
   The name still resolves, so nothing looks wrong, and the whole delta between the
   commit we took and the one the tag now names is attributed to Helio.
 
-When any of these applies, compare against the upstream **commit** the branch actually
-holds rather than the tag: the sync PR that brought it records that sha. If you
-cannot establish the baseline confidently, treat ownership as unresolved and ask
-— an unresolved answer is recoverable, a wrong "this is ours" becomes a permanent
-divergence.
+When any of these applies, compare against the upstream **commit** the branch
+actually holds rather than the tag — but be aware that **nothing durable records
+that sha today**, so this is a search, not a lookup:
+
+- The **sync commit message** names the tag only. The workflow's own resolver
+  template squashes with `-m "Upstream sync: <tag> into <target-branch> (squashed)"`,
+  and `ce472ef4` (the v2.4.2 sync) carries no sha anywhere in its body.
+- The **`helio-last-synced` tracking tag** is frozen. It points at `v2.3.2-rc2`
+  (2026-03-06) while the branch holds v2.4.2 — five months and two releases behind,
+  because the workflow's token cannot update it. `helio-last-synced-main` is stale
+  the same way. Read either as a historical marker, never as the current baseline.
+- The **workflow run log** echoes `Sync target: … -> $SYNC_SHA`, which is the real
+  answer while it lasts, but Actions logs expire.
+
+So for a retagged release specifically, there may be **no** way to recover the
+original commit after the fact. That is a gap in our tooling, not a step you have
+missed. If you cannot establish the baseline confidently, treat ownership as
+unresolved and ask — an unresolved answer is recoverable, a wrong "this is ours"
+becomes a permanent divergence.
 
 Use the map as a quick first look and for the *why* (it records what each
 touchpoint is for), but let the git comparison settle disagreements — it cannot go
