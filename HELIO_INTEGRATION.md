@@ -660,8 +660,15 @@ them in this order:
   literal sha as `git merge <sync_sha>` — and, when a graft was needed, the previous
   upstream commit as well. Issue #98 is the worked example: it names
   `8500fcdccaa10b5099ac20d252af3a7c560046f1` for v2.4.2 (verified to match what
-  `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **This
-  is the route that works today.**
+  `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **The
+  best route available today — but conditional, not durable.** The issue is deduped
+  by a title built from the tag (`Upstream sync failed: <tag> (merge conflicts)`) and
+  a later run that matches that title **overwrites the body** with its own sha. The
+  key is the tag, which is precisely what a retag moves: sync `v2.4.2` from A and the
+  issue holds A; upstream retags `v2.4.2` to B; the next conflicting run for `v2.4.2`
+  finds that same open issue and replaces A with B. In the one scenario this fallback
+  exists for, it can erase the answer it was holding. Read it **before** re-running a
+  sync for that tag, and copy the sha somewhere immutable if it matters.
 - **A clean sync's own commit** — with two caveats that currently make it the weaker
   route. The workflow squashes the sync branch with
   `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`, so grep
@@ -694,10 +701,13 @@ Two things do **not** answer this, and both look like they should:
   workflow's token cannot update it. `helio-last-synced-main` is stale the same way.
   Historical markers, never the current baseline.
 
-If the sync predates these records, or the issue has been deleted, and you cannot
-establish the baseline confidently, treat ownership as unresolved and ask — an
-unresolved answer is recoverable, a wrong "this is ours" becomes a permanent
-divergence.
+**Nothing here is immutable**, which is the honest summary: the issue can be
+overwritten or deleted, the release-branch commit carries the sha only if a squash
+happened to copy it, and the tracking tags are stale. Recording the sha somewhere
+that cannot be rewritten is tracked in #120. Until that lands, if the sync predates
+these records or they no longer agree, and you cannot establish the baseline
+confidently, treat ownership as unresolved and ask — an unresolved answer is
+recoverable, a wrong "this is ours" becomes a permanent divergence.
 
 Use the map as a quick first look and for the *why* (it records what each
 touchpoint is for), but let the git comparison settle disagreements — it cannot go
