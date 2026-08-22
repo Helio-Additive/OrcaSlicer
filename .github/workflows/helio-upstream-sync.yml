@@ -219,15 +219,15 @@ jobs:
           # Determine PREV_UPSTREAM = the upstream commit our branch content is
           # based on.
           #
-          # Preferred source: the `upstream-commit:` trailer that both sync paths
-          # now write (the clean-squash step below, and step 4 of the resolver
-          # instructions). It is a fact recorded by the run that did the merge, on
-          # a release-branch commit — the only record here that cannot be rewritten
-          # afterwards. Tags move, and the conflict issue's body is overwritten by
-          # the next run for the same tag.
+          # Preferred source: the `upstream-commit:` / `upstream-sync-mode:` record
+          # that both sync paths write (the clean-squash step below, and step 4 of
+          # the resolver instructions). It is a fact recorded by the run that did
+          # the merge, on a release-branch commit — the only record here that
+          # cannot be rewritten afterwards. Tags move, and the conflict issue's
+          # body is overwritten by the next run for the same tag.
           #
           # Everything below it is a GUESS from a mutable ref, kept only for the
-          # commits that predate the trailer:
+          # commits that predate the record:
           #  - Tag-release syncs (TRACKING_TAG=helio-last-synced): version.inc
           #    names the upstream release the tree was synced to, so prefer it
           #    (the tracking tag can lag). Tracking tag as fallback.
@@ -245,39 +245,42 @@ jobs:
           PREV=""
           PREV_SRC=""
 
-          # Newest first-parent commit carrying the trailer. First-parent only:
-          # the release branch's own line of syncs, not side histories merged in.
-          # One `git log`, not one process per commit: `%(trailers:...)` renders
-          # the value inline, and the awk keeps the first line that has one.
-          # The awk deliberately does NOT `exit` on the match: closing the pipe
-          # early can SIGPIPE `git log`, and `set -o pipefail` would turn that
-          # into a step failure.
-          # Deliberately UNBOUNDED. A commit cap would silently expire the record
-          # once that many commits landed since the last sync (e.g. while a
-          # conflict PR stayed open), dropping us back to the mutable-tag path and
-          # re-opening the retag hole this whole mechanism exists to close. The
-          # scan is one `git log` over the branch's own first-parent line, once
-          # per sync — there is no cost worth trading a silent failure mode for.
+          # Find the newest sync record on the branch's own first-parent line
+          # (first-parent so side histories merged in cannot supply a baseline).
           #
-          # Scoped to the CURRENT MODE. Tag syncs and main syncs advance the
-          # branch along different upstream lines, so the newest trailer overall
-          # is not necessarily the right baseline for this run: if a main sync
-          # records M and a later tag sync records an older B, a mode-blind read
-          # would graft B for the next main sync and drag the whole B..M range
-          # back into the conflict set. The version.inc / tracking-tag split below
-          # was already mode-specific; this keeps that property.
+          # Four properties of this lookup are load-bearing; each one was a real
+          # failure before it was fixed, so please do not "simplify" them away:
+          #
+          # 1. SCOPED TO THE CURRENT MODE. Tag syncs and main syncs advance the
+          #    branch along different upstream lines, so the newest record overall
+          #    is not necessarily right for this run: if a main sync records M and
+          #    a later tag sync records an older B, a mode-blind read grafts B for
+          #    the next main sync and drags the whole B..M range back into the
+          #    conflict set. The version.inc / tracking-tag split below was already
+          #    mode-specific; this keeps that property.
+          # 2. UNBOUNDED. A commit cap would silently expire the record once that
+          #    many commits landed since the last sync (e.g. while a conflict PR
+          #    stayed open), dropping us to the mutable-tag path and re-opening the
+          #    retag hole this whole mechanism exists to close. The scan runs once
+          #    per sync over one branch's first-parent line — a few ms.
+          # 3. A MESSAGE SCAN, NOT `%(trailers:...)`. Git parses trailers only out
+          #    of the LAST paragraph, and GitHub appends `Co-authored-by:` in a
+          #    paragraph of its own when it squash-merges a PR with more than one
+          #    commit author — which orphans an otherwise valid record and drops us
+          #    to the legacy path with no warning. Verified both ways: same
+          #    paragraph parses, separate paragraph does not. `--grep` anchors `^`
+          #    per line inside the message, so paragraph position stops mattering.
+          # 4. `--all-match` PLUS STRICT PATTERNS. Both lines must be present, the
+          #    id must be a full 40 hex digits and the mode exact, so prose that
+          #    merely mentions the keys does not match and a stray
+          #    `upstream-commit: HEAD` cannot graft an arbitrary commit.
+          #
+          # The awk deliberately does NOT `exit` on the first match: closing the
+          # pipe early can SIGPIPE `git log`, and `set -o pipefail` would turn that
+          # into a step failure.
           SYNC_MODE=tag
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
 
-          # Read with a full-message scan, NOT `%(trailers:...)`. Git parses
-          # trailers only out of the LAST paragraph, and GitHub appends
-          # `Co-authored-by:` in its own paragraph when it squash-merges a PR with
-          # more than one commit author — which orphans an otherwise valid record
-          # and silently drops us to the legacy path. Verified both ways: same
-          # paragraph parses, separate paragraph does not. `--grep` anchors `^`
-          # per line inside the message, and `--all-match` requires both lines, so
-          # the pair has to be present to match at all. The patterns demand a full
-          # 40-hex id and an exact mode, which prose does not accidentally satisfy.
           RECORDED_FROM=$(git log --first-parent -E --all-match \
             --grep="^upstream-commit: [0-9a-f]{40}\$" \
             --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
