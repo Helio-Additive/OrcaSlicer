@@ -218,27 +218,85 @@ jobs:
 
           # Determine PREV_UPSTREAM = the upstream commit our branch content is
           # based on.
+          #
+          # Preferred source: the `upstream-commit:` trailer that both sync paths
+          # now write (the clean-squash step below, and step 4 of the resolver
+          # instructions). It is a fact recorded by the run that did the merge, on
+          # a release-branch commit — the only record here that cannot be rewritten
+          # afterwards. Tags move, and the conflict issue's body is overwritten by
+          # the next run for the same tag.
+          #
+          # Everything below it is a GUESS from a mutable ref, kept only for the
+          # commits that predate the trailer:
           #  - Tag-release syncs (TRACKING_TAG=helio-last-synced): version.inc
-          #    authoritatively names the upstream release the tree was synced to,
-          #    so prefer it (the tracking tag can lag). Tracking tag as fallback.
+          #    names the upstream release the tree was synced to, so prefer it
+          #    (the tracking tag can lag). Tracking tag as fallback.
           #  - Main syncs (TRACKING_TAG=helio-last-synced-main): version.inc names
           #    an older tagged release, NOT the last synced main commit, so it must
           #    NOT be used — prefer the tracking tag, which points at that commit.
+          #
+          # Why the guess is unsafe: `--is-ancestor $cand $SYNC_SHA` proves the
+          # candidate is an ancestor of the INCOMING target, not that it is what
+          # this branch actually holds. If upstream retags a release from A to B
+          # and the next sync targets C (a descendant of B — the ordinary forward
+          # retag), the check passes for B, the graft asserts our tree is based on
+          # B, and the merge computes only B..C. Everything in A..B is never
+          # merged: no conflict, no warning, and a sync PR that looks clean.
           PREV=""
-          if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+          PREV_SRC=""
+
+          # Newest first-parent commit carrying the trailer. First-parent only:
+          # the release branch's own line of syncs, not side histories merged in.
+          # One `git log`, not one process per commit: `%(trailers:...)` renders
+          # the value inline, and the awk keeps the first line that has one.
+          # The awk deliberately does NOT `exit` on the match: closing the pipe
+          # early can SIGPIPE `git log`, and `set -o pipefail` would turn that
+          # into a step failure. The input is capped at 500 lines, so reading it
+          # out costs nothing.
+          RECORDED_LINE=$(git log --first-parent -n 500 \
+            --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' HEAD \
+            | awk 'NF > 1 && !seen { print; seen = 1 }')
+
+          if [ -n "$RECORDED_LINE" ]; then
+            RECORDED_FROM="${RECORDED_LINE%% *}"
+            RECORDED=$(printf '%s' "${RECORDED_LINE#* }" | tr -d '[:space:]')
+            if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
+              PREV=$(git rev-parse "${RECORDED}^{commit}")
+              PREV_SRC="upstream-commit: trailer on $RECORDED_FROM"
+              # Not an ancestor => upstream rewrote history since we synced. The
+              # record is still what this branch was built from, so it is still
+              # the right graft; git computes the true common ancestor from it.
+              if ! git merge-base --is-ancestor "$PREV" "$SYNC_SHA"; then
+                echo "::warning::Recorded baseline $PREV is not an ancestor of sync target $SYNC_SHA — upstream history may have been rewritten. Grafting it anyway; it is what this branch was built from."
+              fi
+            else
+              # Deliberately do NOT fall through to the tag guesses. A wrong graft
+              # under-merges in silence; no graft only inflates the conflict count,
+              # which is loud and a resolver can fix it by hand.
+              echo "::warning::Recorded baseline '$RECORDED' (from $RECORDED_FROM) does not resolve to a commit. Skipping the graft rather than guessing from a mutable tag — expect a large conflict count."
+              echo "grafted=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if [ -z "$PREV" ] && [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
               for cand in "v$VER" "$VER"; do
                 if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
                   c=$(git rev-parse "refs/tags/$cand^{commit}")
-                  if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; break; fi
+                  if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
+                    PREV="$c"; PREV_SRC="version.inc tag $cand (mutable — see above)"; break
+                  fi
                 fi
               done
             fi
           fi
           if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
-            if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then PREV="$c"; fi
+            if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
+              PREV="$c"; PREV_SRC="tracking tag $TRACKING_TAG (mutable — see above)"
+            fi
           fi
 
           # Graft only when PREV is a real, newer common ancestor that git does
@@ -249,6 +307,7 @@ jobs:
             echo "graft_commit=$TIP" >> "$GITHUB_OUTPUT"
             echo "prev_upstream=$PREV" >> "$GITHUB_OUTPUT"
             echo "Grafted $PREV onto $TIP — merge-base corrected to the last synced upstream commit."
+            echo "Baseline source: $PREV_SRC"
           else
             echo "grafted=false" >> "$GITHUB_OUTPUT"
             echo "No graft applied (no newer shared upstream ancestor found; using default merge-base)."
@@ -614,7 +673,10 @@ jobs:
               '### Resolution steps',
               ...checkoutBlock,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
-              '   git fetch upstream --tags',
+              // --force: a resolver's long-lived clone already holds these tags.
+              // Plain --tags refuses to move them ("would clobber existing tag")
+              // AND exits 1, aborting the instruction list under `set -e`.
+              '   git fetch upstream --tags --force',
               '   ```',
               ...graftStep,
               '3. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
@@ -632,13 +694,25 @@ jobs:
               '   BASE=$(git rev-parse HEAD^1)             # target-branch tip (first parent)',
               '   # (placeholders below are literal — do NOT paste the raw upstream tag into a',
               '   #  double-quoted -m; git refnames may contain $()/backticks that would run)',
-              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" -m "Upstream sync: <tag> into <target-branch> (squashed)")',
+              '   # The `upstream-commit:` trailer is REQUIRED, not decorative: the next',
+              '   # sync reads it to set its merge-base graft. Without it that graft falls',
+              '   # back to re-deriving the baseline from version.inc, which resolves through',
+              '   # a MUTABLE tag — and if upstream retags a release after we sync it, the',
+              '   # re-derivation silently skips every change between the old and new tag.',
+              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" \\',
+              '     -m "Upstream sync: <tag> into <target-branch> (squashed)" \\',
+              `     -m "upstream-commit: ${syncSha}")`,
               '   git reset --hard "$NEW"                  # branch now has exactly one commit',
               `   git push origin ${branch} --force-with-lease`,
               '   ```',
               '5. Open a PR and squash-merge it into the release branch (a squash keeps',
               '   the "verified signatures" rule satisfied). Do NOT push unsigned',
               '   upstream commits to a protected branch.',
+              '   When you squash-merge, leave the `upstream-commit:` trailer in the commit',
+              '   message. GitHub pre-fills it from the single commit above; deleting it',
+              '   from the edit box is the one way this record gets lost, and the',
+              '   release-branch commit is the only copy that cannot be rewritten later',
+              '   (this issue\'s body is overwritten by the next run for the same tag).',
               '',
               'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
             ].join('\n');
@@ -746,7 +820,8 @@ jobs:
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
             -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
-            -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications.")
+            -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
+            -m "upstream-commit: ${SYNC_SHA}")
           git reset --hard "$NEW"
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
 

@@ -539,10 +539,7 @@ to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
 workflow ephemerally grafts the upstream commit our content is based on onto the
-branch tip. For tag-release syncs that commit is derived from `version.inc`
-(authoritative — it names the synced release); for `main` syncs it comes from the
-`helio-last-synced-main` tracking tag (`version.inc` would name an older release
-there and must not be used):
+branch tip:
 
 ```bash
 git replace --graft <release_tip> $(git rev-parse <release_tip>^@) <prev_upstream_commit>
@@ -555,6 +552,64 @@ pushed — it only corrects git's merge-base computation. It is removed before a
 push, so nothing unsigned reaches a protected branch. When resolving a conflict
 issue by hand, run the exact `git replace --graft` command from the issue body
 first, or you will face the full (inflated) conflict set instead of the real delta.
+
+### Where `<prev_upstream_commit>` comes from — the `upstream-commit:` trailer
+
+Every sync commit records the upstream SHA it brought in, as a git trailer in the
+last paragraph of its message:
+
+```
+upstream-commit: 8500fcdccaa10b5099ac20d252af3a7c560046f1
+```
+
+Both sync paths write it — the workflow's clean-merge squash step, and step 4 of
+the resolution instructions in the auto-created conflict issue. The next sync
+reads the newest one on the release branch's **first-parent** line:
+
+```bash
+git log --first-parent --format='%H %(trailers:key=upstream-commit,valueonly)' \
+  orca-latest-parity-bambu | awk 'NF > 1 { print; exit }'
+```
+
+**Why a trailer and not a tag.** The graft used to re-derive the baseline from
+`version.inc` (tag syncs) or the `helio-last-synced-main` tracking tag (main
+syncs). Both resolve through a **mutable** ref, and the validation
+(`git merge-base --is-ancestor $candidate $sync_target`) proves only that the
+candidate is an ancestor of the *incoming* target — not that it is what this
+branch actually holds. Those are different questions, and a retag separates them:
+
+1. `v2.4.2` is synced from commit **A**; the branch tree holds A.
+2. Upstream retags `v2.4.2` from A to **B**.
+3. The next sync targets **C**, a descendant of B — the ordinary forward retag.
+4. `--is-ancestor B C` passes, so **B** is accepted as the baseline.
+5. The graft asserts our content is based on B, and the merge computes only B..C.
+
+Everything in **A..B** is then never merged. The branch silently keeps A's content
+for those files, with no conflict, no warning, and a sync PR that looks clean —
+the merge-base bug inverted, producing too *few* conflicts instead of too many.
+The trailer does not move when the tag moves, which closes this.
+
+**Precedence, and what happens when the record is bad:**
+
+| Situation | Behaviour |
+|---|---|
+| Trailer found, SHA resolves | Used. Mutable-ref fallbacks are **not** consulted |
+| Trailer found, SHA resolves but is not an ancestor of the target | Used anyway (upstream rewrote history; the record is still what we built from), with a `::warning::` |
+| Trailer found, SHA does not resolve to a commit | **Graft skipped entirely** — deliberately no fall back to a tag guess |
+| No trailer on the first-parent line (legacy commits) | `version.inc` / tracking-tag derivation, as before |
+
+That third row is the load-bearing choice: a *wrong* graft under-merges in
+silence, while *no* graft only inflates the conflict count — loud, and a resolver
+can fix it by hand. Loud failure beats silent data loss.
+
+**When resolving by hand, keep the trailer.** The commands in the conflict issue
+include it in the `git commit-tree` invocation; leaving it out re-opens the retag
+hole for the following sync. It must land on the **release-branch** commit, since
+the sync branch does not survive the mandated squash — and when you squash-merge
+the PR, leave the trailer in GitHub's pre-filled commit message. No other record
+of the baseline is durable: the conflict issue's body is overwritten by the next
+run for the same tag (it dedupes on a title built from the tag), and the tracking
+tags are frozen at `v2.3.2-rc2`.
 
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.
