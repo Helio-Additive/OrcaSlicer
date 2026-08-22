@@ -586,9 +586,20 @@ paragraph**, and GitHub appends `Co-authored-by:` in a paragraph of its own when
 it squash-merges a PR with more than one commit author. That orphans an
 otherwise perfectly good record and drops the sync silently to the legacy path.
 Both behaviours are verified — same paragraph parses, separate paragraph does
-not — so the reader scans the whole message instead. `--all-match` requires both
-lines, and the patterns demand a full 40-hex id and an exact mode, so prose that
-merely mentions the keys does not match.
+not — so the reader scans the whole message instead.
+
+**`--grep` is only a prefilter; the pair is matched by adjacency.** `--all-match`
+requires both patterns to appear *somewhere* in the message, not in the same
+record. A commit that quotes an older record and carries its own below it
+satisfies both patterns for **either** mode, so a mode-blind extraction returns
+the wrong one — mode scoping defeated by a different route, and in the silent
+direction whenever the wrong record is the newer. Each candidate's message is
+therefore re-scanned for an `upstream-commit:` line **immediately followed** by
+`upstream-sync-mode: <this mode>`; the last such pair wins (the record is a
+trailer, so a commit's own sits at the end), and a candidate with no matching
+pair is skipped in favour of the next. A pair separated by any intervening line
+does not match. Verified on a commit carrying a quoted `main` record above its
+own `tag` record: `main` reads the first, `tag` reads the second.
 
 **Why the mode scoping.** Tag syncs and main syncs advance the branch along
 different upstream lines, so the newest record overall is not necessarily the

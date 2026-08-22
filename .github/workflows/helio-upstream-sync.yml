@@ -270,30 +270,46 @@ jobs:
           #    to the legacy path with no warning. Verified both ways: same
           #    paragraph parses, separate paragraph does not. `--grep` anchors `^`
           #    per line inside the message, so paragraph position stops mattering.
-          # 4. `--all-match` PLUS STRICT PATTERNS. Both lines must be present, the
-          #    id must be a full 40 hex digits and the mode exact, so prose that
-          #    merely mentions the keys does not match and a stray
+          # 4. `--grep` IS ONLY A PREFILTER; THE PAIR IS MATCHED BY ADJACENCY.
+          #    `--all-match` requires both patterns to appear *somewhere* in the
+          #    message, not in the same record. A commit quoting an older record
+          #    and carrying its own below it satisfies both patterns for EITHER
+          #    mode, and a mode-blind extraction then returns the wrong one — the
+          #    mode-scoping bug re-entering by another door, in the silent
+          #    direction when the wrong record is the newer. So each candidate's
+          #    message is re-scanned for an `upstream-commit:` line IMMEDIATELY
+          #    followed by `upstream-sync-mode: <this mode>`; the LAST such pair
+          #    wins (the record is a trailer, so a commit's own is at the end),
+          #    and a candidate with no matching pair is skipped for the next one.
+          #    The strict shapes — 40 lowercase hex, exact mode — mean prose that
+          #    merely mentions the keys never matches, and a stray
           #    `upstream-commit: HEAD` cannot graft an arbitrary commit.
           #
           # The awk deliberately does NOT `exit` on the first match: closing the
           # pipe early can SIGPIPE `git log`, and `set -o pipefail` would turn that
-          # into a step failure.
+          # into a step failure. It also avoids `{40}` interval syntax, which not
+          # every awk on a runner image supports.
           SYNC_MODE=tag
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
 
-          RECORDED_FROM=$(git log --first-parent -E --all-match \
-            --grep="^upstream-commit: [0-9a-f]{40}\$" \
-            --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
-            --format='%H' HEAD | awk '!seen { print; seen = 1 }')
+          RECORDED=""
+          RECORDED_FROM=""
+          for c in $(git log --first-parent -E --all-match \
+              --grep="^upstream-commit: [0-9a-f]{40}\$" \
+              --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
+              --format='%H' HEAD); do
+            v=$(git show -s --format=%B "$c" | awk -v mode="$SYNC_MODE" '
+              /^upstream-commit: / {
+                if (NF == 2 && length($2) == 40 && $2 ~ /^[0-9a-f]+$/) sha = $2; else sha = "";
+                next
+              }
+              $0 == "upstream-sync-mode: " mode && sha != "" { last = sha }
+              { sha = "" }
+              END { if (last != "") print last }')
+            if [ -n "$v" ]; then RECORDED="$v"; RECORDED_FROM="$c"; break; fi
+          done
 
-          if [ -n "$RECORDED_FROM" ]; then
-            # LAST match in the message, not the first. The record is written as a
-            # trailer, i.e. at the end — so if a message somehow carries two (a
-            # revert or a hand-written commit quoting an older sync verbatim, then
-            # its own record below it), the trailing one is this commit's own.
-            RECORDED=$(git show -s --format=%B "$RECORDED_FROM" \
-              | sed -n 's/^upstream-commit: \([0-9a-f]\{40\}\)$/\1/p' \
-              | awk '{ last = $0 } END { if (last != "") print last }')
+          if [ -n "$RECORDED" ]; then
             if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
               PREV=$(git rev-parse "${RECORDED}^{commit}")
               PREV_SRC="upstream-commit: trailer ($SYNC_MODE mode) on $RECORDED_FROM"
