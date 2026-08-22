@@ -284,9 +284,13 @@ jobs:
             --format='%H' HEAD | awk '!seen { print; seen = 1 }')
 
           if [ -n "$RECORDED_FROM" ]; then
+            # LAST match in the message, not the first. The record is written as a
+            # trailer, i.e. at the end — so if a message somehow carries two (a
+            # revert or a hand-written commit quoting an older sync verbatim, then
+            # its own record below it), the trailing one is this commit's own.
             RECORDED=$(git show -s --format=%B "$RECORDED_FROM" \
               | sed -n 's/^upstream-commit: \([0-9a-f]\{40\}\)$/\1/p' \
-              | awk '!seen { print; seen = 1 }')
+              | awk '{ last = $0 } END { if (last != "") print last }')
             if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
               PREV=$(git rev-parse "${RECORDED}^{commit}")
               PREV_SRC="upstream-commit: trailer ($SYNC_MODE mode) on $RECORDED_FROM"
