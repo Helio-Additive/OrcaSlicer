@@ -258,16 +258,35 @@ jobs:
           # re-opening the retag hole this whole mechanism exists to close. The
           # scan is one `git log` over the branch's own first-parent line, once
           # per sync — there is no cost worth trading a silent failure mode for.
+          #
+          # Scoped to the CURRENT MODE. Tag syncs and main syncs advance the
+          # branch along different upstream lines, so the newest trailer overall
+          # is not necessarily the right baseline for this run: if a main sync
+          # records M and a later tag sync records an older B, a mode-blind read
+          # would graft B for the next main sync and drag the whole B..M range
+          # back into the conflict set. The version.inc / tracking-tag split below
+          # was already mode-specific; this keeps that property.
+          SYNC_MODE=tag
+          if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
+
           RECORDED_LINE=$(git log --first-parent \
-            --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' HEAD \
-            | awk 'NF > 1 && !seen { print; seen = 1 }')
+            --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20) %(trailers:key=upstream-sync-mode,valueonly,separator=%x20)' HEAD \
+            | awk -v mode="$SYNC_MODE" 'NF == 3 && $3 == mode && !seen { print; seen = 1 }')
 
           if [ -n "$RECORDED_LINE" ]; then
-            RECORDED_FROM="${RECORDED_LINE%% *}"
-            RECORDED=$(printf '%s' "${RECORDED_LINE#* }" | tr -d '[:space:]')
+            RECORDED_FROM=$(printf '%s' "$RECORDED_LINE" | awk '{ print $1 }')
+            RECORDED=$(printf '%s' "$RECORDED_LINE" | awk '{ print $2 }')
+            # Must be a full 40-hex object name, not just something rev-parse can
+            # resolve: a stray `upstream-commit: HEAD` or a branch name would
+            # otherwise resolve happily and graft an arbitrary commit.
+            if ! printf '%s' "$RECORDED" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::warning::Recorded baseline '$RECORDED' (from $RECORDED_FROM) is not a full 40-hex commit id. Skipping the graft rather than guessing from a mutable tag — expect a large conflict count."
+              echo "grafted=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
               PREV=$(git rev-parse "${RECORDED}^{commit}")
-              PREV_SRC="upstream-commit: trailer on $RECORDED_FROM"
+              PREV_SRC="upstream-commit: trailer ($SYNC_MODE mode) on $RECORDED_FROM"
               # Not an ancestor => upstream rewrote history since we synced. The
               # record is still what this branch was built from, so it is still
               # the right graft; git computes the true common ancestor from it.
@@ -564,6 +583,7 @@ jobs:
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
           GRAFTED: ${{ steps.graft.outputs.grafted }}
@@ -577,6 +597,9 @@ jobs:
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
             const syncSha = process.env.SYNC_SHA;
+            // Mirrors the graft step: the record is scoped to the sync mode, so a
+            // tag sync's baseline is never read as a main sync's and vice versa.
+            const syncMode = process.env.TRACKING_TAG === 'helio-last-synced-main' ? 'main' : 'tag';
             const target = process.env.TARGET_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
             const grafted = process.env.GRAFTED === 'true';
@@ -705,22 +728,25 @@ jobs:
               '   BASE=$(git rev-parse HEAD^1)             # target-branch tip (first parent)',
               '   # (placeholders below are literal — do NOT paste the raw upstream tag into a',
               '   #  double-quoted -m; git refnames may contain $()/backticks that would run)',
-              '   # The `upstream-commit:` trailer is REQUIRED, not decorative: the next',
-              '   # sync reads it to set its merge-base graft. Without it that graft falls',
-              '   # back to re-deriving the baseline from version.inc, which resolves through',
-              '   # a MUTABLE tag — and if upstream retags a release after we sync it, the',
+              '   # The trailers below are REQUIRED, not decorative: the next sync reads',
+              '   # them to set its merge-base graft. Without them that graft falls back to',
+              '   # re-deriving the baseline from version.inc, which resolves through a',
+              '   # MUTABLE tag — and if upstream retags a release after we sync it, the',
               '   # re-derivation silently skips every change between the old and new tag.',
+              '   # Both must sit in ONE -m: git reads trailers only from the last',
+              '   # paragraph, and each -m starts a new one.',
+              `   TRAILERS=$(printf 'upstream-commit: %s\\nupstream-sync-mode: %s' "${syncSha}" "${syncMode}")`,
               '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" \\',
               '     -m "Upstream sync: <tag> into <target-branch> (squashed)" \\',
-              `     -m "upstream-commit: ${syncSha}")`,
+              '     -m "$TRAILERS")',
               '   git reset --hard "$NEW"                  # branch now has exactly one commit',
               `   git push origin ${branch} --force-with-lease`,
               '   ```',
               '5. Open a PR and squash-merge it into the release branch (a squash keeps',
               '   the "verified signatures" rule satisfied). Do NOT push unsigned',
               '   upstream commits to a protected branch.',
-              '   When you squash-merge, leave the `upstream-commit:` trailer in the commit',
-              '   message. GitHub pre-fills it from the single commit above; deleting it',
+              '   When you squash-merge, leave both trailers in the commit',
+              '   message. GitHub pre-fills them from the single commit above; deleting them',
               '   from the edit box is the one way this record gets lost, and the',
               '   release-branch commit is the only copy that cannot be rewritten later',
               '   (this issue\'s body is overwritten by the next run for the same tag).',
@@ -825,14 +851,21 @@ jobs:
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
         run: |
           BASE="$PRE_MERGE"                   # target-branch tip recorded before the merge
           TREE=$(git rev-parse "HEAD^{tree}") # resolved merge (or fast-forwarded) tree
+          # Both trailers must land in ONE -m: git parses trailers only from the
+          # last paragraph, and each -m starts a new one. Built with printf so the
+          # newline does not depend on YAML block indentation.
+          SYNC_MODE=tag
+          if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
+          TRAILERS=$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
             -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
             -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
-            -m "upstream-commit: ${SYNC_SHA}")
+            -m "$TRAILERS")
           git reset --hard "$NEW"
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
 

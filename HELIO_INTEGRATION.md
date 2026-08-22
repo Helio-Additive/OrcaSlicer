@@ -555,22 +555,39 @@ first, or you will face the full (inflated) conflict set instead of the real del
 
 ### Where `<prev_upstream_commit>` comes from — the `upstream-commit:` trailer
 
-Every sync commit records the upstream SHA it brought in, as a git trailer in the
-last paragraph of its message:
+Every sync commit records the upstream SHA it brought in, plus which mode brought
+it, as git trailers in the last paragraph of its message:
 
 ```text
 upstream-commit: 8500fcdccaa10b5099ac20d252af3a7c560046f1
+upstream-sync-mode: tag
 ```
 
-Both sync paths write it — the workflow's clean-merge squash step, and step 4 of
-the resolution instructions in the auto-created conflict issue. The next sync
-reads the newest one on the release branch's **first-parent** line:
+Both sync paths write them — the workflow's clean-merge squash step, and step 4
+of the resolution instructions in the auto-created conflict issue. Both trailers
+must sit in the **same** `-m`: git reads trailers only from the last paragraph,
+and each `-m` starts a new one.
+
+The next sync reads the newest matching record on the release branch's
+**first-parent** line, scoped to its own mode (`tag` for release syncs, `main`
+for `main` syncs):
 
 ```bash
 git log --first-parent \
-  --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' \
-  orca-latest-parity-bambu | awk 'NF > 1 && !seen { print; seen = 1 }'
+  --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20) %(trailers:key=upstream-sync-mode,valueonly,separator=%x20)' \
+  orca-latest-parity-bambu \
+  | awk -v mode=tag 'NF == 3 && $3 == mode && !seen { print; seen = 1 }'
 ```
+
+**Why the mode scoping.** Tag syncs and main syncs advance the branch along
+different upstream lines, so the newest record overall is not necessarily the
+right baseline for a given run. If a `main` sync records **M** and a later tag
+sync records an older **B**, a mode-blind read would hand **B** to the next
+`main` sync — dragging the whole `B..M` range back into the conflict set, which
+is the inflated-conflict failure the graft exists to prevent. The
+`version.inc` / tracking-tag split was already mode-specific; the record keeps
+that property. A commit carrying `upstream-commit:` with no `upstream-sync-mode:`
+is ignored rather than guessed at.
 
 Two details that look like oversights but are not. The `awk` sets a flag rather
 than calling `exit`: closing the pipe early can `SIGPIPE` `git log`, and the
@@ -601,18 +618,18 @@ The trailer does not move when the tag moves, which closes this.
 
 | Situation | Behaviour |
 |---|---|
-| Trailer found, SHA resolves | Used. Mutable-ref fallbacks are **not** consulted |
-| Trailer found, SHA resolves but is not an ancestor of the target | Used anyway (upstream rewrote history; the record is still what we built from), with a `::warning::` |
-| Trailer found, SHA does not resolve to a commit | **Graft skipped entirely** — deliberately no fall back to a tag guess |
-| No trailer on the first-parent line (legacy commits) | `version.inc` / tracking-tag derivation, as before |
+| Record found for this mode, SHA resolves | Used. Mutable-ref fallbacks are **not** consulted |
+| Record found, SHA resolves but is not an ancestor of the target | Used anyway (upstream rewrote history; the record is still what we built from), with a `::warning::` |
+| Record found, SHA does not resolve to a commit | **Graft skipped entirely** — deliberately no fall back to a tag guess |
+| No record for this mode on the first-parent line (legacy commits, or a record written by the other mode) | `version.inc` / tracking-tag derivation, as before |
 
 That third row is the load-bearing choice: a *wrong* graft under-merges in
 silence, while *no* graft only inflates the conflict count — loud, and a resolver
 can fix it by hand. Loud failure beats silent data loss.
 
-**When resolving by hand, keep the trailer.** The commands in the conflict issue
-include it in the `git commit-tree` invocation; leaving it out re-opens the retag
-hole for the following sync. It must land on the **release-branch** commit, since
+**When resolving by hand, keep both trailers.** The commands in the conflict issue
+include them in the `git commit-tree` invocation; leaving them out re-opens the
+retag hole for the following sync. It must land on the **release-branch** commit, since
 the sync branch does not survive the mandated squash — and when you squash-merge
 the PR, leave the trailer in GitHub's pre-filled commit message. No other record
 of the baseline is durable: the conflict issue's body is overwritten by the next
