@@ -979,6 +979,10 @@ jobs:
               }
             }
 
+            // The two-line baseline record. Shared between the new-PR body and
+            // the existing-PR refresh so the two can never drift apart.
+            const recordBlock = `upstream-commit: ${syncSha}\nupstream-sync-mode: ${syncMode}`;
+
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
@@ -1010,9 +1014,10 @@ jobs:
               // "PR title and commit details" takes the commit, "PR title and
               // description" takes this body. Emitting both covers either. ("PR
               // title only" drops the record entirely — see HELIO_INTEGRATION.md.)
-              // Must stay the last thing in the body, with no trailing prose.
-              `upstream-commit: ${syncSha}`,
-              `upstream-sync-mode: ${syncMode}`,
+              // Must stay the last thing in the body, with no trailing prose —
+              // the existing-PR refresh below finds it by looking at the last two
+              // non-blank lines.
+              recordBlock,
             ].join('\n');
 
             try {
@@ -1059,6 +1064,39 @@ jobs:
                     const existingPr = prs[0];
                     core.setOutput('url', existingPr.html_url);
                     console.log(`Found existing PR #${existingPr.number}: ${existingPr.html_url}`);
+                    // Refresh the trailing record. This run force-pushed a commit
+                    // carrying the CURRENT syncSha (the tag may have moved since
+                    // the PR was opened), but the PR body still names the old one.
+                    // Under the "PR title and description" squash setting that
+                    // stale copy is what lands, recording a baseline that does not
+                    // describe the merged tree — the exact failure the record
+                    // exists to prevent. Only the trailing block is replaced, so
+                    // any human edits to the rest of the description survive.
+                    try {
+                      const stripTrailingRecord = (b) => {
+                        const lines = (b || '').split('\n').map(l => l.replace(/\r$/, ''));
+                        while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+                        if (lines.length >= 2
+                            && /^upstream-sync-mode: (?:tag|main)$/.test(lines[lines.length - 1])
+                            && /^upstream-commit: [0-9a-f]{40}$/.test(lines[lines.length - 2])) {
+                          lines.splice(-2, 2);
+                        }
+                        while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+                        return lines.join('\n');
+                      };
+                      const refreshed = `${stripTrailingRecord(existingPr.body)}\n\n${recordBlock}`;
+                      if (refreshed !== existingPr.body) {
+                        await github.rest.pulls.update({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          pull_number: existingPr.number,
+                          body: refreshed
+                        });
+                        console.log(`Refreshed baseline record on PR #${existingPr.number} to ${syncSha} (${syncMode})`);
+                      }
+                    } catch (bodyErr) {
+                      core.warning(`Could not refresh the baseline record on PR #${existingPr.number}: ${bodyErr.message}. Its description may name a stale upstream-commit; check it before squash-merging.`);
+                    }
                     try {
                       await github.rest.issues.addLabels({
                         owner: context.repo.owner,
