@@ -1145,10 +1145,27 @@ jobs:
                       console.warn(`Warning: failed to add claude-work label to existing PR #${existingPr.number}:`, labelErr);
                     }
                   } else {
-                    console.log(`Could not find existing open PR for ${branch} → ${target}`);
+                    // `pulls.create` just told us a PR exists for this head, so an
+                    // empty list means we cannot see the PR whose body needs the
+                    // refreshed record. Same end state as a failed refresh: branch
+                    // carries the new SHA, some PR carries the old one, and under
+                    // the "PR title and description" squash setting that stale
+                    // copy is what merges. Fail rather than let the run go green.
+                    core.setFailed(
+                      `PR creation reported an existing PR for ${branch} → ${target}, but no open PR was found to refresh. ` +
+                      `${branch} carries ${syncSha}; any open PR for it may still record an older upstream-commit. ` +
+                      `Check it before squash-merging, or re-run this workflow.`
+                    );
                   }
                 } catch (listErr) {
-                  console.warn(`Warning: failed to list PRs for ${branch}:`, listErr);
+                  // Also fatal, for the same reason: without the listing we cannot
+                  // confirm the PR body records ${syncSha}, and staying green lets
+                  // the tracking tag advance over an unverified record.
+                  core.setFailed(
+                    `Failed to list PRs for ${branch} while refreshing the baseline record: ${listErr.message}. ` +
+                    `${branch} carries ${syncSha}; the open PR for it may still record an older upstream-commit. ` +
+                    `Check it before squash-merging, or re-run this workflow.`
+                  );
                 }
               } else {
                 throw err;
