@@ -558,7 +558,7 @@ first, or you will face the full (inflated) conflict set instead of the real del
 Every sync commit records the upstream SHA it brought in, as a git trailer in the
 last paragraph of its message:
 
-```
+```text
 upstream-commit: 8500fcdccaa10b5099ac20d252af3a7c560046f1
 ```
 
@@ -567,15 +567,17 @@ the resolution instructions in the auto-created conflict issue. The next sync
 reads the newest one on the release branch's **first-parent** line:
 
 ```bash
-git log --first-parent -n 500 \
+git log --first-parent \
   --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' \
   orca-latest-parity-bambu | awk 'NF > 1 && !seen { print; seen = 1 }'
 ```
 
-(The `awk` sets a flag rather than calling `exit`: closing the pipe early can
-`SIGPIPE` `git log`, and the workflow step runs under `set -o pipefail`, which
-would turn that into a step failure. The input is capped, so reading it out is
-free.)
+Two details that look like oversights but are not. The `awk` sets a flag rather
+than calling `exit`: closing the pipe early can `SIGPIPE` `git log`, and the
+workflow step runs under `set -o pipefail`, which would turn that into a step
+failure. And the search is **unbounded** — a commit cap would silently expire
+the record once that many commits landed since the last sync, dropping back to
+the mutable-tag path and re-opening the retag hole below.
 
 **Why a trailer and not a tag.** The graft used to re-derive the baseline from
 `version.inc` (tag syncs) or the `helio-last-synced-main` tracking tag (main
@@ -614,8 +616,12 @@ hole for the following sync. It must land on the **release-branch** commit, sinc
 the sync branch does not survive the mandated squash — and when you squash-merge
 the PR, leave the trailer in GitHub's pre-filled commit message. No other record
 of the baseline is durable: the conflict issue's body is overwritten by the next
-run for the same tag (it dedupes on a title built from the tag), and the tracking
-tags are frozen at `v2.3.2-rc2`.
+run for the same tag (it dedupes on a title built from the tag), and the
+`helio-last-synced*` tracking tags are mutable refs the workflow force-updates
+(`git tag -f` + `git push --force`) on each successful sync — so they record
+wherever the last *succeeding* run pointed them, not what this branch holds.
+They are also stale in practice, still sitting at `v2.3.2-rc2`, because every
+sync so far has ended in conflicts and never reached that step.
 
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.

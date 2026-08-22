@@ -251,9 +251,14 @@ jobs:
           # the value inline, and the awk keeps the first line that has one.
           # The awk deliberately does NOT `exit` on the match: closing the pipe
           # early can SIGPIPE `git log`, and `set -o pipefail` would turn that
-          # into a step failure. The input is capped at 500 lines, so reading it
-          # out costs nothing.
-          RECORDED_LINE=$(git log --first-parent -n 500 \
+          # into a step failure.
+          # Deliberately UNBOUNDED. A commit cap would silently expire the record
+          # once that many commits landed since the last sync (e.g. while a
+          # conflict PR stayed open), dropping us back to the mutable-tag path and
+          # re-opening the retag hole this whole mechanism exists to close. The
+          # scan is one `git log` over the branch's own first-parent line, once
+          # per sync — there is no cost worth trading a silent failure mode for.
+          RECORDED_LINE=$(git log --first-parent \
             --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' HEAD \
             | awk 'NF > 1 && !seen { print; seen = 1 }')
 
@@ -677,6 +682,12 @@ jobs:
               // Plain --tags refuses to move them ("would clobber existing tag")
               // AND exits 1, aborting the instruction list under `set -e`.
               '   git fetch upstream --tags --force',
+              // `main` mode syncs to an upstream/main commit that no tag reaches.
+              // The conflict path aborts the merge before pushing, so the sync
+              // branch carries no upstream objects either — without this the
+              // `git merge <sha>` below has nothing to merge. Mirrors the CI job,
+              // which fetches both; harmless in tag mode.
+              '   git fetch upstream main',
               '   ```',
               ...graftStep,
               '3. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
