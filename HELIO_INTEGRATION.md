@@ -570,14 +570,33 @@ and each `-m` starts a new one.
 
 The next sync reads the newest matching record on the release branch's
 **first-parent** line, scoped to its own mode (`tag` for release syncs, `main`
-for `main` syncs):
+for `main` syncs). This is the whole algorithm, and it prints the upstream SHA —
+copy it as-is if you need the baseline by hand:
 
 ```bash
-git log --first-parent -E --all-match \
-  --grep='^upstream-commit: [0-9a-f]{40}$' \
-  --grep='^upstream-sync-mode: tag$' \
-  --format='%H' orca-latest-parity-bambu | awk '!seen { print; seen = 1 }'
+MODE=tag        # or: main
+for c in $(git log --first-parent -E --all-match \
+    --grep="^upstream-commit: [0-9a-f]{40}\$" \
+    --grep="^upstream-sync-mode: ${MODE}\$" \
+    --format='%H' orca-latest-parity-bambu); do
+  sha=$(git show -s --format=%B "$c" | awk -v mode="$MODE" '
+    /^upstream-commit: / {
+      if (NF == 2 && length($2) == 40 && $2 ~ /^[0-9a-f]+$/) s = $2; else s = ""
+      next
+    }
+    $0 == "upstream-sync-mode: " mode && s != "" { last = s }
+    { s = "" }
+    END { if (last != "") print last }')
+  [ -n "$sha" ] && { echo "$sha"; break; }
+done
 ```
+
+> [!WARNING]
+> The `git log --grep` half is **only a candidate prefilter** — on its own it
+> prints the *release-branch* commit, not the upstream SHA, and it accepts a
+> commit whose two lines belong to different records. Do not lift it out of this
+> loop and use it to pick a merge base. The `awk` rescan is what makes the answer
+> correct; see the two notes below for why each half is shaped this way.
 
 **Read with a message scan, not `%(trailers:…)`.** They are *written* as trailers
 because that is the readable, `--grep`-able convention, but they must not be
