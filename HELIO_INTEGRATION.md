@@ -573,11 +573,22 @@ The next sync reads the newest matching record on the release branch's
 for `main` syncs):
 
 ```bash
-git log --first-parent \
-  --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20) %(trailers:key=upstream-sync-mode,valueonly,separator=%x20)' \
-  orca-latest-parity-bambu \
-  | awk -v mode=tag 'NF == 3 && $3 == mode && !seen { print; seen = 1 }'
+git log --first-parent -E --all-match \
+  --grep='^upstream-commit: [0-9a-f]{40}$' \
+  --grep='^upstream-sync-mode: tag$' \
+  --format='%H' orca-latest-parity-bambu | awk '!seen { print; seen = 1 }'
 ```
+
+**Read with a message scan, not `%(trailers:…)`.** They are *written* as trailers
+because that is the readable, `--grep`-able convention, but they must not be
+*read* with git's trailer machinery: git parses trailers only out of the **last
+paragraph**, and GitHub appends `Co-authored-by:` in a paragraph of its own when
+it squash-merges a PR with more than one commit author. That orphans an
+otherwise perfectly good record and drops the sync silently to the legacy path.
+Both behaviours are verified — same paragraph parses, separate paragraph does
+not — so the reader scans the whole message instead. `--all-match` requires both
+lines, and the patterns demand a full 40-hex id and an exact mode, so prose that
+merely mentions the keys does not match.
 
 **Why the mode scoping.** Tag syncs and main syncs advance the branch along
 different upstream lines, so the newest record overall is not necessarily the

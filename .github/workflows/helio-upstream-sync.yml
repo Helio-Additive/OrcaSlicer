@@ -269,21 +269,24 @@ jobs:
           SYNC_MODE=tag
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
 
-          RECORDED_LINE=$(git log --first-parent \
-            --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20) %(trailers:key=upstream-sync-mode,valueonly,separator=%x20)' HEAD \
-            | awk -v mode="$SYNC_MODE" 'NF == 3 && $3 == mode && !seen { print; seen = 1 }')
+          # Read with a full-message scan, NOT `%(trailers:...)`. Git parses
+          # trailers only out of the LAST paragraph, and GitHub appends
+          # `Co-authored-by:` in its own paragraph when it squash-merges a PR with
+          # more than one commit author — which orphans an otherwise valid record
+          # and silently drops us to the legacy path. Verified both ways: same
+          # paragraph parses, separate paragraph does not. `--grep` anchors `^`
+          # per line inside the message, and `--all-match` requires both lines, so
+          # the pair has to be present to match at all. The patterns demand a full
+          # 40-hex id and an exact mode, which prose does not accidentally satisfy.
+          RECORDED_FROM=$(git log --first-parent -E --all-match \
+            --grep="^upstream-commit: [0-9a-f]{40}\$" \
+            --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
+            --format='%H' HEAD | awk '!seen { print; seen = 1 }')
 
-          if [ -n "$RECORDED_LINE" ]; then
-            RECORDED_FROM=$(printf '%s' "$RECORDED_LINE" | awk '{ print $1 }')
-            RECORDED=$(printf '%s' "$RECORDED_LINE" | awk '{ print $2 }')
-            # Must be a full 40-hex object name, not just something rev-parse can
-            # resolve: a stray `upstream-commit: HEAD` or a branch name would
-            # otherwise resolve happily and graft an arbitrary commit.
-            if ! printf '%s' "$RECORDED" | grep -Eq '^[0-9a-f]{40}$'; then
-              echo "::warning::Recorded baseline '$RECORDED' (from $RECORDED_FROM) is not a full 40-hex commit id. Skipping the graft rather than guessing from a mutable tag — expect a large conflict count."
-              echo "grafted=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+          if [ -n "$RECORDED_FROM" ]; then
+            RECORDED=$(git show -s --format=%B "$RECORDED_FROM" \
+              | sed -n 's/^upstream-commit: \([0-9a-f]\{40\}\)$/\1/p' \
+              | awk '!seen { print; seen = 1 }')
             if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
               PREV=$(git rev-parse "${RECORDED}^{commit}")
               PREV_SRC="upstream-commit: trailer ($SYNC_MODE mode) on $RECORDED_FROM"
