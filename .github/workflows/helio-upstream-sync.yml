@@ -1116,7 +1116,23 @@ jobs:
                         console.log(`Refreshed baseline record on PR #${existingPr.number} to ${syncSha} (${syncMode})`);
                       }
                     } catch (bodyErr) {
-                      core.warning(`Could not refresh the baseline record on PR #${existingPr.number}: ${bodyErr.message}. Its description may name a stale upstream-commit; check it before squash-merging.`);
+                      // FAIL, do not warn. The branch now carries a commit
+                      // recording the current syncSha while this PR's description
+                      // still records the previous one. Left as a log warning the
+                      // run stays green, the PR stays mergeable, and merging it
+                      // under the "PR title and description" squash setting
+                      // persists a baseline that does not describe the merged
+                      // tree — the silent wrong-baseline failure this whole change
+                      // exists to remove, reached through its own repair path.
+                      // A red run is the loud signal; the next scheduled run
+                      // retries this same path, so a transient API error
+                      // self-heals rather than needing intervention.
+                      core.setFailed(
+                        `Could not refresh the baseline record on PR #${existingPr.number}: ${bodyErr.message}. ` +
+                        `Its description still names a stale upstream-commit while ${branch} carries ${syncSha}. ` +
+                        `Do NOT squash-merge that PR until its trailing record reads "upstream-commit: ${syncSha}" / ` +
+                        `"upstream-sync-mode: ${syncMode}" — fix it by hand, or re-run this workflow to retry.`
+                      );
                     }
                     try {
                       await github.rest.issues.addLabels({

@@ -673,6 +673,17 @@ there is the silent under-merge this whole mechanism removes. Instead it emits a
 rather than mysterious, and a human can redo the graft against the tag after
 confirming the branch really holds it.
 
+**A third way was closed rather than documented.** A tag-mode run that reuses its
+branch after the tag moves force-pushes a commit carrying the new SHA, then
+rewrites the trailing record on the already-open PR to match. If that rewrite
+fails — transient API error, permissions — the workflow **fails the step** rather
+than logging a warning: the branch would otherwise carry one SHA while the PR
+description carried another, and merging that under the *PR title and
+description* setting persists a baseline that does not describe the merged tree.
+A red run is the loud signal; `Update tracking tag` is skipped along with it, so
+the tag does not advance while the two disagree, and the next scheduled run
+retries the same path so a transient failure self-heals.
+
 **When resolving by hand, keep both trailers.** The commands in the conflict issue
 include them in the `git commit-tree` invocation, and step 5 has you repeat them
 at the end of the PR description; leaving them out re-opens the retag hole for
