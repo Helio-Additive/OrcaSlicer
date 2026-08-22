@@ -638,9 +638,34 @@ That third row is the load-bearing choice: a *wrong* graft under-merges in
 silence, while *no* graft only inflates the conflict count — loud, and a resolver
 can fix it by hand. Loud failure beats silent data loss.
 
+### Two known ways the record can still be lost
+
+Neither is silent in the dangerous direction — both fall back to the legacy path,
+which is today's behaviour — but both are worth closing.
+
+**1. The repo's squash-merge message setting.** GitHub offers three: *PR title and
+commit details*, *PR title and description*, and *PR title only*. The first takes
+the record from the commit, the second from the PR body — so the workflow now
+emits the block in **both** places, last and contiguous, and either setting
+carries it through. **Under *PR title only* the record is dropped**, and nothing
+on this side can prevent that; the setting needs to be one of the first two.
+Worth confirming in Settings → General → Pull Requests, since no sync has yet
+merged with a record attached.
+
+**2. An out-of-band merge.** When the workflow detects that upstream content was
+brought in by hand, it advances the `helio-last-synced*` tracking tag but cannot
+append a trailer to history — so the tag can be legitimately *ahead* of the last
+recorded sync. The graft does **not** auto-prefer it: a forward retag makes the
+tag a strict descendant of the record in exactly the same way, and preferring it
+there is the silent under-merge this whole mechanism removes. Instead it emits a
+`::warning::` naming both commits, so an inflated conflict count is explained
+rather than mysterious, and a human can redo the graft against the tag after
+confirming the branch really holds it.
+
 **When resolving by hand, keep both trailers.** The commands in the conflict issue
-include them in the `git commit-tree` invocation; leaving them out re-opens the
-retag hole for the following sync. It must land on the **release-branch** commit, since
+include them in the `git commit-tree` invocation, and step 5 has you repeat them
+at the end of the PR description; leaving them out re-opens the retag hole for
+the following sync. It must land on the **release-branch** commit, since
 the sync branch does not survive the mandated squash — and when you squash-merge
 the PR, leave the trailer in GitHub's pre-filled commit message. No other record
 of the baseline is durable: the conflict issue's body is overwritten by the next
