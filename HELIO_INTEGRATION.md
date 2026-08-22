@@ -567,9 +567,15 @@ the resolution instructions in the auto-created conflict issue. The next sync
 reads the newest one on the release branch's **first-parent** line:
 
 ```bash
-git log --first-parent --format='%H %(trailers:key=upstream-commit,valueonly)' \
-  orca-latest-parity-bambu | awk 'NF > 1 { print; exit }'
+git log --first-parent -n 500 \
+  --format='%H %(trailers:key=upstream-commit,valueonly,separator=%x20)' \
+  orca-latest-parity-bambu | awk 'NF > 1 && !seen { print; seen = 1 }'
 ```
+
+(The `awk` sets a flag rather than calling `exit`: closing the pipe early can
+`SIGPIPE` `git log`, and the workflow step runs under `set -o pipefail`, which
+would turn that into a step failure. The input is capped, so reading it out is
+free.)
 
 **Why a trailer and not a tag.** The graft used to re-derive the baseline from
 `version.inc` (tag syncs) or the `helio-last-synced-main` tracking tag (main
