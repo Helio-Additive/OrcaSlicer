@@ -228,7 +228,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
                     /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
                     /* ORCA: Add Acceleration visualization support */ curr.acceleration,
                     /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #else
               const libvgcode::PathVertex vertex = { convert(prev.position), curr.height, curr.width, curr.feedrate, prev.actual_feedrate,
                     curr.mm3_per_mm, curr.fan_speed, curr.temperature, convert(curr.extrusion_role), curr_type,
@@ -237,7 +239,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
                     /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
                     /* ORCA: Add Acceleration visualization support */ curr.acceleration,
                     /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #endif // VGCODE_ENABLE_COG_AND_TOOL_MARKERS
                 ret.vertices.emplace_back(vertex);
             }
@@ -252,7 +256,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
             /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
             /* ORCA: Add Acceleration visualization support */ curr.acceleration,
             /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #else
         const libvgcode::PathVertex vertex = { convert(curr.position), curr.height, curr.width, curr.feedrate, curr.actual_feedrate,
             curr.mm3_per_mm, curr.fan_speed, curr.temperature, convert(curr.extrusion_role), curr_type,
@@ -261,7 +267,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
             /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
             /* ORCA: Add Acceleration visualization support */ curr.acceleration,
             /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #endif // VGCODE_ENABLE_COG_AND_TOOL_MARKERS
         ret.vertices.emplace_back(vertex);
     }
@@ -834,4 +842,3 @@ GCodeInputData convert(const Slic3r::Print& print, const std::vector<std::string
 }
 
 } // namespace libvgcode
-
