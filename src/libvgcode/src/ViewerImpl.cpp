@@ -1536,6 +1536,15 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
         if (v.thermal_index_max < -100.0f) return DUMMY_COLOR;
         return m_thermal_index_max_range.get_color_at(v.thermal_index_max);
     }
+    case EViewType::WarpageDisplacement: return std::isnan(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
+    case EViewType::WarpageDispX: return std::isnan(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
+    case EViewType::WarpageDispY: return std::isnan(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
+    case EViewType::WarpageDispZ: return std::isnan(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
+    case EViewType::WarpageRisk: return std::isnan(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
+    case EViewType::WarpageTIGradient: return std::isnan(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
+    case EViewType::WarpageThermalStrain: return std::isnan(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
+    case EViewType::WarpageHullShrinkage: return std::isnan(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
+    case EViewType::WarpageLayerShrinkage: return std::isnan(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
     case EViewType::VolumetricFlowRate:
     {
         return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_volumetric_rate_range.get_color_at(v.volumetric_rate());
@@ -1634,6 +1643,15 @@ const ColorRange& ViewerImpl::get_color_range(EViewType type) const
     case EViewType::ThermalIndexMean:         { return m_thermal_index_mean_range; }
     case EViewType::ThermalIndexMin:          { return m_thermal_index_min_range; }
     case EViewType::ThermalIndexMax:          { return m_thermal_index_max_range; }
+    case EViewType::WarpageDisplacement: return m_warpage_ranges[0];
+    case EViewType::WarpageDispX: return m_warpage_ranges[1];
+    case EViewType::WarpageDispY: return m_warpage_ranges[2];
+    case EViewType::WarpageDispZ: return m_warpage_ranges[3];
+    case EViewType::WarpageRisk: return m_warpage_ranges[4];
+    case EViewType::WarpageTIGradient: return m_warpage_ranges[5];
+    case EViewType::WarpageThermalStrain: return m_warpage_ranges[6];
+    case EViewType::WarpageHullShrinkage: return m_warpage_ranges[7];
+    case EViewType::WarpageLayerShrinkage: return m_warpage_ranges[8];
     case EViewType::VolumetricFlowRate:       { return m_volumetric_rate_range; }
     case EViewType::ActualVolumetricFlowRate: { return m_actual_volumetric_rate_range; }
     case EViewType::LayerTimeLinear:          { return m_layer_time_range[0]; }
@@ -1661,6 +1679,15 @@ void ViewerImpl::set_color_range_palette(EViewType type, const Palette& palette)
     case EViewType::ThermalIndexMean:         { m_thermal_index_mean_range.set_palette(palette); break; }
     case EViewType::ThermalIndexMin:          { m_thermal_index_min_range.set_palette(palette); break; }
     case EViewType::ThermalIndexMax:          { m_thermal_index_max_range.set_palette(palette); break; }
+    case EViewType::WarpageDisplacement: m_warpage_ranges[0].set_palette(palette); break;
+    case EViewType::WarpageDispX: m_warpage_ranges[1].set_palette(palette); break;
+    case EViewType::WarpageDispY: m_warpage_ranges[2].set_palette(palette); break;
+    case EViewType::WarpageDispZ: m_warpage_ranges[3].set_palette(palette); break;
+    case EViewType::WarpageRisk: m_warpage_ranges[4].set_palette(palette); break;
+    case EViewType::WarpageTIGradient: m_warpage_ranges[5].set_palette(palette); break;
+    case EViewType::WarpageThermalStrain: m_warpage_ranges[6].set_palette(palette); break;
+    case EViewType::WarpageHullShrinkage: m_warpage_ranges[7].set_palette(palette); break;
+    case EViewType::WarpageLayerShrinkage: m_warpage_ranges[8].set_palette(palette); break;
     case EViewType::VolumetricFlowRate:       { m_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::ActualVolumetricFlowRate: { m_actual_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::LayerTimeLinear:          { m_layer_time_range[0].set_palette(palette);   break; }
@@ -1707,6 +1734,8 @@ size_t ViewerImpl::get_used_cpu_memory() const
     ret += m_thermal_index_mean_range.size_in_bytes_cpu();
     ret += m_thermal_index_min_range.size_in_bytes_cpu();
     ret += m_thermal_index_max_range.size_in_bytes_cpu();
+    for (const ColorRange& range : m_warpage_ranges)
+        ret += range.size_in_bytes_cpu();
     ret += m_volumetric_rate_range.size_in_bytes_cpu();
     ret += m_actual_volumetric_rate_range.size_in_bytes_cpu();
     for (size_t i = 0; i < COLOR_RANGE_TYPES_COUNT; ++i) {
@@ -1866,6 +1895,8 @@ void ViewerImpl::update_color_ranges()
     m_thermal_index_mean_range.reset();
     m_thermal_index_min_range.reset();
     m_thermal_index_max_range.reset();
+    for (ColorRange& range : m_warpage_ranges)
+        range.reset();
     // Helio: Use custom TI palette (blue→green→red) matching BambuStudio
     static const Palette TI_PALETTE{ {
         {  11,  44, 122 },  // #0b2c7a  -100 (blue)
@@ -1883,6 +1914,17 @@ void ViewerImpl::update_color_ranges()
     m_thermal_index_mean_range.set_palette(TI_PALETTE);
     m_thermal_index_min_range.set_palette(TI_PALETTE);
     m_thermal_index_max_range.set_palette(TI_PALETTE);
+    static const Palette WARPAGE_SEQUENTIAL{ {
+        { 30, 180, 60 }, { 140, 190, 40 }, { 220, 180, 30 }, { 230, 100, 20 }, { 200, 20, 20 }
+    } };
+    static const Palette WARPAGE_DIVERGING{ { { 0, 60, 200 }, { 30, 180, 60 }, { 200, 20, 20 } } };
+    static const Palette WARPAGE_DARK{ { { 25, 30, 50 }, { 30, 160, 60 }, { 220, 180, 30 }, { 200, 20, 20 } } };
+    for (ColorRange& range : m_warpage_ranges)
+        range.set_palette(WARPAGE_SEQUENTIAL);
+    m_warpage_ranges[1].set_palette(WARPAGE_DIVERGING);
+    m_warpage_ranges[2].set_palette(WARPAGE_DIVERGING);
+    m_warpage_ranges[3].set_palette(WARPAGE_DIVERGING);
+    m_warpage_ranges[7].set_palette(WARPAGE_DARK);
     // Anchor to fixed [-100, +100] so colors always match the legend
     m_thermal_index_mean_range.update(-100.0f);
     m_thermal_index_mean_range.update(100.0f);
@@ -1916,6 +1958,12 @@ void ViewerImpl::update_color_ranges()
                 m_thermal_index_min_range.update(v.thermal_index_min);
             if (v.thermal_index_max > -100.0f)
                 m_thermal_index_max_range.update(v.thermal_index_max);
+            const std::array<float, 9> warpage_values = { v.warpage_displacement, v.warpage_disp_x, v.warpage_disp_y,
+                v.warpage_disp_z, v.warpage_risk, v.warpage_ti_gradient, v.warpage_thermal_strain,
+                v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
+            for (size_t j = 0; j < warpage_values.size(); ++j)
+                if (!std::isnan(warpage_values[j]))
+                    m_warpage_ranges[j].update(warpage_values[j]);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
             (v.is_wipe() && m_settings.options_visibility[size_t(EOptionType::Wipes)]) ||
