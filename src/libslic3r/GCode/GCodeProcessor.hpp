@@ -172,13 +172,6 @@ class Print;
         FilamentPrintableResult filament_printable_reuslt;
         float initial_layer_time;
         bool is_helio_gcode{false};
-        float warpage_shrinkage_x_pct{ NAN };
-        float warpage_shrinkage_y_pct{ NAN };
-        float warpage_shrinkage_z_pct{ NAN };
-        float warpage_max_displacement_mm{ NAN };
-        float warpage_max_hull_shrinkage_um{ NAN };
-        float warpage_wdm_p95{ NAN };
-        float warpage_whs_p95{ NAN };
 
         struct SettingsIds
         {
@@ -336,13 +329,6 @@ class Print;
             filament_change_count_map = other.filament_change_count_map;
             initial_layer_time = other.initial_layer_time;
             is_helio_gcode = other.is_helio_gcode;
-            warpage_shrinkage_x_pct = other.warpage_shrinkage_x_pct;
-            warpage_shrinkage_y_pct = other.warpage_shrinkage_y_pct;
-            warpage_shrinkage_z_pct = other.warpage_shrinkage_z_pct;
-            warpage_max_displacement_mm = other.warpage_max_displacement_mm;
-            warpage_max_hull_shrinkage_um = other.warpage_max_hull_shrinkage_um;
-            warpage_wdm_p95 = other.warpage_wdm_p95;
-            warpage_whs_p95 = other.warpage_whs_p95;
 #if ENABLE_GCODE_VIEWER_STATISTICS
             time = other.time;
 #endif
