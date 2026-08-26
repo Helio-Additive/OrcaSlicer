@@ -132,6 +132,15 @@ static bool is_warpage_view(libvgcode::EViewType view_type)
            view_type <= libvgcode::EViewType::WarpageLayerShrinkage;
 }
 
+static bool has_warpage_data(const libvgcode::PathVertex& vertex)
+{
+    return !std::isnan(vertex.warpage_displacement) || !std::isnan(vertex.warpage_disp_x) ||
+           !std::isnan(vertex.warpage_disp_y) || !std::isnan(vertex.warpage_disp_z) ||
+           !std::isnan(vertex.warpage_risk) || !std::isnan(vertex.warpage_ti_gradient) ||
+           !std::isnan(vertex.warpage_thermal_strain) || !std::isnan(vertex.warpage_hull_shrinkage) ||
+           !std::isnan(vertex.warpage_layer_shrinkage);
+}
+
 // Find an index of a value in a sorted vector, which is in <z-eps, z+eps>.
 // Returns -1 if there is no such member.
 static int find_close_layer_idx(const std::vector<double> &zs, double &z, double eps)
@@ -1416,7 +1425,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
         for (size_t i = 0; i < vcount; ++i) {
             const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
             m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            m_has_warpage_data |= !std::isnan(vertex.warpage_displacement);
+            m_has_warpage_data |= has_warpage_data(vertex);
             if (m_has_thermal_index_data && m_has_warpage_data)
                 break;
         }
@@ -1718,7 +1727,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
         for (size_t i = 0; i < vcount; ++i) {
             const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
             m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            m_has_warpage_data |= !std::isnan(vertex.warpage_displacement);
+            m_has_warpage_data |= has_warpage_data(vertex);
             if (m_has_thermal_index_data && m_has_warpage_data)
                 break;
         }
