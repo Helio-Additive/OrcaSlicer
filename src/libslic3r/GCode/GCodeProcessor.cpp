@@ -45,6 +45,30 @@ static const float DEFAULT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_RETRACT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_TRAVEL_ACCELERATION = 1250.0f;
 
+static void parse_warpage_fields(std::string_view fields, std::array<float, 9>& values)
+{
+    static constexpr std::array<std::string_view, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
+
+    while (!fields.empty()) {
+        const size_t           delimiter = fields.find(',');
+        const std::string_view field     = fields.substr(0, delimiter);
+        const size_t           separator = field.find('=');
+        if (separator != std::string_view::npos) {
+            const auto key = std::find(keys.begin(), keys.end(), field.substr(0, separator));
+            if (key != keys.end()) {
+                const std::string_view number = field.substr(separator + 1);
+                float                  value;
+                const auto [end, error] = fast_float::from_chars(number.data(), number.data() + number.size(), value);
+                if (error == std::errc() && end == number.data() + number.size())
+                    values[std::distance(keys.begin(), key)] = value;
+            }
+        }
+        if (delimiter == std::string_view::npos)
+            break;
+        fields.remove_prefix(delimiter + 1);
+    }
+}
+
 static const size_t MIN_EXTRUDERS_COUNT = 5;
 static const float DEFAULT_FILAMENT_DIAMETER = 1.75f;
 static const int   DEFAULT_FILAMENT_HRC = 0;
@@ -1686,9 +1710,6 @@ void GCodeProcessorResult::reset() {
     filament_change_count_map.clear();
     warnings.clear();
     is_helio_gcode = false;
-    warpage_shrinkage_x_pct = warpage_shrinkage_y_pct = warpage_shrinkage_z_pct = NAN;
-    warpage_max_displacement_mm = warpage_max_hull_shrinkage_um = NAN;
-    warpage_wdm_p95 = warpage_whs_p95 = NAN;
 
     //BBS: add mutex for protection of gcode result
     unlock();
@@ -3166,23 +3187,8 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
         return;
     }
 
-    // Helio thermal index: handled in process_G1() to ensure parsing occurs before vertex storage
-    const auto parse_warpage_header = [&comment](const std::string_view prefix, float& target) {
-        if (!boost::starts_with(comment, prefix))
-            return false;
-        try {
-            target = static_cast<float>(string_to_double_decimal_point(std::string(comment.substr(prefix.size()))));
-        } catch (...) {}
-        return true;
-    };
-    if (parse_warpage_header(" WARPAGE_SHRINKAGE_X_PCT=", m_result.warpage_shrinkage_x_pct) ||
-        parse_warpage_header(" WARPAGE_SHRINKAGE_Y_PCT=", m_result.warpage_shrinkage_y_pct) ||
-        parse_warpage_header(" WARPAGE_SHRINKAGE_Z_PCT=", m_result.warpage_shrinkage_z_pct) ||
-        parse_warpage_header(" WARPAGE_MAX_DISPLACEMENT_MM=", m_result.warpage_max_displacement_mm) ||
-        parse_warpage_header(" WARPAGE_MAX_HULL_SHRINKAGE_UM=", m_result.warpage_max_hull_shrinkage_um) ||
-        parse_warpage_header(" WARPAGE_WDM_P95=", m_result.warpage_wdm_p95) ||
-        parse_warpage_header(" WARPAGE_WHS_P95=", m_result.warpage_whs_p95))
-        return;
+    // Helio thermal index and warpage fields are handled while processing moves so
+    // they are available before the corresponding vertex is stored.
 
     // wipe start tag
     if (boost::starts_with(comment, reserved_tag(ETags::Wipe_Start))) {
@@ -3872,12 +3878,7 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
-            const std::array<const char*, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
-            for (size_t i = 0; i < keys.size(); ++i) {
-                const std::regex field_re(std::string("(?:^|,)") + keys[i] + "=(-?[0-9]*\\.?[0-9]+)");
-                if (std::regex_search(comment_str, match, field_re))
-                    m_warpage_fields[i] = static_cast<float>(std::atof(match[1].str().c_str()));
-            }
+            parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields);
         }
     }
 
@@ -4635,12 +4636,7 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
-            const std::array<const char*, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
-            for (size_t i = 0; i < keys.size(); ++i) {
-                const std::regex field_re(std::string("(?:^|,)") + keys[i] + "=(-?[0-9]*\\.?[0-9]+)");
-                if (std::regex_search(comment_str, match, field_re))
-                    m_warpage_fields[i] = static_cast<float>(std::atof(match[1].str().c_str()));
-            }
+            parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields);
         }
     }
 
