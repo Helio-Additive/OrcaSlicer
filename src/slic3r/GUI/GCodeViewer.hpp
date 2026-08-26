@@ -253,6 +253,7 @@ mutable bool m_no_render_path { false };
     libvgcode::Viewer m_viewer;
     bool m_loaded_as_preview{ false };
     bool m_has_thermal_index_data{ false };
+    bool m_has_warpage_data{ false };
 
 public:
     GCodeViewer();
@@ -384,4 +385,3 @@ private:
 } // namespace Slic3r
 
 #endif // slic3r_GCodeViewer_hpp_
-

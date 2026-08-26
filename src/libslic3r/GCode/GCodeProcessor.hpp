@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <cmath>
 
 namespace Slic3r {
 
@@ -212,6 +213,15 @@ class Print;
             float thermal_index_mean{ -200.0f };
             float thermal_index_min{ -200.0f };
             float thermal_index_max{ -200.0f };
+            float warpage_displacement{ NAN };
+            float warpage_disp_x{ NAN };
+            float warpage_disp_y{ NAN };
+            float warpage_disp_z{ NAN };
+            float warpage_risk{ NAN };
+            float warpage_ti_gradient{ NAN };
+            float warpage_thermal_strain{ NAN };
+            float warpage_hull_shrinkage{ NAN };
+            float warpage_layer_shrinkage{ NAN };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
             unsigned int layer_id{ 0 };
@@ -835,6 +845,7 @@ class Print;
         float m_thermal_index_mean{ -200.0f };
         float m_thermal_index_min{ -200.0f };
         float m_thermal_index_max{ -200.0f };
+        std::array<float, 9> m_warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         bool m_is_helio_gcode{false};
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
@@ -967,6 +978,7 @@ class Print;
         // Move
         void process_G0(const GCodeReader::GCodeLine& line);
         void process_G1(const GCodeReader::GCodeLine& line, const std::optional<unsigned int>& remaining_internal_g1_lines = std::nullopt);
+        void parse_warpage_fields(const std::string& comment);
         enum class G1DiscretizationOrigin {
             G1,
             G2G3,
@@ -1170,5 +1182,3 @@ class Print;
 } /* namespace Slic3r */
 
 #endif /* slic3r_GCodeProcessor_hpp_ */
-
-
