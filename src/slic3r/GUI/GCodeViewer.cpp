@@ -132,13 +132,34 @@ static bool is_warpage_view(libvgcode::EViewType view_type)
            view_type <= libvgcode::EViewType::WarpageLayerShrinkage;
 }
 
-static bool has_warpage_data(const libvgcode::PathVertex& vertex)
+static size_t warpage_view_index(libvgcode::EViewType view_type)
 {
-    return !std::isnan(vertex.warpage_displacement) || !std::isnan(vertex.warpage_disp_x) ||
-           !std::isnan(vertex.warpage_disp_y) || !std::isnan(vertex.warpage_disp_z) ||
-           !std::isnan(vertex.warpage_risk) || !std::isnan(vertex.warpage_ti_gradient) ||
-           !std::isnan(vertex.warpage_thermal_strain) || !std::isnan(vertex.warpage_hull_shrinkage) ||
-           !std::isnan(vertex.warpage_layer_shrinkage);
+    assert(is_warpage_view(view_type));
+    return static_cast<size_t>(view_type) - static_cast<size_t>(libvgcode::EViewType::WarpageDisplacement);
+}
+
+static std::array<float, 9> warpage_values(const libvgcode::PathVertex& vertex)
+{
+    return { vertex.warpage_displacement, vertex.warpage_disp_x, vertex.warpage_disp_y,
+             vertex.warpage_disp_z, vertex.warpage_risk, vertex.warpage_ti_gradient,
+             vertex.warpage_thermal_strain, vertex.warpage_hull_shrinkage, vertex.warpage_layer_shrinkage };
+}
+
+static float warpage_value(const libvgcode::PathVertex& vertex, libvgcode::EViewType view_type)
+{
+    return warpage_values(vertex)[warpage_view_index(view_type)];
+}
+
+static void update_warpage_availability(const libvgcode::PathVertex& vertex, std::array<bool, 9>& availability)
+{
+    const auto values = warpage_values(vertex);
+    for (size_t i = 0; i < values.size(); ++i)
+        availability[i] = availability[i] || !std::isnan(values[i]);
+}
+
+static bool has_warpage_data(const std::array<bool, 9>& availability, libvgcode::EViewType view_type)
+{
+    return is_warpage_view(view_type) && availability[warpage_view_index(view_type)];
 }
 
 // Find an index of a value in a sorted vector, which is in <z-eps, z+eps>.
@@ -467,6 +488,22 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                 else
                     sprintf(detail_buf, "%s%s", _u8L("TI Max: ").c_str(), "null");
                 break;
+            case libvgcode::EViewType::WarpageDisplacement:
+            case libvgcode::EViewType::WarpageDispX:
+            case libvgcode::EViewType::WarpageDispY:
+            case libvgcode::EViewType::WarpageDispZ:
+            case libvgcode::EViewType::WarpageRisk:
+            case libvgcode::EViewType::WarpageTIGradient:
+            case libvgcode::EViewType::WarpageThermalStrain:
+            case libvgcode::EViewType::WarpageHullShrinkage:
+            case libvgcode::EViewType::WarpageLayerShrinkage: {
+                const float value = warpage_value(vertex, view_type);
+                if (is_extrusion && !std::isnan(value))
+                    sprintf(detail_buf, "%s: %.4f", get_view_type_string(view_type).c_str(), value);
+                else
+                    sprintf(detail_buf, "%s: %s", get_view_type_string(view_type).c_str(), NA_CSTR);
+                break;
+            }
             default:
                 detail_buf[0] = '\0';
                 break;
@@ -1226,17 +1263,11 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMin);
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMax);
     }
-    if (m_has_warpage_data) {
-        view_type_items.push_back(libvgcode::EViewType::WarpageDisplacement);
-        view_type_items.push_back(libvgcode::EViewType::WarpageDispX);
-        view_type_items.push_back(libvgcode::EViewType::WarpageDispY);
-        view_type_items.push_back(libvgcode::EViewType::WarpageDispZ);
-        view_type_items.push_back(libvgcode::EViewType::WarpageRisk);
-        view_type_items.push_back(libvgcode::EViewType::WarpageTIGradient);
-        view_type_items.push_back(libvgcode::EViewType::WarpageThermalStrain);
-        view_type_items.push_back(libvgcode::EViewType::WarpageHullShrinkage);
-        view_type_items.push_back(libvgcode::EViewType::WarpageLayerShrinkage);
-    }
+    for (auto view_type = libvgcode::EViewType::WarpageDisplacement;
+         view_type <= libvgcode::EViewType::WarpageLayerShrinkage;
+         view_type = static_cast<libvgcode::EViewType>(static_cast<size_t>(view_type) + 1))
+        if (has_warpage_data(m_has_warpage_data, view_type))
+            view_type_items.push_back(view_type);
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -1419,14 +1450,14 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
 
     // Helio: expose simulation-only views only when their data is present.
     m_has_thermal_index_data = false;
-    m_has_warpage_data = false;
+    m_has_warpage_data.fill(false);
     {
         const size_t vcount = m_viewer.get_vertices_count();
         for (size_t i = 0; i < vcount; ++i) {
             const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
             m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            m_has_warpage_data |= has_warpage_data(vertex);
-            if (m_has_thermal_index_data && m_has_warpage_data)
+            update_warpage_availability(vertex, m_has_warpage_data);
+            if (m_has_thermal_index_data && std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
                 break;
         }
     }
@@ -1510,7 +1541,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     const auto cur_vt = get_view_type();
     const bool thermal_view = is_thermal_view(cur_vt);
     const bool warpage_view = is_warpage_view(cur_vt);
-    if ((thermal_view && m_has_thermal_index_data) || (warpage_view && m_has_warpage_data)) {
+    if ((thermal_view && m_has_thermal_index_data) || has_warpage_data(m_has_warpage_data, cur_vt)) {
         auto it = std::find(view_type_items.begin(), view_type_items.end(), cur_vt);
         if (it != view_type_items.end())
             m_view_type_sel = std::distance(view_type_items.begin(), it);
@@ -1649,7 +1680,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
         const auto cur_vt2 = get_view_type();
         const bool unavailable_simulation_view =
             (is_thermal_view(cur_vt2) && !m_has_thermal_index_data) ||
-            (is_warpage_view(cur_vt2) && !m_has_warpage_data);
+            (is_warpage_view(cur_vt2) && !has_warpage_data(m_has_warpage_data, cur_vt2));
         if (unavailable_simulation_view) {
             for (int i = 0; i < view_type_items.size(); i++) {
                 if (view_type_items[i] == libvgcode::EViewType::FeatureType) {
@@ -1721,14 +1752,14 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
 
     // Helio: expose simulation-only views only when their data is present.
     m_has_thermal_index_data = false;
-    m_has_warpage_data = false;
+    m_has_warpage_data.fill(false);
     {
         const size_t vcount = m_viewer.get_vertices_count();
         for (size_t i = 0; i < vcount; ++i) {
             const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
             m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            m_has_warpage_data |= has_warpage_data(vertex);
-            if (m_has_thermal_index_data && m_has_warpage_data)
+            update_warpage_availability(vertex, m_has_warpage_data);
+            if (m_has_thermal_index_data && std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
                 break;
         }
     }
@@ -1736,7 +1767,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
 
     const auto current_view = get_view_type();
     if ((is_thermal_view(current_view) && !m_has_thermal_index_data) ||
-        (is_warpage_view(current_view) && !m_has_warpage_data)) {
+        (is_warpage_view(current_view) && !has_warpage_data(m_has_warpage_data, current_view))) {
         const auto it = std::find(view_type_items.begin(), view_type_items.end(), libvgcode::EViewType::FeatureType);
         m_view_type_sel = it == view_type_items.end() ? 0 : std::distance(view_type_items.begin(), it);
         set_view_type(libvgcode::EViewType::FeatureType);
