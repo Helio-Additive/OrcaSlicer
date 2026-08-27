@@ -1536,15 +1536,55 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
         if (v.thermal_index_max < -100.0f) return DUMMY_COLOR;
         return m_thermal_index_max_range.get_color_at(v.thermal_index_max);
     }
-    case EViewType::WarpageDisplacement: return std::isnan(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
-    case EViewType::WarpageDispX: return std::isnan(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
-    case EViewType::WarpageDispY: return std::isnan(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
-    case EViewType::WarpageDispZ: return std::isnan(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
-    case EViewType::WarpageRisk: return std::isnan(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
-    case EViewType::WarpageTIGradient: return std::isnan(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
-    case EViewType::WarpageThermalStrain: return std::isnan(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
-    case EViewType::WarpageHullShrinkage: return std::isnan(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
-    case EViewType::WarpageLayerShrinkage: return std::isnan(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
+    // Helio: Warpage visualization. Travel moves carry no simulation data, so they take the
+    // configured travel colour rather than DUMMY_COLOR — matching the thermal index views above
+    // and every other range view in this function. Without this, a travel and an extrusion whose
+    // metric is absent are both grey and cannot be told apart.
+    case EViewType::WarpageDisplacement:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
+    }
+    case EViewType::WarpageDispX:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
+    }
+    case EViewType::WarpageDispY:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
+    }
+    case EViewType::WarpageDispZ:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
+    }
+    case EViewType::WarpageRisk:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
+    }
+    case EViewType::WarpageTIGradient:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
+    }
+    case EViewType::WarpageThermalStrain:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
+    }
+    case EViewType::WarpageHullShrinkage:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
+    }
+    case EViewType::WarpageLayerShrinkage:
+    {
+        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
+        return std::isnan(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
+    }
     case EViewType::VolumetricFlowRate:
     {
         return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_volumetric_rate_range.get_color_at(v.volumetric_rate());
