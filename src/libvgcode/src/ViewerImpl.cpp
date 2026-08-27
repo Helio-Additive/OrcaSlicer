@@ -2017,6 +2017,16 @@ void ViewerImpl::update_color_ranges()
         }
     }
 
+    // Directional displacement uses a diverging palette, whose middle color must represent zero.
+    for (size_t i = 1; i <= 3; ++i) {
+        const std::array<float, 2>& range = m_warpage_ranges[i].get_range();
+        if (range[0] <= range[1]) {
+            const float extent = std::max(std::abs(range[0]), std::abs(range[1]));
+            m_warpage_ranges[i].update(-extent);
+            m_warpage_ranges[i].update(extent);
+        }
+    }
+
     const std::vector<float> times = m_layers.get_times(m_settings.time_mode);
     for (size_t i = 0; i < m_layer_time_range.size(); ++i) {
         for (float t : times) {
