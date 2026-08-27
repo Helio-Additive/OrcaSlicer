@@ -40,6 +40,8 @@ Key data flow:
 - `HelioPlateResult` — per-plate result storage on `PartPlate`
 - `HelioCompletionEvent` — carries result path + quality metrics to UI thread
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
+- Warpage metrics — parsed from the same `;helioadditive=` comments (keys `wdm`, `wdx`,
+  `wdy`, `wdz`, `wr`, `wtg`, `wts`, `whs`, `wls`) and from `WARPAGE_*` header tags
 
 ## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
 
@@ -195,7 +197,14 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/slic3r/GUI/LibVGCode/LibVGCodeWrapper.cpp` (+8/-8)
 - **4 positional initializer lists modified**: appended `curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max` to `PathVertex` aggregate initializations
+- Then appended the **9 `curr.warpage_*` floats** after those, so each of the 4 lists now
+  carries **12 trailing floats**
 - Very fragile — if upstream changes `PathVertex` fields or reorders initializer, these break
+- **The failure is silent, and 12 same-typed values make it likelier.** All 12 are `float`,
+  so dropping one, duplicating one, or getting the order wrong still *compiles*: the values
+  simply land in the wrong members and the viewer paints wrong colours. There is no
+  compiler error to catch it and no test that would. When resolving a conflict here, check
+  the order against `PathVertex.hpp` field-by-field rather than eyeballing the list length
 
 ### MEDIUM RISK
 
@@ -244,8 +253,11 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/libslic3r/GCode/GCodeProcessor.hpp` (+4)
 - Added to `GCodeProcessorResult`: `bool is_helio_gcode`
-- Added to `MoveVertex`: `thermal_index_mean/min/max` floats
-- Added member variables: `m_thermal_index_mean/min/max`, `m_is_helio_gcode`
+- Added to `MoveVertex`: `thermal_index_mean/min/max` floats, then the 9 `warpage_*` floats
+- Added member variables: `m_thermal_index_mean/min/max`, `m_is_helio_gcode`,
+  `std::array<float, 9> m_warpage_fields`
+- `MoveVertex`'s members feed the positional initializers in `LibVGCodeWrapper.cpp` and the
+  `store_move_vertex()` aggregate — **adding or reordering a field here means updating both**
 
 #### `src/libvgcode/src/ViewerImpl.cpp` (+33)
 - **3 switch statements**: Added `ThermalIndexMean/Min/Max` cases in `get_vertex_color()`, `get_range()`, `set_palette()`
@@ -253,6 +265,8 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/libvgcode/src/ViewerImpl.hpp` (+2)
 - 3 new members: `m_thermal_index_mean_range`, `m_thermal_index_min_range`, `m_thermal_index_max_range`
+- Plus `std::array<ColorRange, 9> m_warpage_ranges` — indexed positionally in the order the
+  `EViewType` warpage values are declared, so the enum order and the array index must agree
 
 #### `src/slic3r/GUI/Widgets/TextInput.hpp` (+63)
 - Added `#include <memory>`, `#include <vector>`, forward declaration
@@ -276,9 +290,25 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/libvgcode/include/PathVertex.hpp` (+4)
 - Appended 3 floats to `PathVertex` struct: `thermal_index_mean/min/max`
+- Then appended 9 more: `warpage_displacement`, `warpage_disp_x/y/z`, `warpage_risk`,
+  `warpage_ti_gradient`, `warpage_thermal_strain`, `warpage_hull_shrinkage`,
+  `warpage_layer_shrinkage` — **12 appended floats in total**. The TI three default to
+  `-200.0f` and use a `< -100.0f` sentinel; the warpage nine default to `NAN` and use
+  `std::isnan()`. Do not unify these — the TI sentinel is a real value in the palette range
 
 #### `src/libvgcode/include/Types.hpp` (+2)
 - Appended 3 enum values to `EViewType`: `ThermalIndexMean`, `ThermalIndexMin`, `ThermalIndexMax`
+- Then 9 more for warpage: `WarpageDisplacement`, `WarpageDispX/Y/Z`, `WarpageRisk`,
+  `WarpageTIGradient`, `WarpageThermalStrain`, `WarpageHullShrinkage`,
+  `WarpageLayerShrinkage` — **12 in total, all inserted before `Tool`**
+- `GCodeViewer.cpp`'s `is_warpage_view()` tests the range
+  `>= WarpageDisplacement && <= WarpageLayerShrinkage`, so **the nine must stay
+  contiguous and in order**. Splitting them, or letting an upstream view type land
+  between them, silently widens or breaks that test
+- Inserting before `Tool` shifts the numeric value of `Tool` and `COUNT`. That is safe
+  today because `EViewType` is never serialized — it appears nowhere in `src/libslic3r/`
+  and no `AppConfig` key stores it. If upstream ever starts persisting the view type,
+  this becomes a migration concern
 
 #### `src/slic3r/CMakeLists.txt` (+12)
 - Appended 12 source file entries (6 hpp + 6 cpp for Helio files), including
@@ -351,15 +381,29 @@ Files where Helio code is inserted within upstream functions: `Plater.cpp`, `Mai
 
 ### Rule 4: Switch Statement Cases
 Files: `GCodeViewer.cpp`, `ViewerImpl.cpp`.
-- Add `ThermalIndexMean/Min/Max` cases alongside upstream's existing cases
+- Add `ThermalIndexMean/Min/Max` and the 9 `Warpage*` cases alongside upstream's existing cases
 - If upstream reordered `EViewType` enum, match new order
-- If upstream added new view types, ensure TI cases don't conflict
+- If upstream added new view types, ensure TI and warpage cases don't conflict
+- Each simulation view type needs a case in **four** places, and a conflict resolution that
+  restores three of them leaves no compiler error: `get_vertex_color()`,
+  `get_color_range()`, `set_color_range_palette()` (all `ViewerImpl.cpp`) and the legend
+  title switch in `GCodeViewer.cpp::render_legend()`. Grep for one of the view-type names
+  and confirm you get all four before calling a resolution done
+- **Every range view returns the travel colour for travel moves** —
+  `if (v.is_travel()) return get_option_color(move_type_to_option(v.type));` comes *first*,
+  before the no-data sentinel test. Omitting it does not fail to compile; travels just
+  render `DUMMY_COLOR`, which is also what a data-less extrusion renders, so the two become
+  indistinguishable. This was a real defect in the warpage cases, fixed on #126
 
 ### Rule 5: Positional Initializer Lists
 File: `LibVGCodeWrapper.cpp`.
-- 4 `PathVertex` aggregate initializations have `thermal_index_mean/min/max` appended
+- 4 `PathVertex` aggregate initializations have `thermal_index_mean/min/max` plus the 9
+  `warpage_*` floats appended — **12 trailing floats each**
 - If upstream changes `PathVertex` struct layout, these MUST be reordered to match
 - If upstream switches from aggregate to designated initializers, convert accordingly
+- Because all 12 are the same type, a wrong order or a dropped value compiles cleanly and
+  corrupts the visualization silently. Verify against `PathVertex.hpp` field-by-field;
+  matching the *count* is not enough
 
 ### Rule 6: Modified Function Signatures
 Files: `NotificationManager.hpp/cpp`.
