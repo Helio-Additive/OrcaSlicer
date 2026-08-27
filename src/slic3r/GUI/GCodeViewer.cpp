@@ -152,6 +152,9 @@ static float warpage_value(const libvgcode::PathVertex& vertex, libvgcode::EView
 
 static void update_warpage_availability(const libvgcode::PathVertex& vertex, std::array<bool, 9>& availability)
 {
+    if (!vertex.is_extrusion())
+        return;
+
     const auto values = warpage_values(vertex);
     for (size_t i = 0; i < values.size(); ++i)
         availability[i] = availability[i] || !std::isnan(values[i]);
