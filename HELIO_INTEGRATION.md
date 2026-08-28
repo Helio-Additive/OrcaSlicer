@@ -651,10 +651,24 @@ worth saying why, because the obvious guard looks correct and is not.
 `git merge-base --is-ancestor`, but it runs that against the *upstream* commit it
 is about to merge, not against our branch. Our branch cannot answer it: sync PRs
 are squash-merged, which discards upstream ancestry — the very reason the
-merge-base graft exists. On `orca-latest-parity-bambu` today, `v2.4.2` shares **no**
-merge-base with `HEAD` even though the tree holds v2.4.2's content, so an
-`--is-ancestor` gate would reject every baseline and the check would never run.
-Content matches; ancestry does not. Do not add that guard.
+merge-base graft exists. Measured on `orca-latest-parity-bambu` today: the tree holds
+v2.4.2's content, `git merge-base --is-ancestor refs/tags/v2.4.2 HEAD` is **false**,
+and an `--is-ancestor` gate would therefore reject every baseline and the check would
+never run. Content matches; ancestry does not. Do not add that guard.
+
+A merge base does still **exist** — the two are different claims and conflating them
+misleads anyone diagnosing an inflated conflict set. `git merge-base v2.4.2 HEAD`
+returns `d6761fedc6` (2026-03-06), an upstream commit from the v2.3.2-rc2 era: the
+squash discards the *recent* shared ancestry, so the base falls back past it to the
+last commit both sides still agree on. That is the same fallback the graft section
+below describes as the cause of the 7,876-file explosion, and it is why the graft is
+needed rather than evidence that ancestry is unavailable.
+
+**Beware measuring this in a shallow clone.** A truncated history makes
+`git merge-base` return empty, which reads as "no common ancestor" and is an artifact
+of the clone, not a property of the repository. Check `git rev-parse
+--is-shallow-repository` before trusting a negative answer here; this file previously
+asserted "no merge-base" on exactly that mistake.
 
 **Never add `--prune-tags` here.** It is the obvious companion to `--force` — the
 flag that *does* remove local tags upstream has deleted — and it would destroy
