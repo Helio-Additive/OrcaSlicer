@@ -1,0 +1,60 @@
+# Runs the upstream-sync guard regression suite.
+#
+# `scripts/helio/test_sync_noop_guards.py` extracts the real `check` and `graft`
+# step bodies out of helio-upstream-sync.yml and runs them against synthetic
+# repositories. Until this workflow existed, nothing executed it: a ~700-line
+# suite pinning the workflow's most failure-prone logic ran only when someone
+# remembered to, which is precisely the rot the workflow inventory (#106) exists
+# to prevent.
+#
+# It is a separate Helio-owned workflow rather than a job bolted onto the
+# upstream-owned shellcheck.yml, so it is not a new conflict site on every
+# upstream sync.
+name: Helio sync guard tests
+
+on:
+  push:
+    paths:
+      - '.github/workflows/helio-upstream-sync.yml'
+      - '.github/workflows/helio-sync-guard-tests.yml'
+      - 'scripts/helio/**'
+  pull_request:
+    paths:
+      - '.github/workflows/helio-upstream-sync.yml'
+      - '.github/workflows/helio-sync-guard-tests.yml'
+      - 'scripts/helio/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-guards:
+    name: Upstream sync guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The suite builds its own synthetic repositories and never inspects
+          # this one's history, so a shallow checkout is enough.
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        # The harness parses helio-upstream-sync.yml to extract the step bodies
+        # under test, rather than transcribing them.
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Configure git identity
+        # The fixtures commit into throwaway repositories; runners have no
+        # global identity and `git commit` fails without one.
+        run: |
+          git config --global user.email "ci@helioadditive.com"
+          git config --global user.name "Helio CI"
+          git config --global init.defaultBranch main
+
+      - name: Run guard suite
+        run: python3 scripts/helio/test_sync_noop_guards.py
