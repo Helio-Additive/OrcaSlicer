@@ -598,9 +598,10 @@ to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
 workflow ephemerally grafts the upstream commit our content is based on onto the
-branch tip. For tag-release syncs that commit is derived from `version.inc`
-(authoritative — it names the synced release); for `main` syncs it comes from the
-`helio-last-synced-main` tracking tag (`version.inc` would name an older release
+branch tip. For tag-release syncs that commit is derived from `version.inc` (it
+names the synced release) provided it is a **strict** ancestor of the sync target —
+see the rules below for why that qualifier matters; for `main` syncs it comes from
+the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
 ```bash
@@ -617,6 +618,256 @@ first, or you will face the full (inflated) conflict set instead of the real del
 
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.
+
+**The other side effect: "already synced" becomes hard to detect.** Every cheap
+test for "have we got this release already?" reasons about **ancestry** — is the
+target an ancestor of `HEAD`, does a trial merge apply cleanly — and ancestry is
+precisely what the squash destroyed. In August 2026 that produced #107: an empty
+PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
+have recurred every Monday (#110). The workflow now answers the question with
+**four** guards, cheapest first. Two of them still reason about ancestry and are
+kept only as cheap early exits; the authoritative one does not:
+
+| guard | when | basis | can it skip on its own? |
+| --- | --- | --- | --- |
+| `version.inc` equals the target | before any merge | a version *string* — sets an expectation only | **no** |
+| tracking tag equals the target | before any merge | a commit id, only ever written after content was validated | yes |
+| ancestor check / trial merge | before the graft | **ancestry-dependent** — only meaningful when history was not flattened, which after a squash it always is | yes |
+| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" | yes — **this is the authority** |
+
+The last one is the backstop and cannot be fooled: if the merge produces a tree
+identical to the release branch's, there is nothing to propose, whatever the
+history says. It skips the PR, records why in the job summary, and advances the
+tracking tag.
+
+**`version.inc` deliberately cannot skip a run by itself.** It is a version string
+in a file, and the release it names can stop describing the tree without the file
+changing — upstream force-retagging a release we already synced, or a local version
+bump landing before the content. Either way the string equals the sync target while
+the target's content is absent, and skipping there would **silently drop upstream
+work**, with every later run reaching the same wrong conclusion. That failure is
+invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
+baseline and sets an expectation, and the merged-tree comparison decides.
+
+Three rules keep that true, and all of them are load-bearing:
+
+1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
+   a clean no-diff trial merge, the tree-level content test, a merged resolution
+   PR for the exact target commit, or an identical merged tree. That is what lets
+   the tag (unlike `version.inc`) skip a run on its own.
+
+   "A sync PR was opened" is **not** such evidence, and the workflow used to treat
+   it as if it were: the tag advanced as soon as the PR was created. That made the
+   tag a record of intent while the rest of the workflow read it as a record of
+   content, and two silent drops followed. A PR closed unmerged left the tag at a
+   release the branch never received, so the `check` step skipped it for good; and
+   while the PR merely sat open, the next release grafted that unreceived commit as
+   the merge base. The tag now moves only once the content is on the target branch —
+   the first run after the sync PR merges takes one of the paths above and
+   advances it there. Until then each run redoes the merge and refreshes the same
+   PR, which is the honest description of the state: not synced yet.
+2. **The graft base must be a *strict* ancestor of the sync target.**
+   `git merge-base --is-ancestor` is true for a commit and itself, so a `version.inc`
+   naming the target would otherwise graft the target onto the branch tip, making the
+   merge-base the target — the merge is then a no-op *by construction* and the tree
+   comparison "confirms" a release that was never merged. The one content-based guard
+   becomes a rubber stamp. The `check` step's refusal to skip on `version.inc` alone
+   only works together with this.
+
+   When the records *do* name the target itself, the base becomes the target's
+   **first parent** — which is what "our content is based on this release" actually
+   means, so the merge applies that release's own delta and the tree comparison
+   still decides. Rejecting the candidate outright instead left no graft at all,
+   and the merge then ran against the ancient pre-squash ancestor and conflicted,
+   turning a run that should quietly do nothing into a weekly conflict issue.
+
+3. **Every graft candidate must be content-validated, for its *inherited*
+   content — not just its own delta.** Choosing the graft base is **asymmetric**:
+   too old is merely expensive (more delta recomputed, conflict set inflated),
+   while too new **silently drops upstream work** — git reads the content between
+   the real base and the claimed one as deliberate local reversions and never
+   re-applies it. The merge succeeds, the PR opens, and it claims a release whose
+   content is only partly present.
+
+   Strictness alone does not catch this. If the tree holds v2.4.1, `version.inc`
+   says v2.4.2 and the target is v2.4.3, then v2.4.2 *is* a strict ancestor of the
+   target — so it passes rule 2 and grafts, and only `v2.4.2..v2.4.3` is applied.
+
+   Validating the candidate's **own delta** does not catch it either, and that is
+   the subtle part. Grafting the candidate's first parent and trial-merging it
+   proves the candidate's last step is present and *assumes* everything under it.
+   When the gap sits below a small step, the assumption is exactly what is false:
+   tree at v2.4.0, `version.inc` says v2.4.2, v2.4.1 added a file, and v2.4.2 only
+   bumped the version string — which the fork already carries, so the trial passes
+   and v2.4.1's file is dropped. The same hole reached through the tracking tag,
+   which was not validated at all.
+
+   So validation asks about inherited content, and it compares **trees**. The
+   work lives in `scripts/helio/upstream_content.sh`, shared with the `check`
+   step so that "does this branch hold release X?" has one implementation; it was
+   inline in the graft step before, which is precisely why `check` could not use
+   it and went on trusting the tracking tag.
+
+   A path upstream changed between a base four releases below the candidate and
+   the candidate itself, which our tree still holds at exactly the base version,
+   is a change we never applied. Comparing changed path **names** is not enough:
+   if upstream edits one hunk of a file and Helio independently edits another
+   hunk, the path appears on both sides and a name-level set difference cancels
+   it out while upstream's hunk is genuinely absent. So blob ids are compared —
+   two `git diff --raw` calls give every id on both sides — and for the remainder
+   where our blob matches neither side, a three-way merge decides:
+
+   | our blob + mode | verdict |
+   | --- | --- |
+   | equals the candidate's | held |
+   | equals the base's | **missing** |
+   | neither, merge is clean and changes ours | **missing** |
+   | neither, merge is clean and leaves ours alone | held |
+   | neither, merge conflicts | **unknown** |
+
+   Mode is part of the comparison, not just the blob, and it is decided **before**
+   the three-way merge rather than inside it. A path whose only change is
+   `100644` → `100755` has identical blob ids on both sides, so a blob-only test
+   reports nothing and the executable bit is dropped from the sync for good.
+   Comparing blob-and-mode together closes that case but not the next one: if
+   upstream changes only the mode while Helio independently edits the blob, the
+   composite values differ for a reason unrelated to the mode, and the text merge
+   — which is handed blob ids and cannot see modes at all — finds upstream's blob
+   equal to the base's, leaves ours alone and answers *held*. So the rule is
+   applied first and separately: upstream moved the mode and we are still at the
+   base's mode, therefore we never received it, whatever the blobs then say.
+
+   **`unknown` is a third answer, and the two callers lean opposite ways on it.**
+   A conflict cannot distinguish "we have upstream's change with our edit on top"
+   from "we never received it", because both produce overlapping hunks. So:
+
+   | question | caller | `unknown` means |
+   | --- | --- | --- |
+   | is the sync already done? | `holds`, in `check` | **not** done — do not skip |
+   | is this safe as a merge base? | `base-ok`, in `graft` | tolerated — but only as a last resort |
+
+   Guessing *yes* on the first skips a release silently. Guessing *no* on the
+   second leaves no graft, and the merge then runs against the ancient
+   pre-squash ancestor and conflicts every week. Collapsing the two was a real
+   bug: the conflict case was reasoned about for the graft base, then the same
+   function was reused for the skip decision, where the safe direction inverts.
+
+   **Tolerated is not the same as preferred**, and that distinction was itself a
+   bug for two rounds. The argument above is sound about *rejecting* an
+   undecidable candidate and unsound about *accepting* one, because an
+   undecidable path in the **base** is the single shape that drops upstream work
+   with no conflict at all: if the base already carries upstream's value for that
+   path and the sync target has not moved it since, the merge sees
+   `theirs == base`, keeps ours, and nothing is reported. So `graft` takes a
+   candidate outright only when `holds` passes. A candidate that is merely
+   `base-ok` sends the run looking for a provably-held base *below* it
+   (`first-held … strict`), where the same paths are still in motion and the
+   merge must therefore present them — as a change applied or as a conflict,
+   either way visible. Only when no such base exists within `MAX_WALK` steps is
+   the undecidable candidate used, and then the run says so and names the paths.
+   Preferring an older base costs conflict volume, which is the direction this
+   whole mechanism chooses everywhere else.
+
+   `MAX_WALK` is set in the `check` and `graft` steps' own `env:` blocks, not
+   only inside `upstream_content.sh`. The script runs as a separate process, so
+   a value defined only there is invisible to the workflow's shell — and the
+   graft step interpolates `$MAX_WALK` into its rejection warnings under
+   `set -u`, where an unset variable aborts the step instead of warning and
+   carrying on. `CONTENT_DEPTH` deliberately has no such duplication: no step
+   body expands it, so it lives only in the script, whose
+   `CONTENT_DEPTH="${CONTENT_DEPTH:-4}"` default is the single source — both
+   steps call the same script and therefore always validate at the same depth.
+
+   The candidate records themselves are evaluated **newest-first by ancestry,
+   with fall-through**: strictly-held on any candidate beats degraded
+   acceptance on any, and the walk below a candidate begins only after every
+   newer candidate has failed. Record preference — version.inc, then the
+   tracking tag, then (when the records self-name the target) the target's
+   first parent, appended last — is *not* ancestry order, and evaluating in
+   record order let a stale tracking tag's walk-down defeat a strictly newer
+   candidate that validates: with the tree fully holding the target and the
+   tag stale at v2.3.2, the tag was base-ok-with-unknowns, its strict walk
+   grafted v2.3.0, and the expected-no-op verification merge conflicted on
+   content already on the branch — the weekly treadmill of #110 for an
+   already-merged release.
+
+   Within the walk, releases are ordered by **ancestry** (`git describe` on
+   each successive parent), not by tag date — tags sharing a timestamp sort
+   arbitrarily, and a base one release too new is the very thing being
+   rejected.
+
+   A candidate that fails is not simply dropped: the run walks down to the newest
+   commit whose content *is* present and grafts that, warning loudly and naming
+   the files that were never applied. The walk prefers a provably-held base and
+   falls back to a merely base-ok one only when the strict walk exhausts
+   `MAX_WALK` — the fallback then carries undecidable paths by construction, so
+   the run emits the same warning naming them that the base-ok candidate case
+   emits. Rejecting outright leaves no graft, and the merge then runs against
+   the ancient pre-squash ancestor and conflicts — the weekly treadmill rule 2
+   already had to undo once.
+
+   The window is four releases. Any finite window has a floor — a change older
+   than the base is outside the diff and invisible — so this is a depth/cost
+   trade rather than a proof.
+
+
+`scripts/helio/test_sync_noop_guards.py` pins all of this. It extracts the real
+`check` and `graft` step bodies from the workflow rather than transcribing them,
+and runs them against synthetic repositories whose content is held by a squashed
+commit with no upstream ancestry. Add a row there before changing any of the three
+rules above — every one of them was added in response to a failure that the
+then-current tests did not catch.
+
+**The tracking tag is a convenience, not a source of truth.** `helio-last-synced`
+is only advanced by a successful push at the end of a run, so an out-of-band merge
+— or a run whose tag push was refused — leaves it behind while the tree moves on.
+It sat at `v2.3.2-rc2` through three releases that way. Two consequences are baked
+into the workflow: for tag-release syncs `version.inc` is preferred over the tag
+as the baseline whenever it names a **strictly newer** release, and a **refused tag
+push warns rather than failing the run**. If you see that warning, a maintainer can
+heal it with:
+
+```bash
+git push helio +<upstream_commit>:refs/tags/helio-last-synced
+```
+
+**Why the push is refused — it is not what it looked like.** This was recorded for
+months as "the token cannot *always* force-update tags (`HTTP 403`)", which implied
+an intermittent permission gap or a tag-protection rule. Neither is true. The real
+message, from run `32014594574`:
+
+```text
+! [remote rejected] helio-last-synced -> helio-last-synced
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/build_all.yml` without `workflows` permission)
+```
+
+The tracking tag points at an **upstream** commit. Creating that ref makes
+upstream's `.github/workflows/**` newly reachable from a ref in this repository,
+and GitHub refuses to let any GitHub App token — `GITHUB_TOKEN` included — create
+a ref that introduces workflow content without the `workflows` permission. That
+permission is **not** one of the scopes a workflow's `permissions:` block can
+grant, so this cannot be fixed by editing the workflow: it fails on every run, and
+always will. That, not bad luck, is why the tag stuck at `v2.3.2-rc2` across three
+releases and let the ancestry problem compound into #107.
+
+Three ways out, none yet chosen:
+
+| option | cost |
+| --- | --- |
+| PAT with `workflows` scope, stored as a **repo secret** | a long-lived credential able to rewrite workflow files, held to solve a bookkeeping problem |
+| drop the tag entirely | every decision already has a content-backed fallback, so this is mostly deletion |
+| point the tag at the **Helio** commit, upstream sha in the annotated tag message | needs no new permission (the commit is already reachable), but every reader of the tag has to change |
+
+Do **not** attempt to fix this by adding `workflows:` to the workflow's
+`permissions:` block. It is not a valid key there, and a run will not tell you so —
+it will just keep failing the same way.
+
+Note the remote. The workflow's own pushes use `origin` because `actions/checkout`
+configures origin as *this fork*; you are running this in your own clone, where
+`origin` is upstream OrcaSlicer and `helio` is the fork (see "Git Workflow" in
+`CLAUDE.md`). Every maintainer-facing command the workflow prints says `helio` for
+that reason — pushing a Helio tracking tag to `origin` would aim it at upstream.
 
 **Squash the sync branch *before* the PR is opened, too.** GitHub auto-subscribes
 the author of every commit in a PR to that PR's notification thread. A sync branch
