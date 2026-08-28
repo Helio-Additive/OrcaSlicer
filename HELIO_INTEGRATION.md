@@ -521,6 +521,65 @@ branch there, and it now appears in the conflict list of **8 of 13** sync issues
 Both still have `workflow_dispatch`, so either can be run by hand against a sync
 branch if a specific sync warrants it.
 
+**A second, independent reason not to flip that branch filter.** Rule 13's argument
+is about *cost* — editing an upstream-owned file buys a conflict on every future
+sync. But `check_profiles.yml` would also simply **fail today** if it were wired up,
+on data nobody here wrote. It downloads the **nightly** validator built from upstream
+`main`, while this fork is pinned to the v2.4.2 release, so the validator rejects keys
+that were valid at v2.4.2 and removed later. Run against the parity branch:
+
+```
+error: resources/profiles/Qidi/process/fdm_process_n_common.json contains incorrect keys:
+       machine_prepare_compensation_time, which were removed
+error: resources/profiles/Qidi/machine/fdm_qidi_x3_common.json contains incorrect keys:
+       filament_dev_ams_drying_*, ... which were removed
+Validation failed
+```
+
+Both key families are absent from this fork's own `PrintConfig.cpp`, and `git log` on
+both files shows only upstream-sync commits — this is inherited version skew, not
+Helio drift. So enabling it unchanged would red-light every profile PR on day one, on
+top of the conflict cost. Pinning the validator to the matching release, or scoping
+validation to changed vendors, would have to come first.
+
+`scripts/orca_extra_profile_check.py` **does** pass on the parity branch today
+(0 errors, exit 0), so that half could be enabled independently of the validator.
+
+### Rule 14: Inherited CI Trigger Filters (branch & path)
+
+The *reachability* complement to Rule 12: the manifest records whether an inherited
+workflow **should** run here, this rule covers whether it **can**.
+
+Upstream workflows are written for **upstream's** branch layout: they gate on
+`branches: [main]` (plus `release/*`). This fork's release branch is
+`orca-latest-parity-bambu`, so an inherited workflow is **silently inert here**
+unless someone adds that branch to its filter. Nothing fails — the workflow simply
+never starts, which is far harder to notice than a red check. Rule 13's
+`check_profiles.yml` / `check_locale.yml` / `check_profiles_comment.yml` are the
+worked example; that inertness was discovered, not chosen.
+
+When a sync adds or edits a workflow with a `pull_request` / `push` trigger, check
+both filters:
+
+| filter | failure mode if wrong |
+| --- | --- |
+| `branches:` | workflow never runs on this fork's PRs at all |
+| `paths:` | workflow never runs for the file types you care about |
+
+**`paths:` is evaluated before any job-level `if:`.** This matters for the
+`ready-to-build` opt-in on `build_all.yml`: a label cannot start a workflow that the
+path filter excluded, so a profile-only PR carrying `ready-to-build` produced no build
+at all until `resources/**` and `localization/**` were added to the `pull_request`
+`paths:` list (they were already in the `push` list — the asymmetry was the bug).
+
+Note the two rules pull in opposite directions on the same question, and the
+difference is **who owns the file**. Rule 12 says don't edit an upstream-owned
+workflow to make it reachable, because the edit conflicts on every sync. Rule 14 says
+an unreachable workflow is a silent hole. Where both apply, the reachability fix is
+worth its conflict cost only when the workflow does something no Helio-owned file
+could do instead — `build_all.yml` qualifies (it is the build), `check_profiles.yml`
+does not (Rule 13 already guarantees profile parity by construction).
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
