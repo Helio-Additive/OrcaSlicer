@@ -6,7 +6,8 @@
 > **Git is authoritative, not this map.** This is the starting point for AI agents resolving
 > merge conflicts or build fixes — it records what each touchpoint is *for*, which git cannot
 > tell you. But it is hand-maintained and it drifts, so where the map and the tree disagree,
-> the tree wins. See **Rule 15** for the command that settles ownership.
+> the tree wins — provided the command is run against a verified baseline. See
+> **Rule 15** for that command and for the cases where its baseline cannot be trusted.
 > Updated for the v2.4.0-beta upstream sync: upstream added `acceleration` and `jerk`
 > visualization fields that sit **between** `pressure_advance` and the Helio
 > `thermal_index_*` fields in `PathVertex` (libvgcode) and `MoveVertex` (GCodeProcessor).
@@ -789,8 +790,15 @@ confidently, treat ownership as unresolved and ask — an unresolved answer is
 recoverable, a wrong "this is ours" becomes a permanent divergence.
 
 Use the map as a quick first look and for the *why* (it records what each
-touchpoint is for), but let the git comparison settle disagreements — it cannot go
-stale. For #116 both agreed: `Print.hpp` appears zero times in the map, and its
+touchpoint is for), but let the git comparison settle disagreements — **provided its
+baseline is sound.** The comparison cannot drift the way a hand-maintained list does:
+nobody forgets to update it. But it is only ever as good as the commit it is run
+against, and the cases above — a retagged release, a `main`-mode sync, a version bump
+landing early — all produce a *confidently wrong* answer rather than an obviously
+broken one. Verify the baseline first; where it cannot be established, neither source
+settles anything and ownership stays unresolved.
+
+For #116 both agreed: `Print.hpp` appears zero times in the map, and its
 blob is byte-identical to `v2.4.2`. The question was answered before the PR was
 opened; nothing had told anyone to ask it.
 
