@@ -1,7 +1,13 @@
 # Helio Integration Map
 
-> Auto-generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2`
-> This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
+> Generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2` — the baseline at the
+> time of generation, which is **older than the release this branch now holds**. Treat the
+> file counts and line totals below as a snapshot of that moment, not a current measurement.
+> **Git is authoritative, not this map.** This is the starting point for AI agents resolving
+> merge conflicts or build fixes — it records what each touchpoint is *for*, which git cannot
+> tell you. But it is hand-maintained and it drifts, so where the map and the tree disagree,
+> the tree wins — provided the command is run against a verified baseline. See
+> **Rule 15** for that command and for the cases where its baseline cannot be trusted.
 > Updated for the v2.4.0-beta upstream sync: upstream added `acceleration` and `jerk`
 > visualization fields that sit **between** `pressure_advance` and the Helio
 > `thermal_index_*` fields in `PathVertex` (libvgcode) and `MoveVertex` (GCodeProcessor).
@@ -579,6 +585,332 @@ an unreachable workflow is a silent hole. Where both apply, the reachability fix
 worth its conflict cost only when the workflow does something no Helio-owned file
 could do instead — `build_all.yml` qualifies (it is the build), `check_profiles.yml`
 does not (Rule 13 already guarantees profile parity by construction).
+
+### Rule 15: Upstream code defects are upstream's (do not patch them here)
+
+Rules 11, 12 and 13 each say "upstream owns this, do not diverge" about one asset
+class — branding docs, workflows, profiles. **The same answer applies to upstream
+source code, and this rule says so explicitly**, because its absence is what let
+PR #116 get opened: a two-line patch to `src/libslic3r/Print.hpp`, which is
+upstream code carrying an upstream bug that upstream had *already fixed*.
+
+**This fork maintains Helio code.** A defect in a file Helio has never touched is
+not ours to fix, however well diagnosed and however small the patch looks.
+
+**The cost is not the two lines, it is the divergence.** Rule 12's argument
+applies verbatim: a local edit to an upstream-owned file has to be reconciled at
+every future sync, forever. It also silently adds a Helio touchpoint to the map
+below that nobody decided to take on. Paying that indefinitely to front-run a fix
+upstream has already written — and will deliver on its own with the next sync — is
+a bad trade even when the patch is correct.
+
+**The test — ask git, not the map.** The touchpoint map below is a hand-maintained
+snapshot and it drifts; treating it as the authority fails in both directions,
+and one of them is dangerous (a file Helio has since changed, missing from the
+map, gets disowned as upstream's). Ask the tree instead, against the upstream
+release this branch is synced to (`version.inc` names it):
+
+```bash
+# SoftFever/OrcaSlicer. --force, or a retagged release leaves a stale local tag.
+git fetch upstream --tags --force || { echo "tag fetch failed — baseline may be stale" >&2; exit 1; }
+VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1)
+SYNCED=""
+for cand in "v$VER" "$VER"; do                  # upstream tags both forms
+  # Must exist upstream *now*: --force updates a moved tag but never removes one
+  # upstream deleted, so a local leftover would otherwise answer the question.
+  git ls-remote --exit-code --tags upstream "refs/tags/$cand" >/dev/null 2>&1 || continue
+  if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null; then
+    SYNCED="refs/tags/$cand"; break          # carry the verified ref, not the name
+  fi
+done
+[ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
+
+git diff --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
+git diff        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks — that is the test
+```
+
+**Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
+tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
+`for cand in "v$VER" "$VER"` loop — this command mirrors that. Assuming
+the `v` prefix makes the check die on an unprefixed release. Bailing out when
+neither form exists is the point: a baseline that does not resolve must stop the
+check, not silently downgrade it to "everything differs, therefore ours".
+
+**A tag that resolves is still only an expectation.** Tags are mutable pointers,
+so `version.inc` naming a release says what we *expect* to hold, never what we *do*
+hold. If upstream retags that release onto a commit we never synced, the lookup
+succeeds and every upstream change between the two commits reads as a Helio
+difference — the rule would authorise exactly the divergence it exists to prevent.
+Demonstrated on a synthetic upstream: before a retag the diff reports the one Helio
+file; after, two, the extra one purely upstream's. **A retagged release is listed
+below with the other cases where the tag is the wrong baseline**, along with the two
+records that do preserve the sha the tag has moved away from.
+
+There is no ancestry check available to catch this automatically here, and it is
+worth saying why, because the obvious guard looks correct and is not.
+`helio-upstream-sync.yml` validates its own candidates with
+`git merge-base --is-ancestor`, but it runs that against the *upstream* commit it
+is about to merge, not against our branch. Our branch cannot answer it: sync PRs
+are squash-merged, which discards upstream ancestry — the very reason the
+merge-base graft exists. Measured on `orca-latest-parity-bambu` today: the tree holds
+v2.4.2's content, `git merge-base --is-ancestor refs/tags/v2.4.2 HEAD` is **false**,
+and an `--is-ancestor` gate would therefore reject every baseline and the check would
+never run. Content matches; ancestry does not. Do not add that guard.
+
+A merge base does still **exist** — the two are different claims and conflating them
+misleads anyone diagnosing an inflated conflict set. `git merge-base v2.4.2 HEAD`
+returns `d6761fedc6` (2026-03-06), an upstream commit from the v2.3.2-rc2 era: the
+squash discards the *recent* shared ancestry, so the base falls back past it to the
+last commit both sides still agree on. That is the same fallback the graft section
+below describes as the cause of the 7,876-file explosion, and it is why the graft is
+needed rather than evidence that ancestry is unavailable.
+
+**Beware measuring this in a shallow clone.** A truncated history makes
+`git merge-base` return empty, which reads as "no common ancestor" and is an artifact
+of the clone, not a property of the repository. Check `git rev-parse
+--is-shallow-repository` before trusting a negative answer here; this file previously
+asserted "no merge-base" on exactly that mistake.
+
+**Never add `--prune-tags` here.** It is the obvious companion to `--force` — the
+flag that *does* remove local tags upstream has deleted — and it would destroy
+this fork's own state. `helio-last-synced` and `helio-last-synced-main` exist only
+here, never upstream, so a prune deletes them: verified on a synthetic clone where
+`--tags --force --prune --prune-tags` left `v1.0` alone and took **both** Helio
+tracking tags with it. That is why the deletion case is handled with a read-only
+`git ls-remote` check per candidate instead. Same shape as the ancestry guard
+above — the reasonable-looking fix is the destructive one.
+
+**Fetch with `--force`, and stop if the fetch fails.** Plain `git fetch --tags`
+refuses to move a tag that already exists locally — it reports
+`! [rejected] … (would clobber existing tag)` and leaves the old commit in place.
+So if upstream retags a release, a repo that fetched the earlier tag keeps
+diffing against it, and the ownership verdict is computed from a baseline that no
+longer exists upstream. Both `helio-upstream-sync.yml` and `helio-upstream-watch.yml`
+already fetch `--tags --force`; this command matches them. The rejection does exit
+non-zero, so the guard catches it — without one the script runs on regardless and
+answers from whatever stale tags happen to be local, which is the wrong-baseline
+failure this rule exists to prevent.
+
+**`--stat` answers the first question, the patch answers the real one.** A diffstat
+shows *whether* the file differs, which settles the empty case outright — byte-identical
+to upstream, not ours, stop. It cannot settle the non-empty case, because ownership
+turns on **where** the defect sits, and a file-count tells you nothing about that. Run
+the second command and read the hunks. Treating the stat as the whole test is how
+"this file differs" quietly becomes "this file is ours", which is the exception this
+rule spends a section closing.
+
+**`$SYNCED` carries the verified `refs/tags/` ref, not the bare tag name**, so the
+ref that was checked is the ref the diff uses. Verifying `refs/tags/$cand` and then
+handing a bare `$cand` to `git diff` makes the verification decorative: git resolves
+`refs/` before `refs/tags/`, so a stray `refs/<tag>` answers the ownership question
+from a different commit. A same-named *branch* is not the hazard — `refs/tags/`
+outranks `refs/heads/` — which is exactly why the bare form looks safe until it
+isn't. Same defect as the one fixed in `helio-upstream-watch.yml` (#118).
+
+**Derive the tag, never hardcode it.** `version.inc` names the release this branch
+holds, so the command above follows the branch as it advances. A literal tag rots
+the moment a sync lands, and it rots in the dangerous direction: compared against
+a release older than the one we hold, a file we merely *inherited* from a later
+release shows a non-empty diff, reads as Helio-owned, and this rule then waves
+through exactly the patch it exists to prevent.
+
+**Empty output means the file is byte-identical to upstream's** — no Helio content
+in it, so a defect in it is not ours. Non-empty means *something* differs, which
+is a prompt to read the diff, **not** by itself proof of Helio ownership: check
+whether the hunks are Helio's or upstream changes made after the baseline.
+
+**`version.inc` names a tagged release, so it is the right baseline only for a
+tag-mode sync.** Three cases break it, all in the dangerous direction — content we
+merely inherited shows as a difference and reads as Helio-owned:
+
+- After a **`main`-mode sync** (`sync_target: main`) the tree holds upstream commits
+  newer than any tag, while `version.inc` may still name the last release.
+- A **local version bump** landing before the content it names — a case the sync
+  workflow already guards against for its own baseline.
+- A **retagged release**: upstream moves the tag we synced onto a different commit.
+  The name still resolves, so nothing looks wrong, and the whole delta between the
+  commit we took and the one the tag now names is attributed to Helio.
+
+When any of these applies, compare against the upstream **commit** the branch
+actually holds rather than the tag. Two records may carry that sha — **neither is
+immutable**, so check them in this order and treat what you find as evidence rather
+than proof:
+
+- **The auto-created `upstream-sync` issue**, whose resolution steps embed the
+  literal sha as `git merge <sync_sha>` — and, when a graft was needed, the previous
+  upstream commit as well. Issue #98 is the worked example: it names
+  `8500fcdccaa10b5099ac20d252af3a7c560046f1` for v2.4.2 (verified to match what
+  `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **The
+  best route available today — but conditional, not durable.** The issue is deduped
+  by a title built from the tag (`Upstream sync failed: <tag> (merge conflicts)`) and
+  a later run that matches that title **overwrites the body** with its own sha. The
+  key is the tag, which is precisely what a retag moves: sync `v2.4.2` from A and the
+  issue holds A; upstream retags `v2.4.2` to B; the next conflicting run for `v2.4.2`
+  finds that same open issue and replaces A with B. In the one scenario this fallback
+  exists for, it can erase the answer it was holding. Read it **before** re-running a
+  sync for that tag, and copy the sha somewhere immutable if it matters.
+- **A clean sync's own commit** — with two caveats that currently make it the weaker
+  route. The workflow squashes the sync branch with
+  `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`, so grep
+  with `git log --grep='Squashed single-commit sync'`. But:
+
+  **The sha may not be there.** No sync has yet taken the clean path — every one so
+  far hit conflicts and was squashed by hand via step 4 below, whose template carries
+  the tag only, and those commits reproduce the same opening sentence *without* the
+  sha. `ce472ef4` (v2.4.2) and `eaf3cb948e` (v2.4.1) both match the grep and contain
+  no sha at all. A matching subject line is not the record; the sha is.
+
+  **And that commit is not on the release branch.** The workflow's commit lives on
+  the sync branch, which is then *squash-merged* — mandated, for the verified-
+  signatures rule — producing a fresh commit with the release-branch tip as its only
+  parent. `ce472ef4` has exactly one parent for this reason. GitHub's squash normally
+  copies a single commit's message into the new one, but the merger can edit it
+  freely, so survival is a default rather than a guarantee. Once the sync branch is
+  deleted, whatever the squash did not copy is gone. Grep the release branch, and if
+  the sha is not in the commit you find, go back to the issue.
+
+Two things do **not** answer this, and both look like they should:
+
+- **The resolver's squash commit.** Step 4 of those same issue instructions squashes
+  with `-m "Upstream sync: <tag> into <target-branch> (squashed)"` — tag only. So a
+  conflict-resolved sync loses the sha at exactly the step where the clean path keeps
+  it, and `ce472ef4` (v2.4.2, conflict-resolved) has no sha in its body. The issue is
+  the record there, not the commit.
+- **The tracking tags.** `helio-last-synced` points at `v2.3.2-rc2` (2026-03-06)
+  while the branch holds v2.4.2 — five months and two releases behind, because the
+  workflow's token cannot update it. `helio-last-synced-main` is stale the same way.
+  Historical markers, never the current baseline.
+
+**Nothing here is immutable**, which is the honest summary: the issue can be
+overwritten or deleted, the release-branch commit carries the sha only if a squash
+happened to copy it, and the tracking tags are stale. Recording the sha somewhere
+that cannot be rewritten is tracked in #120. Until that lands, if the sync predates
+these records or they no longer agree, and you cannot establish the baseline
+confidently, treat ownership as unresolved and ask — an unresolved answer is
+recoverable, a wrong "this is ours" becomes a permanent divergence.
+
+Use the map as a quick first look and for the *why* (it records what each
+touchpoint is for), but let the git comparison settle disagreements — **provided its
+baseline is sound.** The comparison cannot drift the way a hand-maintained list does:
+nobody forgets to update it. But it is only ever as good as the commit it is run
+against, and the cases above — a retagged release, a `main`-mode sync, a version bump
+landing early — all produce a *confidently wrong* answer rather than an obviously
+broken one. Verify the baseline first; where it cannot be established, neither source
+settles anything and ownership stays unresolved.
+
+For #116 both agreed: `Print.hpp` appears zero times in the map, and its
+blob is byte-identical to `v2.4.2`. The question was answered before the PR was
+opened; nothing had told anyone to ask it.
+
+**"But it is breaking our CI" is not an exception.** That was exactly #116's
+reasoning: an upstream defect made a test fail intermittently, the red check
+blocked a Helio PR, and fixing upstream's code looked like the direct route to
+green. The blocker was real; the conclusion did not follow. When an upstream
+defect costs us something:
+
+1. Confirm our diff did not cause it. From the PR's branch:
+
+   ```bash
+   git fetch helio refs/heads/orca-latest-parity-bambu || { echo "fetch failed — base unknown" >&2; exit 1; }
+   git diff --stat FETCH_HEAD...HEAD          # what this fetch just brought, nothing else
+   ```
+
+   **Fail closed, and diff `FETCH_HEAD` — not a named ref.** Both hazards here point
+   at "nothing of ours changed", which files a regression we caused as inherited and
+   then step 3 says not to fix it, so this step must never answer from anything the
+   fetch did not just produce.
+
+   Naming the branch is wrong twice over. `helio/orca-latest-parity-bambu` is a
+   shorthand git resolves as `refs/<name>` → `refs/tags/<name>` → `refs/heads/<name>`
+   → `refs/remotes/<name>`, so a stray `refs/helio/orca-latest-parity-bambu` outranks
+   the remote-tracking ref. Spelling out `refs/remotes/helio/…` fixes that and still
+   fails, because **the fetch may never write that ref**: if `remote.helio.fetch` is
+   restricted — a clone made with `git remote add -t <branch>`, for instance — then
+   `git fetch helio orca-latest-parity-bambu` updates only `FETCH_HEAD` and **exits
+   0**, so the guard does not fire and a remote-tracking ref left over from some
+   earlier, broader fetch quietly supplies the baseline. Verified: with
+   `+refs/heads/feature:refs/remotes/helio/feature` configured, that fetch returned 0
+   and `refs/remotes/helio/orca-latest-parity-bambu` did not exist afterwards.
+
+   `FETCH_HEAD` is written by the fetch on the line above, so it is neither
+   shadowable nor stale. Simpler than the pinned ref, and correct in cases the
+   pinned ref is not.
+
+   **Fetch `refs/heads/…`, not the bare branch name.** `FETCH_HEAD` fixes which ref
+   answers *locally*; the fetch's **source** argument is a refspec resolved against
+   the remote and is separately ambiguous. Give it a bare name and a same-named tag
+   on `helio` wins — so `FETCH_HEAD` holds the tag, and the three-dot diff below
+   compares against it. Verified on a synthetic remote carrying both:
+
+   ```
+   fetch 'orca-latest-parity-bambu'            -> 7b7daf44c6   (the tag)
+   fetch 'refs/heads/orca-latest-parity-bambu' -> 2605974be6   (the branch)
+   ```
+
+   Both fetches exit 0, so the guard catches neither. Every ref this rule consumes is
+   now fully qualified — `refs/tags/` for the ownership baseline, `refs/heads/` here.
+
+   **List everything the branch changed and read it — do not filter by a path
+   list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
+   and the command prints nothing, the failure is filed as inherited, and step 3
+   then says not to fix it — so a regression we actually caused goes unowned. The
+   surface is wider than it looks: `src/`, `tests/`, `deps/`, `deps_src/`,
+   `resources/`, `cmake/`, `CMakeLists.txt`, `version.inc`, the `build_*.sh` /
+   `build_*.bat` scripts, `.github/workflows/build_*.yml`, and `scripts/` all
+   reach the built or tested artifact.
+
+   Inherited means the changed files **cannot** affect the artifact — documentation
+   and repo metadata that no build or test step reads. Anything else, assume ours
+   until shown otherwise.
+
+   "Assume ours" means **look before concluding inherited**, not block or escalate.
+   The look is bounded: does the failing job read any of the changed paths? For a
+   PR that touched only an unrelated workflow, answering that takes a minute and
+   the answer is usually no. Spending that minute unnecessarily is the cost this
+   default deliberately accepts, because the opposite error — filing our own
+   regression as upstream's, where step 3 then tells everyone not to fix it — is
+   the one that leaves a real bug unowned.
+
+   Use the three-dot form: it diffs from the **merge base**, so a release branch
+   that moved on after the branch was cut does not show up as changes this PR
+   made. Two-dot answers a different question and can implicate a PR that touched
+   nothing.
+2. Record it as an issue so the next person does not re-investigate it (#115 is
+   the worked example), including the upstream commit that fixes it if there is one.
+3. Rebuild, or wait for the sync that carries the fix. Do not patch, and do not
+   quarantine a test to make it quiet either.
+
+**Do not report it upstream on Helio's behalf** unless doing so serves Helio.
+Filing issues or PRs upstream is a maintenance commitment — follow-up, review
+rounds, defending the change — and this fork has not taken that on.
+
+**Where this genuinely is ours:** the defect is in Helio code, the defect is in
+Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), or **the
+defect sits in a Helio hunk of a shared file — or is caused by one.**
+
+That last one is deliberately about the *hunk*, not the file, and the distinction
+does real work. A Helio touchpoint is usually a handful of lines inside a mostly
+upstream file: `src/slic3r/GUI/Plater.cpp` is our heaviest at +2319/-182, and it is
+still overwhelmingly upstream code. "The file carries Helio changes, therefore the
+defect in it is ours" would hand us every upstream bug in every file we have ever
+touched — which is the patch this rule exists to prevent, arriving through its own
+exception. It would also contradict the diff test above, which says outright that a
+non-empty diff is a prompt to read the hunks, not proof of ownership.
+
+So read the hunks and ask where the defect lives. Inside Helio's lines, or produced
+by them (an upstream function misbehaving *because* of what we changed) — ours. In a
+region byte-identical to upstream, in a file that happens to carry Helio changes
+elsewhere — upstream's, and the fact that we edited another part of the same file
+does not alter that.
+
+For the hunk test, **map membership is not the qualifier — the diff above
+is.** A file can sit in the map having lost its Helio content, because the change
+was reverted or upstream absorbed an equivalent one, and the map is not updated
+when that happens. Taking the listing as proof would have someone patching
+upstream-identical code on the strength of a stale line in a document, which is
+the divergence this rule exists to stop. The map says *where to look and what the
+touchpoint was for*; `git diff` against the synced baseline says whether it is
+still there.
 
 ## Upstream Sync: squash merges & the merge-base graft
 
