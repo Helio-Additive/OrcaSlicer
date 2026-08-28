@@ -573,38 +573,50 @@ jobs:
           # patterns appear anywhere in a message, including non-adjacently, so
           # taking the newest match and parsing only that one lets a single
           # malformed or quoting commit SHADOW every valid record beneath it — the
-          # mechanism silently stops working from that commit onward. Walk the
-          # candidates newest-first and take the first that actually yields an
-          # adjacent pair.
-          RECORDED_FROM=""
-          REC=""
+          # mechanism silently stops working from that commit onward.
+          #
+          # Every same-mode record becomes a candidate, newest-first — not just the
+          # newest one. Stopping at the first parseable pair shadows older records
+          # just as surely, only later in the pipeline: a syntactically fine record
+          # that then fails the content validation below takes the whole mechanism
+          # down with it, because no older record was ever offered. That is not a
+          # corner case here. Resolving a conflict means deliberately not taking
+          # some of upstream's content, so a conflict-resolved sync's tree can fail
+          # the held-content test by construction — and on this fork every sync so
+          # far has conflicted. The graft would fall back to a far older release
+          # baseline (or, in main mode where the tracking tag cannot be written at
+          # all, to nothing) and replay history that was already resolved.
+          #
+          # Offering all of them is safe because candidates are not preference-
+          # ordered: they are sorted by ancestry and each must prove its content is
+          # held, so an older record can only ever be chosen when every newer one
+          # failed on the merits.
           CAND_COMMITS=$(git log --first-parent -E --all-match \
             --grep="^upstream-commit: [0-9a-f]{40}\$" \
             --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
             --format=%H 2>/dev/null || true)
+          REC_SEEN=""
           for cand in $CAND_COMMITS; do
             v=$(git show -s --format=%B "$cand" | awk -v mode="$SYNC_MODE" '
               /^upstream-commit: [0-9a-f]{40}$/ { sha = $2; next }
               $0 == "upstream-sync-mode: " mode && sha != "" { last = sha; sha = ""; next }
               { sha = "" }
               END { print last }')
-            if [ -n "$v" ]; then RECORDED_FROM="$cand"; REC="$v"; break; fi
-          done
-          if [ -n "$RECORDED_FROM" ]; then
+            [ -n "$v" ] || continue
             # Must be a full 40-hex object name we actually have: a short or
             # symbolic value (`upstream-commit: HEAD`) would graft an arbitrary
             # commit, which is worse than having no record.
-            if [ -n "$REC" ] && git rev-parse -q --verify "$REC^{commit}" >/dev/null 2>&1; then
-              if [ "$REC" = "$SYNC_SHA" ]; then
-                SELF_NAMED=true
-              elif git merge-base --is-ancestor "$REC" "$SYNC_SHA"; then
-                CANDS+=("$REC")
-                CDESC+=("the upstream-commit: record ($SYNC_MODE mode) on ${RECORDED_FROM:0:12}")
-              fi
-            elif [ -n "$REC" ]; then
-              echo "::warning title=Unusable baseline record::Commit ${RECORDED_FROM:0:12} carries \`upstream-commit: $REC\`, which is not a commit this clone has. Ignoring it and falling back to the other candidates."
+            if ! git rev-parse -q --verify "$v^{commit}" >/dev/null 2>&1; then
+              echo "::warning title=Unusable baseline record::Commit ${cand:0:12} carries \`upstream-commit: $v\`, which is not a commit this clone has. Ignoring it and continuing with older records."
+              continue
             fi
-          fi
+            if [ "$v" = "$SYNC_SHA" ]; then SELF_NAMED=true; continue; fi
+            git merge-base --is-ancestor "$v" "$SYNC_SHA" || continue
+            case " $REC_SEEN " in *" $v "*) continue ;; esac
+            REC_SEEN="$REC_SEEN $v"
+            CANDS+=("$v")
+            CDESC+=("the upstream-commit: record ($SYNC_MODE mode) on ${cand:0:12}")
+          done
 
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
