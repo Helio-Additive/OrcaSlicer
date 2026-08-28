@@ -1085,12 +1085,16 @@ jobs:
           PREV_UPSTREAM: ${{ steps.graft.outputs.prev_upstream }}
           BRANCH_PUSHED: ${{ steps.push_branch.outputs.pushed }}
           PUSH_SKIP_REASON: ${{ steps.push_branch.outputs.skip_reason }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
         with:
           script: |
             const fs = require('fs');
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
             const syncSha = process.env.SYNC_SHA;
+            // Same derivation as the clean-squash step. The reader filters on
+            // mode, so recording the wrong one is equivalent to recording nothing.
+            const syncMode = process.env.TRACKING_TAG === 'helio-last-synced-main' ? 'main' : 'tag';
             const target = process.env.TARGET_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
             const grafted = process.env.GRAFTED === 'true';
@@ -1210,7 +1214,16 @@ jobs:
               '   BASE=$(git rev-parse HEAD^1)             # target-branch tip (first parent)',
               '   # (placeholders below are literal — do NOT paste the raw upstream tag into a',
               '   #  double-quoted -m; git refnames may contain $()/backticks that would run)',
-              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" -m "Upstream sync: <tag> into <target-branch> (squashed)")',
+              '   # The baseline record. Both lines go in ONE -m so they land in the same',
+              '   # paragraph and stay adjacent, and it is the LAST -m so the pair terminates',
+              '   # the message — the reader in the graft step requires both, so that a record',
+              '   # quoted from an older sync cannot be spliced onto a later one.',
+              '   # Every sync on this fork so far has conflicted, so this recipe — not the',
+              '   # automatic squash step — is where the record actually gets written.',
+              `   RECORD=$(printf 'upstream-commit: %s\\nupstream-sync-mode: %s' "${syncSha}" "${syncMode}")`,
+              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" \\',
+              '     -m "Upstream sync: <tag> into <target-branch> (squashed)" \\',
+              '     -m "$RECORD")',
               '   git reset --hard "$NEW"                  # branch now has exactly one commit',
               `   git push origin ${branch} --force-with-lease`,
               '   ```',
