@@ -662,11 +662,16 @@ upstream-sync-mode: tag|main
 **Why it exists, given `version.inc` and the tracking tag.** It is for `main` mode.
 There `version.inc` is deliberately excluded — it names a *release*, and a `main`
 sync is ahead of it — so the only other candidate is `helio-last-synced-main`, a tag
-that is mutable and, on this repository, **cannot be written at all**: pushing it
-makes upstream's `.github/workflows/**` reachable, and `GITHUB_TOKEN` may not
-introduce workflow content, so the push is refused. Without the record a `main` sync
-has no durable baseline. A trailer on the commit is immutable, travels with the
-branch, and needs no permission beyond committing.
+that is mutable and, **with the workflow's current `GITHUB_TOKEN`, cannot be
+written**: pushing it makes upstream's `.github/workflows/**` reachable, and a
+GitHub App token may not introduce workflow content without the `workflows`
+permission — which a workflow's `permissions:` block cannot grant. That is a
+property of the credential, not of the repository: a PAT with `workflows` scope
+could write it, at the cost of a long-lived credential able to rewrite workflow
+files. See "Why the push is refused" below for the full diagnosis and the three
+options, none of which has been chosen. So as things stand a `main` sync has no
+durable baseline. A trailer on the commit is immutable, travels with the branch,
+and needs no permission beyond committing.
 
 It only **adds a candidate**. It is content-validated alongside every other one, so
 a record that disagrees with the tree loses to one that matches it.
