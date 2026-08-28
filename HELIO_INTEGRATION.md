@@ -623,7 +623,9 @@ for cand in "v$VER" "$VER"; do                  # upstream tags both forms
   fi
 done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
-git diff --stat "$SYNCED" HEAD -- <file>
+
+git diff --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
+git diff        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks — that is the test
 ```
 
 **Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
@@ -673,6 +675,14 @@ already fetch `--tags --force`; this command matches them. The rejection does ex
 non-zero, so the guard catches it — without one the script runs on regardless and
 answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
+
+**`--stat` answers the first question, the patch answers the real one.** A diffstat
+shows *whether* the file differs, which settles the empty case outright — byte-identical
+to upstream, not ours, stop. It cannot settle the non-empty case, because ownership
+turns on **where** the defect sits, and a file-count tells you nothing about that. Run
+the second command and read the hunks. Treating the stat as the whole test is how
+"this file differs" quietly becomes "this file is ours", which is the exception this
+rule spends a section closing.
 
 **`$SYNCED` carries the verified `refs/tags/` ref, not the bare tag name**, so the
 ref that was checked is the ref the diff uses. Verifying `refs/tags/$cand` and then
