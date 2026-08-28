@@ -83,6 +83,9 @@ jobs:
             # The regex tolerates both `-rc2`-style and dotted `-rc.1`-style
             # SemVer suffixes. `|| true` keeps pipefail happy when grep finds
             # nothing (only prereleases exist) — handled by the empty-check below.
+            # Must stay byte-identical to PRERELEASE_RE in
+            # scripts/helio/upstream_content.sh, whose ancestry walk uses the
+            # same exclusion (drift is pinned by test_sync_noop_guards.py).
             LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
               | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)
@@ -107,30 +110,184 @@ jobs:
 
       - name: Check if already synced
         id: check
+        # SYNC_LABEL is an upstream tag name. Interpolating it into the script
+        # body would make an upstream-controlled string part of the shell source,
+        # where a quote or `$(` would escape the assignment. Via `env` the shell
+        # substitutes it after parsing, so it cannot. (SYNC_SHA is hex from
+        # rev-parse and TRACKING_TAG is one of two literals, but they go through
+        # env too so the pattern is uniform and nobody has to re-derive which
+        # values are safe.)
+        env:
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          # Same value as the graft step: this step also calls `first-held`, and
+          # the two must not walk different distances.
+          MAX_WALK: '6'
+          # For the completion signal below. BRANCH_NAME is derived from an
+          # upstream tag, so it goes through env for the same reason SYNC_LABEL
+          # does. GH_TOKEN is what `gh api` reads; the workflow already holds
+          # `pull-requests: write`, and this only ever reads.
+          RELEASE_BRANCH: ${{ steps.branch.outputs.target }}
+          BRANCH_NAME: ${{ steps.target.outputs.branch_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
-          SYNC_LABEL="${{ steps.target.outputs.sync_label }}"
-          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
+          # Shared with the `graft` step below, so "does this branch hold
+          # release X?" has one implementation rather than two that drift.
+          CONTENT="$GITHUB_WORKSPACE/scripts/helio/upstream_content.sh"
+
+          # Moving the tracking tag requires force-updating a tag on this repo,
+          # which the workflow token is not always permitted to do (observed:
+          # HTTP 403). That must not fail a sync run — the tag is a convenience,
+          # and every decision below has a fallback that does not need it. It
+          # does need to be LOUD, because a tag that silently never moves is how
+          # this workflow came to re-propose an already-merged release (#110).
+          # Callers write `skip=true` to $GITHUB_OUTPUT BEFORE calling this: the
+          # skip decision is the run's product and the tag is bookkeeping, so a
+          # tag failure must never cost a run whose conclusion was already
+          # reached. The local write is guarded for the same reason the noop
+          # step guards its own — under the Actions default `-e` an unguarded
+          # `git tag -f` failing here would abort the step instead of warning.
+          update_tracking_tag() {
+            git tag -f "$TRACKING_TAG" "$1" || {
+              echo "::warning title=Tracking tag not updated::Could not write $TRACKING_TAG locally."
+              return 0
+            }
+            if git push origin "refs/tags/$TRACKING_TAG" --force; then
+              echo "Updated $TRACKING_TAG -> $1"
+            else
+              # NOTE ON REMOTES: the push above uses `origin` because that is
+              # what actions/checkout configures — inside Actions, origin IS
+              # this fork. The healing command below is run by a HUMAN in their
+              # own clone, where CLAUDE.md says origin is upstream OrcaSlicer
+              # and `helio` is this fork. Telling a maintainer to push a Helio
+              # tracking tag to `origin` would aim it at upstream.
+              echo "::warning title=Tracking tag not updated::Could not force-update \`$TRACKING_TAG\` to $1 (the token appears to lack permission to update tags). The sync itself is unaffected — nothing below depends on the tag — but it will keep pointing at a stale commit until a maintainer runs, from a clone whose fork remote is \`helio\`: git push helio +$1:refs/tags/$TRACKING_TAG"
+            fi
+          }
+
+          # version.inc records which upstream release this tree was synced to.
+          # For tag-mode syncs it is a better BASELINE than the tracking tag: the
+          # tag is only advanced by a successful push at the end of a run, so an
+          # out-of-band merge, or a run whose tag push was refused, leaves it
+          # behind while the tree moves on. `helio-last-synced` sat at v2.3.2-rc2
+          # through three releases for exactly that reason.
+          #
+          # It is NOT proof of content, and must never be treated as such. It is
+          # a version string in a file; the release it names can stop describing
+          # the tree without the file changing:
+          #   - upstream force-retags a release after we synced the original
+          #     commit, so the name now resolves somewhere we have never merged
+          #   - version.inc is bumped locally ahead of the content landing
+          # In both cases the string equals the sync target while the target's
+          # content is absent. Skipping on that would be a SILENT false negative
+          # — upstream work dropped, and every later run reaching the same wrong
+          # conclusion — which is strictly worse than the empty PR of #110. So
+          # version.inc selects the baseline and nothing more; the merged-tree
+          # comparison in `noop` is the only thing here that decides "synced".
+          VERSION_COMMIT=""
+          VERSION_TAG=""
+          if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
+            if [ -n "$VER" ]; then
+              for cand in "v$VER" "$VER"; do
+                if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
+                  VERSION_COMMIT=$(git rev-parse "refs/tags/$cand^{commit}")
+                  VERSION_TAG="$cand"
+                  break
+                fi
+              done
+            fi
+          fi
+
+          # version.inc naming the sync target means "we expect to be synced".
+          # Record it, do not act on it: the run continues to the grafted merge
+          # so the tree comparison can confirm or refute it. Deliberately no
+          # `update_tracking_tag` here either — every write of that tag must be
+          # backed by content (an ancestry hit, a clean no-diff trial merge, an
+          # identical merged tree, or a completed sync), so that the tag stays
+          # usable as evidence at line ~165 below.
+          VERSION_MATCHES_TARGET=false
+          if [ -n "$VERSION_COMMIT" ] && [ "$VERSION_COMMIT" = "$SYNC_SHA" ]; then
+            VERSION_MATCHES_TARGET=true
+            echo "version.inc reports $VERSION_TAG, which is the sync target ($SYNC_LABEL) — expecting a no-op, but continuing to the merge to verify it by content"
+          fi
 
           # Determine baseline
           LAST_SYNCED=""
+          TAG_UNTRUSTED=false
           if git rev-parse "$TRACKING_TAG" >/dev/null 2>&1; then
             SYNCED_COMMIT=$(git rev-parse "$TRACKING_TAG")
+            # The tag matching the target is a REASON TO LOOK, not an answer.
+            #
+            # It used to exit here on its own, on the grounds that the tag is
+            # only ever written after content was validated. That was not true:
+            # the tag was advanced when a sync PR was *created*. So a PR closed
+            # unmerged left the tag naming a release this branch never received,
+            # and this exit then skipped that release permanently — every run,
+            # for ever. Removing the PR-creation write stops NEW tags being
+            # wrong; it does nothing for tags already written that way, which is
+            # why the claim has to be rechecked here rather than trusted.
             if [ "$SYNCED_COMMIT" = "$SYNC_SHA" ]; then
-              echo "Already synced to $SYNC_LABEL"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              if "$CONTENT" holds "$SYNC_SHA"; then
+                echo "Already synced to $SYNC_LABEL (tracking tag, confirmed by content)"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              # Rejecting the tag at THIS exit is not enough. The tag also feeds
+              # the baseline, and a baseline equal to the target hits a second,
+              # separate "nothing to sync" exit further down — so the bad tag
+              # skipped the release anyway, through a different door. Mark it
+              # untrusted and let every consumer below ignore it.
+              TAG_UNTRUSTED=true
+              echo "::warning title=Tracking tag does not match the tree::\`$TRACKING_TAG\` names $SYNC_LABEL, but this branch does not hold that release's content (never applied: $("$CONTENT" missing "$SYNC_SHA" 2>/dev/null | head -5 | tr '\n' ' ')). The tag was probably advanced by a sync PR that was never merged. Ignoring the tag for this run and syncing anyway."
+            fi
+            # Prefer version.inc when it names a NEWER upstream release than the
+            # tag does. The baseline feeds the changelog and the Helio-relevant
+            # change report, so a stale one does not just add noise — it reports
+            # changes that were reviewed and merged one or more syncs ago.
+            #
+            # Not when version.inc names the target itself: a baseline equal to
+            # the thing being synced makes the changelog range empty and, worse,
+            # feeds the graft step a circular base (see the strict-ancestor
+            # requirement there). Fall back to the tag in that case.
+            if [ -n "$VERSION_COMMIT" ] && \
+               [ "$VERSION_COMMIT" != "$SYNC_SHA" ] && \
+               git merge-base --is-ancestor "$SYNCED_COMMIT" "$VERSION_COMMIT" && \
+               [ "$SYNCED_COMMIT" != "$VERSION_COMMIT" ]; then
+              echo "Tracking tag ($TRACKING_TAG -> $SYNCED_COMMIT) is behind version.inc ($VERSION_TAG); using version.inc as the baseline"
+              LAST_SYNCED="$VERSION_TAG"
             fi
             # For tag mode, try to find the v* tag at that commit
-            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+            if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ] && \
+               [ "$TRACKING_TAG" = "helio-last-synced" ]; then
               LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
             fi
-            if [ -z "$LAST_SYNCED" ]; then
+            if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ]; then
               LAST_SYNCED="$TRACKING_TAG"
             fi
+            # The tag is untrusted and version.inc gave us nothing usable, so
+            # there is no record left to take a baseline from. Fall back to the
+            # newest release whose content this branch demonstrably holds — the
+            # same content test, which is the only thing here that has not been
+            # wrong about this branch.
+            if [ -z "$LAST_SYNCED" ]; then
+              LAST_SYNCED=$("$CONTENT" first-held "$("$CONTENT" base-below "$SYNC_SHA" 1)" || true)
+              if [ -n "$LAST_SYNCED" ]; then
+                echo "Baseline taken from content: $LAST_SYNCED is the newest release this branch holds"
+              else
+                LAST_SYNCED="v2.3.2-rc2"
+                echo "No usable record and no validated release; falling back to the bootstrap baseline"
+              fi
+            fi
           else
-            if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
-              echo "No previous sync tag found, using v2.3.2-rc2 as baseline"
+            if [ -n "$VERSION_TAG" ] && [ "$VERSION_COMMIT" != "$SYNC_SHA" ]; then
+              echo "No previous sync tag found, using version.inc ($VERSION_TAG) as baseline"
+              LAST_SYNCED="$VERSION_TAG"
+            elif [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+              # Bootstrap baseline, only reachable when version.inc names no tag
+              # upstream has (a local version bump, say).
+              echo "No previous sync tag and no usable version.inc, using v2.3.2-rc2 as baseline"
               LAST_SYNCED="v2.3.2-rc2"
             else
               # First main sync — capture current HEAD SHA as baseline (before merge moves it)
@@ -146,7 +303,11 @@ jobs:
             exit 1
           fi
 
-          if [ "$BASELINE_COMMIT" = "$SYNC_SHA" ]; then
+          # The guards above keep version.inc from steering the baseline onto the
+          # target, so reaching this with an equal baseline means a tag genuinely
+          # records this commit as synced. If version.inc is the only reason the
+          # two coincide, do not skip — that is the unvalidated claim again.
+          if [ "$BASELINE_COMMIT" = "$SYNC_SHA" ] && [ "$VERSION_MATCHES_TARGET" != "true" ]; then
             echo "Baseline $LAST_SYNCED and target $SYNC_LABEL point to the same commit — nothing to sync"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -156,9 +317,8 @@ jobs:
           # done out-of-band (e.g. a manual PR).  Update the tracking tag and skip.
           if git merge-base --is-ancestor "$SYNC_SHA" HEAD; then
             echo "Target $SYNC_LABEL ($SYNC_SHA) is already merged into HEAD — updating tracking tag and skipping"
-            git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-            git push origin "$TRACKING_TAG" --force
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
             exit 0
           fi
 
@@ -166,30 +326,115 @@ jobs:
           # squash-merged because the original upstream commit is not in the
           # history.  Try a trial merge — if it succeeds with no diff, the
           # content is already incorporated.
+          #
+          # Note this runs BEFORE the merge-base graft, so on a squash-flattened
+          # history the trial merge is computed against the same wrong base the
+          # graft exists to correct, and usually conflicts rather than reporting
+          # "no diff". Like the ancestor check above it, it is ancestry-dependent:
+          # cheap, catches the easy cases, and cannot be relied on.
+          #
+          # The AUTHORITATIVE no-op detection is the merged-tree comparison in the
+          # `noop` step, after the real grafted merge — that is the only guard here
+          # that reasons about content. The version.inc check above is explicitly
+          # NOT authoritative; it compares a version string and only sets an
+          # expectation. See #110.
           if git merge --no-commit --no-ff "$SYNC_SHA" 2>/dev/null; then
             if git diff --cached --quiet 2>/dev/null; then
               echo "Target $SYNC_LABEL already incorporated (squash merge detected) — updating tracking tag and skipping"
               git merge --abort 2>/dev/null || git reset --hard HEAD
-              git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-              git push origin "$TRACKING_TAG" --force
               echo "skip=true" >> "$GITHUB_OUTPUT"
+              update_tracking_tag "$SYNC_SHA"
               exit 0
             fi
           fi
           git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+
+          # The content test, which is what the two checks above only approximate.
+          #
+          # Both of them ask an ANCESTRY question, and this fork squash-merges,
+          # so both are defeated by exactly the history they run against. That is
+          # survivable for a clean sync — the merged-tree comparison in `noop`
+          # catches it later. It is NOT survivable for a sync that CONFLICTED:
+          # the resolution branch is squash-merged too, the ancestor check misses
+          # it, the pre-graft trial merge conflicts against the wrong base, and
+          # `noop` never runs because `noop` only runs after a clean merge. So
+          # nothing would ever record that a resolved sync had landed, and the
+          # workflow would re-conflict and refresh the conflict issue every week
+          # for a sync that is already on the branch. That regression arrived
+          # with the removal of the PR-creation tag write, which had been
+          # covering for it.
+          #
+          # This asks the tree directly, so it is immune to the squash and covers
+          # the conflict path, the out-of-band merge, and the ordinary one alike.
+          if "$CONTENT" holds "$SYNC_SHA"; then
+            echo "Target $SYNC_LABEL is already present in this branch's content — updating tracking tag and skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
+            exit 0
+          fi
+
+          # The completion signal for CONFLICT syncs, which content cannot give.
+          #
+          # `holds` above is the right question for a clean sync and the wrong
+          # one for a resolved conflict, because resolving a conflict means a
+          # human deliberately chose NOT to take some of upstream's content. The
+          # tree then legitimately does not hold everything at the target, so
+          # `holds` says "no" for ever and the finished sync is re-proposed every
+          # Monday: merge re-conflicts, conflict issue refreshed, human asked to
+          # redo work they already did.
+          #
+          # No content test can fix this. "We never received this content" and
+          # "we received it and chose ours" produce byte-identical trees. The
+          # only system holding the distinction is GitHub — was the resolution PR
+          # merged? — so this is the one guard here that leaves git. Approved on
+          # the PR after being raised as the open question three rounds running.
+          #
+          # Safety: it is strictly narrower than the checks above. It fires only
+          # on a MERGED PR (closed-unmerged deliberately does not count — that
+          # was the "closed PR skips the release for ever" bug, and this must not
+          # reintroduce it from the other side) whose base is this release branch
+          # and whose body carries the sync-target marker naming THIS commit. The
+          # marker names a sha, not a tag, so an upstream force-retag stops
+          # matching and the sync is correctly re-proposed.
+          #
+          # An API failure returns non-zero and we fall through to the ordinary
+          # merge path — degraded to today's behaviour, never to a false skip.
+          if COMPLETION_PR="$("$GITHUB_WORKSPACE/scripts/helio/sync_completion.sh" "$SYNC_SHA" "$RELEASE_BRANCH" "$BRANCH_NAME")"; then
+            echo "Target $SYNC_LABEL landed via merged PR #${COMPLETION_PR} — updating tracking tag and skipping"
+            {
+              echo "### Sync already completed"
+              echo
+              echo "\`$SYNC_LABEL\` was merged by PR #${COMPLETION_PR}."
+              echo
+              echo "The content test still reports paths as not held, which is expected for a"
+              echo "conflict resolution — the resolver chose Helio's version for them. Listed"
+              echo "here so the divergence stays visible rather than silently accepted:"
+              echo
+              echo '```'
+              "$CONTENT" missing "$SYNC_SHA" 2>/dev/null | sed 's/^/missing: /' | head -40 || true
+              "$CONTENT" unknown "$SYNC_SHA" 2>/dev/null | sed 's/^/unknown: /' | head -40 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            update_tracking_tag "$SYNC_SHA"
+            exit 0
+          fi
 
           echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Exit if already synced
         if: steps.check.outputs.skip == 'true'
-        run: echo "Nothing to sync — already at ${{ steps.target.outputs.sync_label }}."
+        env:
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+        run: echo "Nothing to sync — already at $SYNC_LABEL."
 
       - name: Create sync branch
         if: steps.check.outputs.skip != 'true'
         id: sync_branch
+        env:
+          BRANCH: ${{ steps.target.outputs.branch_name }}
         run: |
-          BRANCH="${{ steps.target.outputs.branch_name }}"
           git checkout -b "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -210,158 +455,306 @@ jobs:
       - name: Establish correct merge base (ephemeral graft)
         if: steps.check.outputs.skip != 'true'
         id: graft
+        env:
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          # Set HERE, not only in upstream_content.sh. The script's
+          # `MAX_WALK="${MAX_WALK:-6}"` initialises the variable in the script's
+          # OWN process; this step's shell is a different process and never sees
+          # it. The rejection warning below interpolates $MAX_WALK, and under
+          # `set -u` an unset variable there aborts the step — turning "warn and
+          # carry on without a graft" into a failed run. Exporting it from the
+          # step also keeps the number the walk uses and the number the warning
+          # quotes to a single source.
+          MAX_WALK: '6'
         run: |
           set -euo pipefail
-          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
-          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
           TIP=$(git rev-parse HEAD)
 
           # Determine PREV_UPSTREAM = the upstream commit our branch content is
           # based on.
-          #
-          # Preferred source: the `upstream-commit:` / `upstream-sync-mode:` record
-          # that both sync paths write (the clean-squash step below, and step 4 of
-          # the resolver instructions). It is a fact recorded by the run that did
-          # the merge, on a release-branch commit — the only record here that
-          # cannot be rewritten afterwards. Tags move, and the conflict issue's
-          # body is overwritten by the next run for the same tag.
-          #
-          # Everything below it is a GUESS from a mutable ref, kept only for the
-          # commits that predate the record:
-          #  - Tag-release syncs (TRACKING_TAG=helio-last-synced): version.inc
-          #    names the upstream release the tree was synced to, so prefer it
-          #    (the tracking tag can lag). Tracking tag as fallback.
+          #  - Tag-release syncs (TRACKING_TAG=helio-last-synced): version.inc names
+          #    the upstream release the tree was synced to, so prefer it (the
+          #    tracking tag can lag) — but only once its content is VALIDATED, see
+          #    below. Tracking tag as fallback.
           #  - Main syncs (TRACKING_TAG=helio-last-synced-main): version.inc names
           #    an older tagged release, NOT the last synced main commit, so it must
           #    NOT be used — prefer the tracking tag, which points at that commit.
           #
-          # Why the guess is unsafe: `--is-ancestor $cand $SYNC_SHA` proves the
-          # candidate is an ancestor of the INCOMING target, not that it is what
-          # this branch actually holds. If upstream retags a release from A to B
-          # and the next sync targets C (a descendant of B — the ordinary forward
-          # retag), the check passes for B, the graft asserts our tree is based on
-          # B, and the merge computes only B..C. Everything in A..B is never
-          # merged: no conflict, no warning, and a sync PR that looks clean.
-          PREV=""
-          PREV_SRC=""
+          # THE GRAFT BASE IS A SAFETY-CRITICAL CHOICE, AND IT IS ASYMMETRIC.
+          # Too OLD is merely expensive: git recomputes more of the delta and the
+          # conflict set inflates. Too NEW silently DROPS UPSTREAM WORK — git reads
+          # the content between the real base and the claimed one as deliberate
+          # local reversions and never re-applies it. The merge succeeds, the tree
+          # changes, the PR opens, and it claims a release whose content is only
+          # partly there. Nothing reports it. So a candidate is used only when
+          # there is evidence the tree really holds it.
+          #
+          # Two ways version.inc can name something too new:
+          #  1. It names the sync target itself. `--is-ancestor` is true for a
+          #     commit and itself, so without a strict test this grafts the target
+          #     onto the tip: the merge-base becomes the target, the merge is a
+          #     no-op BY CONSTRUCTION, and the merged-tree comparison "confirms"
+          #     already-synced for a release never merged — the one content-based
+          #     guard reduced to a rubber stamp.
+          #  2. It names an INTERMEDIATE release we do not hold (tree at v2.4.1,
+          #     version.inc says v2.4.2, target v2.4.3). v2.4.2 is a strict
+          #     ancestor of v2.4.3, so a strictness test alone accepts it, and
+          #     only v2.4.2..v2.4.3 gets applied. v2.4.2's content is dropped.
+          #
+          # Case 1 is handled by SELF_NAMED below. Case 2 needs actual validation.
+          #
+          # Validating a candidate by its OWN delta is not enough, and that was
+          # the third route to the same silent drop. Grafting the candidate's
+          # first parent and trial-merging the candidate proves only that the
+          # candidate's LAST STEP is present; everything below it is assumed. The
+          # assumption is exactly what is false when the gap sits underneath a
+          # small step: tree at v2.4.0, version.inc says v2.4.2, v2.4.1 added a
+          # file, v2.4.2 only bumped version.inc. The v2.4.2 delta is a version
+          # string we already have, so the trial passes, v2.4.2 becomes the base,
+          # and v2.4.1's file is dropped from the sync. The same hole applies to
+          # the tracking tag, which was not validated at all — and it can name a
+          # commit this branch does not hold, because it is advanced when a sync
+          # PR is *created*, not when it is merged (see "Note pending sync").
+          #
+          # So validate INHERITED content, and compare TREES rather than names.
+          #
+          # That work lives in scripts/helio/upstream_content.sh, shared with the
+          # `check` step above, so "does this branch hold release X?" has one
+          # implementation. It was inline here before, which is exactly why the
+          # check step could not use it and went on trusting the tracking tag.
+          #
+          # Comparing changed path NAMES is not enough either: if upstream edits
+          # one hunk of a file and Helio independently edits another hunk, the
+          # path appears on both sides and a name-level set difference cancels it
+          # out while upstream's hunk is genuinely absent. The script compares
+          # blob ids, and for the remainder where our blob matches neither side
+          # it runs a three-way merge to decide whether upstream's change is
+          # already in ours.
+          CONTENT="$GITHUB_WORKSPACE/scripts/helio/upstream_content.sh"
 
-          # Find the newest sync record on the branch's own first-parent line
-          # (first-parent so side histories merged in cannot supply a baseline).
+          # Candidates in preference order. Every one of them is a CLAIM about
+          # what this tree contains, and every one of them is checked against the
+          # tree before it can steer the merge.
+          PREV=""
+          SELF_NAMED=false
+          CANDS=()
+          CDESC=()
+
+          # Highest record preference: the `upstream-commit:` trailer written onto
+          # the sync commit itself by the squash step below.
           #
-          # Four properties of this lookup are load-bearing; each one was a real
-          # failure before it was fixed, so please do not "simplify" them away:
+          # WHY THIS EXISTS, given version.inc and the tracking tag already feed
+          # this list. It is for `main` mode. There, version.inc is deliberately
+          # excluded (it names a RELEASE, and a main sync is ahead of it), so the
+          # only candidate is `helio-last-synced-main` — a tag that is mutable and,
+          # on this repository, cannot even be written: pushing it makes upstream's
+          # .github/workflows/** reachable and GITHUB_TOKEN may not introduce
+          # workflow content, so the push is refused. A main sync therefore has no
+          # durable baseline at all. A trailer on the commit has neither problem:
+          # it is immutable, it travels with the branch, and writing it needs no
+          # permission beyond committing.
           #
-          # 1. SCOPED TO THE CURRENT MODE. Tag syncs and main syncs advance the
-          #    branch along different upstream lines, so the newest record overall
-          #    is not necessarily right for this run: if a main sync records M and
-          #    a later tag sync records an older B, a mode-blind read grafts B for
-          #    the next main sync and drags the whole B..M range back into the
-          #    conflict set. The version.inc / tracking-tag split below was already
-          #    mode-specific; this keeps that property.
-          # 2. UNBOUNDED. A commit cap would silently expire the record once that
-          #    many commits landed since the last sync (e.g. while a conflict PR
-          #    stayed open), dropping us to the mutable-tag path and re-opening the
-          #    retag hole this whole mechanism exists to close. The scan runs once
-          #    per sync over one branch's first-parent line — a few ms.
-          # 3. A MESSAGE SCAN, NOT `%(trailers:...)`. Git parses trailers only out
-          #    of the LAST paragraph, and GitHub appends `Co-authored-by:` in a
-          #    paragraph of its own when it squash-merges a PR with more than one
-          #    commit author — which orphans an otherwise valid record and drops us
-          #    to the legacy path with no warning. Verified both ways: same
-          #    paragraph parses, separate paragraph does not. `--grep` anchors `^`
-          #    per line inside the message, so paragraph position stops mattering.
-          # 4. `--grep` IS ONLY A PREFILTER; THE PAIR IS MATCHED BY ADJACENCY.
-          #    `--all-match` requires both patterns to appear *somewhere* in the
-          #    message, not in the same record. A commit quoting an older record
-          #    and carrying its own below it satisfies both patterns for EITHER
-          #    mode, and a mode-blind extraction then returns the wrong one — the
-          #    mode-scoping bug re-entering by another door, in the silent
-          #    direction when the wrong record is the newer. So each candidate's
-          #    message is re-scanned for an `upstream-commit:` line IMMEDIATELY
-          #    followed by `upstream-sync-mode: <this mode>`; the LAST such pair
-          #    wins (the record is a trailer, so a commit's own is at the end),
-          #    and a candidate with no matching pair is skipped for the next one.
-          #    The strict shapes — 40 lowercase hex, exact mode — mean prose that
-          #    merely mentions the keys never matches, and a stray
-          #    `upstream-commit: HEAD` cannot graft an arbitrary commit.
+          # NOT a substitute for the checks below. This only ADDS a candidate; it
+          # is content-validated with every other one, so a record that disagrees
+          # with the tree loses to one that matches it.
           #
-          # The awk deliberately does NOT `exit` on the first match: closing the
-          # pipe early can SIGPIPE `git log`, and `set -o pipefail` would turn that
-          # into a step failure. It also avoids `{40}` interval syntax, which not
-          # every awk on a runner image supports.
+          # Read with --grep over the FULL message, not `%(trailers:...)`: git
+          # parses trailers only from the last paragraph, and GitHub appends
+          # `Co-authored-by:` in a paragraph of its own when it squash-merges a PR
+          # with more than one commit author — which silently drops the record.
+          # The two lines must be ADJACENT and the mode must match, so a message
+          # quoting an older record cannot be combined with a newer one; the LAST
+          # such pair in a message wins, because a commit's own record is written
+          # below anything it quotes.
           SYNC_MODE=tag
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
-
-          RECORDED=""
+          # --grep is a CANDIDATE FILTER, not the answer. It is satisfied when both
+          # patterns appear anywhere in a message, including non-adjacently, so
+          # taking the newest match and parsing only that one lets a single
+          # malformed or quoting commit SHADOW every valid record beneath it — the
+          # mechanism silently stops working from that commit onward. Walk the
+          # candidates newest-first and take the first that actually yields an
+          # adjacent pair.
           RECORDED_FROM=""
-          for c in $(git log --first-parent -E --all-match \
-              --grep="^upstream-commit: [0-9a-f]{40}\$" \
-              --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
-              --format='%H' HEAD); do
-            v=$(git show -s --format=%B "$c" | awk -v mode="$SYNC_MODE" '
-              /^upstream-commit: / {
-                if (NF == 2 && length($2) == 40 && $2 ~ /^[0-9a-f]+$/) sha = $2; else sha = "";
-                next
-              }
-              $0 == "upstream-sync-mode: " mode && sha != "" { last = sha }
+          REC=""
+          CAND_COMMITS=$(git log --first-parent -E --all-match \
+            --grep="^upstream-commit: [0-9a-f]{40}\$" \
+            --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
+            --format=%H 2>/dev/null || true)
+          for cand in $CAND_COMMITS; do
+            v=$(git show -s --format=%B "$cand" | awk -v mode="$SYNC_MODE" '
+              /^upstream-commit: [0-9a-f]{40}$/ { sha = $2; next }
+              $0 == "upstream-sync-mode: " mode && sha != "" { last = sha; sha = ""; next }
               { sha = "" }
-              END { if (last != "") print last }')
-            if [ -n "$v" ]; then RECORDED="$v"; RECORDED_FROM="$c"; break; fi
+              END { print last }')
+            if [ -n "$v" ]; then RECORDED_FROM="$cand"; REC="$v"; break; fi
           done
-
-          if [ -n "$RECORDED" ]; then
-            if git rev-parse -q --verify "${RECORDED}^{commit}" >/dev/null 2>&1; then
-              PREV=$(git rev-parse "${RECORDED}^{commit}")
-              PREV_SRC="upstream-commit: trailer ($SYNC_MODE mode) on $RECORDED_FROM"
-              # Not an ancestor => upstream rewrote history since we synced. The
-              # record is still what this branch was built from, so it is still
-              # the right graft; git computes the true common ancestor from it.
-              if ! git merge-base --is-ancestor "$PREV" "$SYNC_SHA"; then
-                echo "::warning::Recorded baseline $PREV is not an ancestor of sync target $SYNC_SHA — upstream history may have been rewritten. Grafting it anyway; it is what this branch was built from."
+          if [ -n "$RECORDED_FROM" ]; then
+            # Must be a full 40-hex object name we actually have: a short or
+            # symbolic value (`upstream-commit: HEAD`) would graft an arbitrary
+            # commit, which is worse than having no record.
+            if [ -n "$REC" ] && git rev-parse -q --verify "$REC^{commit}" >/dev/null 2>&1; then
+              if [ "$REC" = "$SYNC_SHA" ]; then
+                SELF_NAMED=true
+              elif git merge-base --is-ancestor "$REC" "$SYNC_SHA"; then
+                CANDS+=("$REC")
+                CDESC+=("the upstream-commit: record ($SYNC_MODE mode) on ${RECORDED_FROM:0:12}")
               fi
-              # The out-of-band squash detection earlier in this workflow advances
-              # the tracking tag when it finds upstream content already merged by
-              # hand, but it cannot append a trailer to history — so the tag can be
-              # legitimately AHEAD of the last recorded sync. Say so rather than
-              # silently grafting the older baseline: the cost is an inflated
-              # conflict count, which is exactly what the graft exists to avoid.
-              # We do NOT auto-prefer the tag: a forward retag also makes it a
-              # strict descendant of the record, and preferring it there is the
-              # silent under-merge this whole change removes. Loud beats silent.
-              if git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
-                TT=$(git rev-parse "$TRACKING_TAG^{commit}")
-                if [ "$TT" != "$PREV" ] && git merge-base --is-ancestor "$PREV" "$TT" \
-                   && git merge-base --is-ancestor "$TT" "$SYNC_SHA"; then
-                  echo "::warning::Tracking tag $TRACKING_TAG ($TT) is ahead of the recorded baseline $PREV. If an out-of-band merge brought $TT in, expect an inflated conflict count; re-run the graft by hand against $TT after verifying the branch really holds it. Not preferring it automatically — a moved release tag looks identical from here."
-                fi
-              fi
-            else
-              # Deliberately do NOT fall through to the tag guesses. A wrong graft
-              # under-merges in silence; no graft only inflates the conflict count,
-              # which is loud and a resolver can fix it by hand.
-              echo "::warning::Recorded baseline '$RECORDED' (from $RECORDED_FROM) does not resolve to a commit. Skipping the graft rather than guessing from a mutable tag — expect a large conflict count."
-              echo "grafted=false" >> "$GITHUB_OUTPUT"
-              exit 0
+            elif [ -n "$REC" ]; then
+              echo "::warning title=Unusable baseline record::Commit ${RECORDED_FROM:0:12} carries \`upstream-commit: $REC\`, which is not a commit this clone has. Ignoring it and falling back to the other candidates."
             fi
           fi
 
-          if [ -z "$PREV" ] && [ "$TRACKING_TAG" = "helio-last-synced" ]; then
+          if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
               for cand in "v$VER" "$VER"; do
                 if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
                   c=$(git rev-parse "refs/tags/$cand^{commit}")
+                  if [ "$c" = "$SYNC_SHA" ]; then SELF_NAMED=true; continue; fi
                   if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
-                    PREV="$c"; PREV_SRC="version.inc tag $cand (mutable — see above)"; break
+                    CANDS+=("$c"); CDESC+=("version.inc ($cand)")
+                    break
                   fi
                 fi
               done
             fi
           fi
-          if [ -z "$PREV" ] && git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
+          if git rev-parse -q --verify "$TRACKING_TAG^{commit}" >/dev/null 2>&1; then
             c=$(git rev-parse "$TRACKING_TAG^{commit}")
-            if git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
-              PREV="$c"; PREV_SRC="tracking tag $TRACKING_TAG (mutable — see above)"
+            if [ "$c" = "$SYNC_SHA" ]; then
+              SELF_NAMED=true
+            elif git merge-base --is-ancestor "$c" "$SYNC_SHA"; then
+              CANDS+=("$c"); CDESC+=("the tracking tag ($TRACKING_TAG)")
+            fi
+          fi
+
+          # Our records name the sync target itself. Use the target's FIRST
+          # PARENT: it says exactly what the record means — "our content is based
+          # on this release" — and being strictly older it cannot make the merge a
+          # no-op by construction. If we really hold the release the merge is
+          # clean and empty; if we do not, the delta arrives and the tree changes.
+          if [ "$SELF_NAMED" = "true" ]; then
+            p=$(git rev-parse -q --verify "$SYNC_SHA^1" 2>/dev/null || true)
+            if [ -n "$p" ]; then
+              CANDS+=("$p"); CDESC+=("the sync target's first parent")
+            fi
+          fi
+
+          if [ "${#CANDS[@]}" -gt 0 ]; then
+            # NEWEST-FIRST, BY ANCESTRY, WITH FALL-THROUGH. The insertion order
+            # above is record preference (version.inc, then the tag, then the
+            # target's first parent), which is not ancestry order — the
+            # self-named case appends the target's first parent LAST, after a
+            # possibly ancient tracking tag. Evaluating in that order let a
+            # stale tag's walk-down win over a strictly newer candidate that
+            # validates: records self-name v2.4.2, tag stale at v2.3.2, the tag
+            # is base-ok-with-unknowns, and the strict walk below it grafts
+            # v2.3.0 — so the expected-no-op verification merge conflicts on
+            # content already on the branch, re-opening the weekly treadmill of
+            # #110 for an already-merged release. A newer candidate that
+            # validates must always beat any walk-down below an older one, so
+            # sort first (insertion sort; incomparable or equal pairs keep the
+            # record-preference order) and only walk below a candidate after
+            # every newer one has failed.
+            for (( i=1; i<${#CANDS[@]}; i++ )); do
+              c="${CANDS[$i]}"; d="${CDESC[$i]}"; j=$((i-1))
+              while [ "$j" -ge 0 ] && [ "${CANDS[$j]}" != "$c" ] && \
+                    git merge-base --is-ancestor "${CANDS[$j]}" "$c"; do
+                CANDS[j+1]="${CANDS[$j]}"; CDESC[j+1]="${CDESC[$j]}"
+                j=$((j-1))
+              done
+              CANDS[j+1]="$c"; CDESC[j+1]="$d"
+            done
+
+            # 1. Nothing missing AND nothing undecidable. Take the newest such.
+            for idx in "${!CANDS[@]}"; do
+              c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+              if "$CONTENT" holds "$c"; then
+                PREV="$c"
+                echo "$d names $c and this tree holds its inherited content — using it as the merge base."
+                # Every candidate ordered ahead of this one is strictly newer
+                # and lost. Picking the right base is not the same as saying
+                # why: without this the only trace of a record that disagrees
+                # with the tree is a line naming some other commit, and a
+                # version.inc bumped ahead of its content stays wrong for ever
+                # because each run silently routes around it.
+                for (( k=0; k<idx; k++ )); do
+                  skipped_missing=$("$CONTENT" missing "${CANDS[$k]}" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                  if [ -n "$skipped_missing" ]; then
+                    echo "::warning title=Records do not match the tree::${CDESC[$k]} names \`${CANDS[$k]}\`, which is newer, but this tree does not hold that release's inherited content (never applied: $skipped_missing). Using \`$c\` instead — the newest candidate whose content is provably present. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
+                  else
+                    skipped_unknown=$("$CONTENT" unknown "${CANDS[$k]}" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                    echo "::notice title=Newer candidate passed over::${CDESC[$k]} names \`${CANDS[$k]}\`, which is newer, but whether this tree holds upstream's version of ${skipped_unknown:-some paths} cannot be decided from content. Using \`$c\` instead, which is provably held."
+                  fi
+                done
+                break
+              fi
+            done
+
+            # 2. Nothing DEFINITIVELY missing, but some paths cannot be decided
+            #    from content (Helio's edit overlaps upstream's in the same
+            #    region, so the three-way merge conflicts and proves nothing).
+            #
+            #    `base-ok` used to accept this outright, on the reasoning that
+            #    a wrong rejection only costs conflict volume. That reasoning
+            #    is right about REJECTING and wrong about ACCEPTING: an
+            #    undecidable path in the BASE is exactly the shape that drops
+            #    upstream work without a conflict. If the base already carries
+            #    upstream's value for that path and the sync target has not
+            #    moved it since, the merge sees theirs == base, keeps ours, and
+            #    nobody is told. Prefer an older base where the path is still
+            #    in motion, so the merge either applies upstream's change or
+            #    conflicts — either way it is visible.
+            if [ -z "$PREV" ]; then
+              for idx in "${!CANDS[@]}"; do
+                c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+                if "$CONTENT" base-ok "$c"; then
+                  undecided=$("$CONTENT" unknown "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                  clean=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
+                  if [ -n "$clean" ]; then
+                    PREV="$clean"
+                    echo "::notice title=Using an older merge base::$d names \`$c\`, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content. Using \`$clean\` instead — the newest release below it whose content is provably present — so those paths are still presented by the merge instead of being resolved in Helio's favour in silence. This costs conflict volume; grafting \`$c\` would cost upstream changes without saying so."
+                    break
+                  fi
+                  PREV="$c"
+                  echo "::warning title=Merge base accepted with undecidable paths::$d names \`$c\` and nothing is definitively missing, but ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps below it. Using it anyway, because leaving no graft conflicts against the pre-squash ancestor on every run — but if upstream changed those paths at or below \`$c\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
+                  break
+                fi
+              done
+            fi
+
+            # 3. Every candidate has content definitively missing. Walk down
+            #    below each in turn, and name the files, not just the verdict:
+            #    "the tree does not hold v2.4.2" is not actionable,
+            #    "src/mid.c was never applied" is.
+            #
+            #    The walk mirrors case 2's preference: a provably-held base
+            #    first, and only on failure the permissive one — which then by
+            #    construction carries undecidable paths, the shape that keeps
+            #    Helio's value without a conflict, so it gets the same warning
+            #    naming them that case 2 emits. The permissive walk alone used
+            #    to be silent about exactly that.
+            if [ -z "$PREV" ]; then
+              for idx in "${!CANDS[@]}"; do
+                c="${CANDS[$idx]}"; d="${CDESC[$idx]}"
+                rejected=$("$CONTENT" missing "$c" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" strict || true)
+                if [ -z "$held" ]; then
+                  held=$("$CONTENT" first-held "$("$CONTENT" base-below "$c" 1)" || true)
+                  if [ -n "$held" ]; then
+                    undecided=$("$CONTENT" unknown "$held" 2>/dev/null | head -5 | tr '\n' ' ' || true)
+                    echo "::warning title=Merge base accepted with undecidable paths::The fallback base \`$held\` has nothing definitively missing, but whether this tree holds upstream's version of ${undecided:-some paths} cannot be decided from content, and no provably-held base was found within $MAX_WALK steps. If upstream changed those paths at or below \`$held\`, this merge keeps Helio's value without raising a conflict. Check them by hand."
+                  fi
+                fi
+                if [ -n "$held" ]; then
+                  PREV="$held"
+                  echo "::warning title=Records do not match the tree::$d names \`$c\`, but this tree does not hold that release's inherited content (never applied: ${rejected:-see log}). Using \`$held\` instead — the newest commit whose content is actually present. Grafting \`$c\` would make git read the missing changes as deliberate reversions and drop them from this sync. Someone should reconcile version.inc / \`$TRACKING_TAG\` with what the branch contains."
+                  break
+                fi
+                echo "::warning title=Merge base candidate rejected::$d names \`$c\`, but this tree does not hold its content (never applied: ${rejected:-see log}) and no validated older base was found within $MAX_WALK steps."
+              done
             fi
           fi
 
@@ -373,7 +766,6 @@ jobs:
             echo "graft_commit=$TIP" >> "$GITHUB_OUTPUT"
             echo "prev_upstream=$PREV" >> "$GITHUB_OUTPUT"
             echo "Grafted $PREV onto $TIP — merge-base corrected to the last synced upstream commit."
-            echo "Baseline source: $PREV_SRC"
           else
             echo "grafted=false" >> "$GITHUB_OUTPUT"
             echo "No graft applied (no newer shared upstream ancestor found; using default merge-base)."
@@ -382,8 +774,9 @@ jobs:
       - name: Attempt merge
         if: steps.check.outputs.skip != 'true'
         id: merge
+        env:
+          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
         run: |
-          SYNC_REF="${{ steps.target.outputs.sync_ref }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -464,12 +857,71 @@ jobs:
         if: always() && steps.graft.outputs.grafted == 'true'
         run: git replace -d "${{ steps.graft.outputs.graft_commit }}" || true
 
+      # Last line of defence against proposing a sync that changes nothing (#110,
+      # which opened #107 re-proposing v2.4.2 three and a half hours after #96
+      # merged it).
+      #
+      # Every earlier guard reasons about ANCESTRY — is the target already an
+      # ancestor, does a trial merge apply cleanly — and ancestry is exactly what
+      # squash-merging this fork's sync PRs destroys. This one compares the
+      # merged TREE with the tree of the target branch tip. If they are equal the
+      # merge produced no change, whatever the history says, and there is nothing
+      # to open a PR about.
+      - name: Detect no-op merge
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        id: noop
+        env:
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
+        run: |
+          MERGED_TREE=$(git rev-parse 'HEAD^{tree}')
+          BASE_TREE=$(git rev-parse "${PRE_MERGE}^{tree}")
+
+          if [ "$MERGED_TREE" != "$BASE_TREE" ]; then
+            echo "noop=false" >> "$GITHUB_OUTPUT"
+            echo "Merge changed the tree — continuing."
+            exit 0
+          fi
+
+          echo "noop=true" >> "$GITHUB_OUTPUT"
+          echo "The merge of $SYNC_LABEL produced a tree identical to the target branch — its content is already incorporated. Not opening a PR."
+
+          # `noop=true` is already written above, deliberately: the four
+          # downstream steps gate on it, and they must skip whatever happens to
+          # the tag. The tag write itself is guarded too — under the Actions
+          # default `-e` an unguarded `git tag -f` failing here would fail the
+          # job for a run whose conclusion ("nothing to do") was already correct
+          # and already recorded.
+          git tag -f "$TRACKING_TAG" "$SYNC_SHA" || \
+            echo "::warning title=Tracking tag not updated::Could not write $TRACKING_TAG locally."
+          if git push origin "refs/tags/$TRACKING_TAG" --force; then
+            TAG_NOTE="Tracking tag \`$TRACKING_TAG\` advanced to \`$SYNC_SHA\`."
+          else
+            # `helio`, not `origin`: this text is read by a human in their own
+            # clone, where origin is upstream OrcaSlicer (CLAUDE.md → Git
+            # Workflow). The push above correctly uses origin because inside
+            # Actions origin is this fork.
+            TAG_NOTE=":warning: Could not update \`$TRACKING_TAG\` (push refused). Until a maintainer runs \`git push helio +$SYNC_SHA:refs/tags/$TRACKING_TAG\` (from a clone whose fork remote is \`helio\`), every run will redo this merge to reach the same conclusion."
+            echo "::warning title=Tracking tag not updated::Could not force-update $TRACKING_TAG to $SYNC_SHA."
+          fi
+
+          {
+            echo "### Upstream sync: nothing to do"
+            echo ""
+            echo "\`$SYNC_LABEL\` merges into the release branch with **no change to the tree**, so its content is already present — most likely merged by a squashed PR, which leaves no ancestry for the earlier checks to find."
+            echo ""
+            echo "$TAG_NOTE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Identify Helio-relevant upstream changes
         if: steps.check.outputs.skip != 'true'
         id: helio_changes
+        env:
+          LAST: ${{ steps.check.outputs.last_synced }}
+          LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
-          LAST="${{ steps.check.outputs.last_synced }}"
-          LATEST="${{ steps.target.outputs.sync_ref }}"
 
           # High-conflict-risk files from HELIO_INTEGRATION.md
           WATCHED_FILES=(
@@ -526,9 +978,10 @@ jobs:
       - name: Get upstream changelog
         if: steps.check.outputs.skip != 'true'
         id: changelog
+        env:
+          LAST: ${{ steps.check.outputs.last_synced }}
+          LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
-          LAST="${{ steps.check.outputs.last_synced }}"
-          LATEST="${{ steps.target.outputs.sync_ref }}"
 
           LOG=$(git log --oneline "$LAST".."$LATEST" -- | head -50)
           TOTAL=$(git rev-list --count "$LAST".."$LATEST")
@@ -546,9 +999,9 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'conflict'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.sync_branch.outputs.branch }}
         run: |
           git merge --abort
-          BRANCH="${{ steps.sync_branch.outputs.branch }}"
           LOCAL_TIP=$(git rev-parse HEAD)
           REMOTE_TIP=$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')
 
@@ -625,7 +1078,6 @@ jobs:
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
-          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
           GRAFTED: ${{ steps.graft.outputs.grafted }}
@@ -639,9 +1091,6 @@ jobs:
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
             const syncSha = process.env.SYNC_SHA;
-            // Mirrors the graft step: the record is scoped to the sync mode, so a
-            // tag sync's baseline is never read as a main sync's and vice versa.
-            const syncMode = process.env.TRACKING_TAG === 'helio-last-synced-main' ? 'main' : 'tag';
             const target = process.env.TARGET_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
             const grafted = process.env.GRAFTED === 'true';
@@ -743,16 +1192,7 @@ jobs:
               '### Resolution steps',
               ...checkoutBlock,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
-              // --force: a resolver's long-lived clone already holds these tags.
-              // Plain --tags refuses to move them ("would clobber existing tag")
-              // AND exits 1, aborting the instruction list under `set -e`.
-              '   git fetch upstream --tags --force',
-              // `main` mode syncs to an upstream/main commit that no tag reaches.
-              // The conflict path aborts the merge before pushing, so the sync
-              // branch carries no upstream objects either — without this the
-              // `git merge <sha>` below has nothing to merge. Mirrors the CI job,
-              // which fetches both; harmless in tag mode.
-              '   git fetch upstream main',
+              '   git fetch upstream --tags',
               '   ```',
               ...graftStep,
               '3. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
@@ -770,41 +1210,27 @@ jobs:
               '   BASE=$(git rev-parse HEAD^1)             # target-branch tip (first parent)',
               '   # (placeholders below are literal — do NOT paste the raw upstream tag into a',
               '   #  double-quoted -m; git refnames may contain $()/backticks that would run)',
-              '   # The trailers below are REQUIRED, not decorative: the next sync reads',
-              '   # them to set its merge-base graft. Without them that graft falls back to',
-              '   # re-deriving the baseline from version.inc, which resolves through a',
-              '   # MUTABLE tag — and if upstream retags a release after we sync it, the',
-              '   # re-derivation silently skips every change between the old and new tag.',
-              '   # Both must sit in ONE -m: git reads trailers only from the last',
-              '   # paragraph, and each -m starts a new one.',
-              '   # The SHA below is THIS run\'s target. If you resolved against an',
-              '   # earlier one (this issue is rewritten in place every run for the same',
-              '   # tag, and an in-flight PR is left alone), record the SHA you actually',
-              '   # merged — a record naming a NEWER commit than the tree holds is the',
-              '   # silent under-merge this whole mechanism exists to prevent.',
-              `   TRAILERS=$(printf 'upstream-commit: %s\\nupstream-sync-mode: %s' "${syncSha}" "${syncMode}")`,
-              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" \\',
-              '     -m "Upstream sync: <tag> into <target-branch> (squashed)" \\',
-              '     -m "$TRAILERS")',
+              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" -m "Upstream sync: <tag> into <target-branch> (squashed)")',
               '   git reset --hard "$NEW"                  # branch now has exactly one commit',
               `   git push origin ${branch} --force-with-lease`,
               '   ```',
               '5. Open a PR and squash-merge it into the release branch (a squash keeps',
               '   the "verified signatures" rule satisfied). Do NOT push unsigned',
               '   upstream commits to a protected branch.',
-              '   Put the same two lines at the END of the PR description too, contiguous',
-              '   and with no prose after them:',
-              '   ```text',
-              `   upstream-commit: ${syncSha}`,
-              `   upstream-sync-mode: ${syncMode}`,
+              '',
+              '   **Paste this line into the PR description**, on its own line:',
+              '',
               '   ```',
-              '   Which copy GitHub puts in the squash-merge message depends on the repo\'s',
-              '   squash-message setting — "PR title and commit details" takes the commit,',
-              '   "PR title and description" takes the body — so carrying both covers either.',
-              '   Then leave them in the commit message when you merge: deleting them from',
-              '   the edit box is the one way this record gets lost, and the release-branch',
-              '   commit is the only copy that cannot be rewritten later (this issue\'s body',
-              '   is overwritten by the next run for the same tag).',
+              `   <!-- helio-sync-target: ${syncSha} -->`,
+              '   ```',
+              '',
+              '   It is how later runs know this sync finished. Without it they fall back',
+              '   to matching the branch name, and if that fails too, **this sync will be',
+              '   re-proposed every Monday for ever** — the merge will re-conflict and this',
+              '   issue will be refreshed, asking someone to redo the work you just did.',
+              '   The reason no automatic check can replace it: resolving a conflict means',
+              '   deliberately not taking some of upstream\'s content, so afterwards the',
+              '   tree is indistinguishable from one that never received the sync at all.',
               '',
               'See `HELIO_INTEGRATION.md` for detailed conflict resolution rules.',
             ].join('\n');
@@ -896,7 +1322,7 @@ jobs:
       # only parent is our target branch tip — no upstream parents, no external
       # commit authors. The PR is squash-merged anyway, so nothing is lost.
       - name: Squash clean merge into a single commit
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         # Pass tag-derived values through env vars, never interpolated directly into
         # the run: body — git ref names can contain shell metacharacters (`, $, (, ))
         # that GitHub template expansion does not escape (template-injection).
@@ -910,31 +1336,44 @@ jobs:
         run: |
           BASE="$PRE_MERGE"                   # target-branch tip recorded before the merge
           TREE=$(git rev-parse "HEAD^{tree}") # resolved merge (or fast-forwarded) tree
-          # Both trailers must land in ONE -m: git parses trailers only from the
-          # last paragraph, and each -m starts a new one. Built with printf so the
-          # newline does not depend on YAML block indentation.
+          # The baseline record. Both lines go in ONE -m so they land in the same
+          # paragraph and stay adjacent — the reader in the graft step requires
+          # adjacency so a quoted record cannot be spliced onto a later one. It is
+          # also the LAST -m so the pair terminates the message, which is what
+          # makes "the last pair wins" mean "this commit's own record".
           SYNC_MODE=tag
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
-          TRAILERS=$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
             -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
             -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
-            -m "$TRAILERS")
+            -m "$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")")
           git reset --hard "$NEW"
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
 
       - name: Push clean merge branch
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
+        # Through `env`, not `${{ }}` inline. The branch name is derived from
+        # LATEST_TAG — an UPSTREAM-controlled ref name — and GitHub expands
+        # expressions before bash parses the line, so a crafted upstream tag
+        # containing shell metacharacters would execute here. An env var is
+        # substituted by the shell after parsing, so it cannot.
+        env:
+          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
         run: |
           # force-with-lease so retries (same branch name) overwrite the previous attempt
-          git push origin "${{ steps.sync_branch.outputs.branch }}" --force-with-lease
+          git push origin "$SYNC_BRANCH" --force-with-lease
 
       - name: Trigger build check
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         id: build
         continue-on-error: true
         uses: actions/github-script@v7
+        # Same reason as the push step above: interpolating the branch name into
+        # the script body makes an upstream-controlled string part of the
+        # JavaScript source, where a quote would end the literal.
+        env:
+          SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
         with:
           script: |
             // Trigger full build_all workflow (all platforms) on the sync branch
@@ -942,18 +1381,17 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'build_all.yml',
-              ref: '${{ steps.sync_branch.outputs.branch }}'
+              ref: process.env.SYNC_BRANCH
             });
 
       - name: Create pull request
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean'
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
         id: pr
         uses: actions/github-script@v7
         env:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
           SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
-          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
           HELIO_REPORT: ${{ steps.helio_changes.outputs.report }}
@@ -964,7 +1402,6 @@ jobs:
             const syncLabel = process.env.SYNC_LABEL;
             const syncRef = process.env.SYNC_REF;
             const syncSha = process.env.SYNC_SHA;
-            const syncMode = process.env.TRACKING_TAG === 'helio-last-synced-main' ? 'main' : 'tag';
             const target = process.env.TARGET_BRANCH;
             const branch = process.env.SYNC_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
@@ -1000,10 +1437,6 @@ jobs:
               }
             }
 
-            // The two-line baseline record. Shared between the new-PR body and
-            // the existing-PR refresh so the two can never drift apart.
-            const recordBlock = `upstream-commit: ${syncSha}\nupstream-sync-mode: ${syncMode}`;
-
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
@@ -1029,16 +1462,20 @@ jobs:
               '---',
               '*Auto-generated by helio-upstream-sync workflow*',
               '',
-              // Repeat the baseline record here, LAST and contiguous. The commit
-              // already carries it, but which of the two GitHub copies into the
-              // squash message depends on the repo's squash-message setting:
-              // "PR title and commit details" takes the commit, "PR title and
-              // description" takes this body. Emitting both covers either. ("PR
-              // title only" drops the record entirely — see HELIO_INTEGRATION.md.)
-              // Must stay the last thing in the body, with no trailing prose —
-              // the existing-PR refresh below finds it by looking at the last two
-              // non-blank lines.
-              recordBlock,
+              // Machine-readable completion marker, read by
+              // scripts/helio/sync_completion.sh on later runs to answer "did
+              // this sync already land?" for syncs that CONFLICTED — where the
+              // content test cannot answer, because resolving a conflict means
+              // deliberately not taking some of upstream's content.
+              //
+              // It names the COMMIT, not the tag, on purpose: if upstream
+              // force-retags this release the sha changes, the marker stops
+              // matching, and the sync is re-proposed instead of being skipped
+              // against content nobody ever merged.
+              //
+              // Do not remove or reword this line. Editing the PR body by hand
+              // is fine as long as it survives.
+              `<!-- helio-sync-target: ${syncSha} -->`,
             ].join('\n');
 
             try {
@@ -1085,55 +1522,6 @@ jobs:
                     const existingPr = prs[0];
                     core.setOutput('url', existingPr.html_url);
                     console.log(`Found existing PR #${existingPr.number}: ${existingPr.html_url}`);
-                    // Refresh the trailing record. This run force-pushed a commit
-                    // carrying the CURRENT syncSha (the tag may have moved since
-                    // the PR was opened), but the PR body still names the old one.
-                    // Under the "PR title and description" squash setting that
-                    // stale copy is what lands, recording a baseline that does not
-                    // describe the merged tree — the exact failure the record
-                    // exists to prevent. Only the trailing block is replaced, so
-                    // any human edits to the rest of the description survive.
-                    try {
-                      const stripTrailingRecord = (b) => {
-                        const lines = (b || '').split('\n').map(l => l.replace(/\r$/, ''));
-                        while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-                        if (lines.length >= 2
-                            && /^upstream-sync-mode: (?:tag|main)$/.test(lines[lines.length - 1])
-                            && /^upstream-commit: [0-9a-f]{40}$/.test(lines[lines.length - 2])) {
-                          lines.splice(-2, 2);
-                        }
-                        while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-                        return lines.join('\n');
-                      };
-                      const refreshed = `${stripTrailingRecord(existingPr.body)}\n\n${recordBlock}`;
-                      if (refreshed !== existingPr.body) {
-                        await github.rest.pulls.update({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          pull_number: existingPr.number,
-                          body: refreshed
-                        });
-                        console.log(`Refreshed baseline record on PR #${existingPr.number} to ${syncSha} (${syncMode})`);
-                      }
-                    } catch (bodyErr) {
-                      // FAIL, do not warn. The branch now carries a commit
-                      // recording the current syncSha while this PR's description
-                      // still records the previous one. Left as a log warning the
-                      // run stays green, the PR stays mergeable, and merging it
-                      // under the "PR title and description" squash setting
-                      // persists a baseline that does not describe the merged
-                      // tree — the silent wrong-baseline failure this whole change
-                      // exists to remove, reached through its own repair path.
-                      // A red run is the loud signal; the next scheduled run
-                      // retries this same path, so a transient API error
-                      // self-heals rather than needing intervention.
-                      core.setFailed(
-                        `Could not refresh the baseline record on PR #${existingPr.number}: ${bodyErr.message}. ` +
-                        `Its description still names a stale upstream-commit while ${branch} carries ${syncSha}. ` +
-                        `Do NOT squash-merge that PR until its trailing record reads "upstream-commit: ${syncSha}" / ` +
-                        `"upstream-sync-mode: ${syncMode}" — fix it by hand, or re-run this workflow to retry.`
-                      );
-                    }
                     try {
                       await github.rest.issues.addLabels({
                         owner: context.repo.owner,
@@ -1145,41 +1533,45 @@ jobs:
                       console.warn(`Warning: failed to add claude-work label to existing PR #${existingPr.number}:`, labelErr);
                     }
                   } else {
-                    // `pulls.create` just told us a PR exists for this head, so an
-                    // empty list means we cannot see the PR whose body needs the
-                    // refreshed record. Same end state as a failed refresh: branch
-                    // carries the new SHA, some PR carries the old one, and under
-                    // the "PR title and description" squash setting that stale
-                    // copy is what merges. Fail rather than let the run go green.
-                    core.setFailed(
-                      `PR creation reported an existing PR for ${branch} → ${target}, but no open PR was found to refresh. ` +
-                      `${branch} carries ${syncSha}; any open PR for it may still record an older upstream-commit. ` +
-                      `Check it before squash-merging, or re-run this workflow.`
-                    );
+                    console.log(`Could not find existing open PR for ${branch} → ${target}`);
                   }
                 } catch (listErr) {
-                  // Also fatal, for the same reason: without the listing we cannot
-                  // confirm the PR body records ${syncSha}, and staying green lets
-                  // the tracking tag advance over an unverified record.
-                  core.setFailed(
-                    `Failed to list PRs for ${branch} while refreshing the baseline record: ${listErr.message}. ` +
-                    `${branch} carries ${syncSha}; the open PR for it may still record an older upstream-commit. ` +
-                    `Check it before squash-merging, or re-run this workflow.`
-                  );
+                  console.warn(`Warning: failed to list PRs for ${branch}:`, listErr);
                 }
               } else {
                 throw err;
               }
             }
 
-      - name: Update tracking tag
-        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.build.outcome == 'success'
+      - name: Note pending sync
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.status == 'clean' && steps.noop.outputs.noop != 'true'
+        env:
+          SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
+          SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
+          TARGET_BRANCH: ${{ steps.branch.outputs.target }}
         run: |
-          SYNC_SHA="${{ steps.target.outputs.sync_sha }}"
-          TRACKING_TAG="${{ steps.target.outputs.tracking_tag }}"
 
-          # Move the tracking tag to the upstream target commit that was synced.
-          # Note: build_all is fire-and-forget (dispatch only), so we track the
-          # upstream commit. Build failures will show up on the PR via status checks.
-          git tag -f "$TRACKING_TAG" "$SYNC_SHA"
-          git push origin "$TRACKING_TAG" --force
+          # The tracking tag is deliberately NOT advanced here.
+          #
+          # It used to be, as soon as the sync PR was created. That made the tag a
+          # record of "a PR was opened", not of "this branch holds that content" —
+          # and the rest of the workflow reads it as the latter. Two silent drops
+          # followed from the gap. If the PR was closed unmerged, the early exit in
+          # `check` ("tracking tag equals the target") skipped that release for
+          # good. And while the PR merely sat open, the tag named content the
+          # branch did not have, so the next release grafted it as the merge base
+          # and git read the unmerged content as deliberate reversions.
+          #
+          # The tag now only ever moves on evidence that the content is ON the
+          # target branch: the ancestor hit, the no-diff trial merge, or the
+          # merged-tree comparison in `noop`. After this PR is merged, the next
+          # run takes one of those paths and advances it then. Until then the run
+          # redoes the merge each week and refreshes the same PR, which is the
+          # honest description of the state: not synced yet.
+          {
+            echo "### Sync PR open, tracking tag unchanged"
+            echo
+            echo "\`$TRACKING_TAG\` still points at the last commit whose content is on \`$TARGET_BRANCH\`."
+            echo "It advances to \`$SYNC_SHA\` (\`$SYNC_LABEL\`) on the first run after this PR merges."
+          } >> "$GITHUB_STEP_SUMMARY"

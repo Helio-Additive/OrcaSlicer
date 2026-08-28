@@ -180,6 +180,16 @@ workflows:
     requires_vars: [HELIO_RELEASE_BRANCH]
     reason: Helio's upstream sync automation. See CLAUDE.md.
 
+  helio-sync-guard-tests.yml:
+    status: run
+    owner: helio
+    reason: >-
+      Runs scripts/helio/test_sync_noop_guards.py, which extracts the real
+      `check` and `graft` step bodies out of helio-upstream-sync.yml and runs
+      them against synthetic repositories. Kept as its own Helio-owned workflow
+      rather than a job inside upstream's shellcheck.yml, so it is not a new
+      conflict site on every sync. No secrets or vars.
+
   helio-upstream-watch.yml:
     status: run
     owner: helio
