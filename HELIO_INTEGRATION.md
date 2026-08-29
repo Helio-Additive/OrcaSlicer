@@ -933,7 +933,8 @@ workflow ephemerally grafts the upstream commit our content is based on onto the
 branch tip. For tag-release syncs that commit is derived from `version.inc` (it
 names the synced release) provided it is a **strict** ancestor of the sync target —
 see the rules below for why that qualifier matters; for `main` syncs it comes from
-the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
+the `upstream-commit:` record on the previous sync commit, falling back to the
+`helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
 ```bash
@@ -981,7 +982,74 @@ work**, with every later run reaching the same wrong conclusion. That failure is
 invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
 baseline and sets an expectation, and the merged-tree comparison decides.
 
-Three rules keep that true, and all of them are load-bearing:
+### The `upstream-commit:` baseline record
+
+The squash step writes two lines as the **final paragraph** of every sync commit:
+
+```text
+upstream-commit: <40-hex upstream sha>
+upstream-sync-mode: tag|main
+```
+
+**Why it exists, given `version.inc` and the tracking tag.** It is for `main` mode.
+There `version.inc` is deliberately excluded — it names a *release*, and a `main`
+sync is ahead of it — so the only other candidate is `helio-last-synced-main`, a tag
+that is mutable and, **with the workflow's current `GITHUB_TOKEN`, cannot be
+written**: pushing it makes upstream's `.github/workflows/**` reachable, and a
+GitHub App token may not introduce workflow content without the `workflows`
+permission — which a workflow's `permissions:` block cannot grant. That is a
+property of the credential, not of the repository: a PAT with `workflows` scope
+could write it, at the cost of a long-lived credential able to rewrite workflow
+files. See "Why the push is refused" below for the full diagnosis and the three
+options, none of which has been chosen. So as things stand a `main` sync has no
+durable baseline. A trailer on the commit is immutable, travels with the branch,
+and needs no permission beyond committing.
+
+It only **adds a candidate**. It is content-validated alongside every other one, so
+a record that disagrees with the tree loses to one that matches it.
+
+Four properties are load-bearing; changing any of them breaks it silently:
+
+- **The two lines must be adjacent**, and the mode must match. That is what stops a
+  message quoting an older record from being spliced onto a newer one.
+- **The last such pair in a message wins** — a commit's own record is written below
+  anything it quotes.
+- **Read the full message, not `%(trailers:…)`.** Git parses trailers only from the
+  last paragraph, and GitHub appends `Co-authored-by:` in a paragraph of its own
+  when it squash-merges a PR with more than one commit author, which drops the
+  record.
+- **`git log --grep` is a candidate filter, not the answer.** It matches when both
+  patterns appear anywhere, including non-adjacently, so parsing only the newest
+  match lets one malformed commit **shadow every valid record beneath it**. Walk
+  candidates newest-first and take the first that yields an adjacent pair.
+- **The repository's squash-merge message setting must stay "PR title and commit
+  details."** The record lives in the sync commit's message, and only that setting
+  copies commit messages into the squash commit. Under *PR title and description*
+  the squash body comes from the PR description instead, and under *PR title only*
+  there is no body at all — under either, the record is dropped at merge and every
+  later sync silently falls back to `version.inc` or the tracking tag. Nothing in
+  this repository can detect that; it is a toggle in **Settings → General → Pull
+  Requests** that any admin can flip.
+
+  It is currently correct, established from merged commits rather than from the
+  settings page: `3c3dec5e` (#113, a multi-commit branch) carries GitHub's
+  `*`-bulleted concatenation of that branch's commit messages, and `ce472ef4`
+  (#96, a single-commit branch) carries its commit message verbatim. Both are
+  `COMMIT_MESSAGES` behaviour — under *PR title and description* the first would
+  have opened with that PR's `# Description` template instead. **If you ever need
+  to re-check this, that is how**: look at the shape of a recent squash commit's
+  body, not at anything in the tree.
+
+  This is also why the record is not additionally copied into the generated PR
+  body. A second copy would survive a setting change, but it can drift from the
+  first — this PR shipped exactly that bug once (`7e0d05bf`, a reused PR whose
+  body kept the previous SHA). One record plus this note beats two records that
+  can disagree.
+
+When resolving a sync by hand, carry the record into your commit — the same two
+lines, adjacent, as the final paragraph, naming **the commit you actually merged**.
+
+Three further rules keep the baseline honest, and all of them are load-bearing:
 
 1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
    a clean no-diff trial merge, the tree-level content test, a merged resolution
