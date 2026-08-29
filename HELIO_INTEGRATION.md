@@ -690,6 +690,29 @@ Four properties are load-bearing; changing any of them breaks it silently:
   patterns appear anywhere, including non-adjacently, so parsing only the newest
   match lets one malformed commit **shadow every valid record beneath it**. Walk
   candidates newest-first and take the first that yields an adjacent pair.
+- **The repository's squash-merge message setting must stay "PR title and commit
+  details."** The record lives in the sync commit's message, and only that setting
+  copies commit messages into the squash commit. Under *PR title and description*
+  the squash body comes from the PR description instead, and under *PR title only*
+  there is no body at all — under either, the record is dropped at merge and every
+  later sync silently falls back to `version.inc` or the tracking tag. Nothing in
+  this repository can detect that; it is a toggle in **Settings → General → Pull
+  Requests** that any admin can flip.
+
+  It is currently correct, established from merged commits rather than from the
+  settings page: `3c3dec5e` (#113, a multi-commit branch) carries GitHub's
+  `*`-bulleted concatenation of that branch's commit messages, and `ce472ef4`
+  (#96, a single-commit branch) carries its commit message verbatim. Both are
+  `COMMIT_MESSAGES` behaviour — under *PR title and description* the first would
+  have opened with that PR's `# Description` template instead. **If you ever need
+  to re-check this, that is how**: look at the shape of a recent squash commit's
+  body, not at anything in the tree.
+
+  This is also why the record is not additionally copied into the generated PR
+  body. A second copy would survive a setting change, but it can drift from the
+  first — this PR shipped exactly that bug once (`7e0d05bf`, a reused PR whose
+  body kept the previous SHA). One record plus this note beats two records that
+  can disagree.
 
 When resolving a sync by hand, carry the record into your commit — the same two
 lines, adjacent, as the final paragraph, naming **the commit you actually merged**.
