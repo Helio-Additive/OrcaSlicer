@@ -201,14 +201,76 @@ def validate(channel, version, branch, latest_stable):
                 % (version, latest_stable, newest[0], newest[1], newest[2] + 1))
 
 
+def validate_tag(tag, channel, version):
+    """Check the tag that will actually be published.
+
+    Validating the *version* is not enough, because the tag is what the update
+    check reads: `consider_release()` strips the prefix and derives the offered
+    version from what is left, never from the binary's own `SoftFever_VERSION`.
+    A tag can therefore misrepresent the build it points at, and every path that
+    builds one — the plain form, a collision suffix, a manual override — is a
+    chance to do so. This is the single place all of them are checked, rather
+    than each being trusted to be careful.
+
+    Two ways it has gone wrong, both caught here:
+      * a collision suffix appended as `-<sha>` produces `2.4.3-exp01-<sha>`,
+        which the deployed matcher rejects outright (a second `-` component), and
+        `2.4.2-<sha>` on the stable channel, which parses but sorts *below* the
+        2.4.2 it re-cuts — so the rebuild is offered to nobody either way;
+      * an override naming a different version (`helio-exp-v9.9.9`) makes a
+        2.4.3-exp01 binary advertise itself as 9.9.9, so it is re-offered for
+        ever and no later stable release supersedes it.
+
+    Build metadata (`+<sha>`) is the one accepted decoration: the deployed
+    matcher takes it, and semver gives it equal precedence, which is the right
+    meaning for re-cutting a version that already shipped.
+    """
+    prefix = CHANNELS[channel][0]
+    if not tag.startswith(prefix):
+        die("tag %r does not start with %r, the prefix for the %s channel.\n"
+            "The update check reads the channel from the tag, so this tag would "
+            "misrepresent the build." % (tag, prefix, channel))
+
+    rest = tag[len(prefix):]
+    if not DEPLOYED_MATCHER.fullmatch(rest):
+        die("tag %r leaves %r after its prefix, which the update check compiled "
+            "into released builds cannot parse (see DEPLOYED_MATCHER).\n"
+            "Those builds skip the release in silence — it would be published "
+            "and offered to nobody." % (tag, rest))
+
+    # Ignoring build metadata, the tag must name the version that was validated
+    # and compiled.
+    named = rest.split("+", 1)[0]
+    if named != version:
+        die("tag %r names version %r, but the tree being published is %r.\n"
+            "The update check takes the offered version from the tag rather than "
+            "from the binary, so users would be offered this build under a "
+            "version it is not, and ordering against later releases would be "
+            "decided by that wrong number." % (tag, named, version))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--header", required=True, help="path to HelioChannel.hpp")
-    ap.add_argument("--version", required=True, help="version from version.inc")
-    ap.add_argument("--branch", required=True, help="branch the release is cut from")
-    ap.add_argument("--latest-stable", default="",
-                    help="newest published stable version; ordering is unchecked when empty")
+    sub = ap.add_subparsers(dest="mode", required=True)
+
+    check = sub.add_parser("check", help="derive and validate the release channel")
+    check.add_argument("--header", required=True, help="path to HelioChannel.hpp")
+    check.add_argument("--version", required=True, help="version from version.inc")
+    check.add_argument("--branch", required=True, help="branch the release is cut from")
+    check.add_argument("--latest-stable", default="",
+                       help="newest published stable version; ordering is unchecked when empty")
+
+    tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
+    tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
+    tagp.add_argument("--channel", required=True, choices=sorted(CHANNELS))
+    tagp.add_argument("--version", required=True, help="version from version.inc")
+
     args = ap.parse_args(argv)
+
+    if args.mode == "check-tag":
+        validate_tag(args.tag, args.channel, args.version)
+        print("tag %r is readable by released builds and names %s" % (args.tag, args.version))
+        return 0
 
     channel = read_channel(args.header)
     validate(channel, args.version, args.branch, args.latest_stable)

@@ -16,6 +16,7 @@ in the pipeline would notice.
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,8 +62,15 @@ def write_header(tmp, flag, name):
 
 def run_channel(header, version, branch, latest_stable=""):
     return subprocess.run(
-        [sys.executable, SCRIPT, "--header", header, "--version", version,
+        [sys.executable, SCRIPT, "check", "--header", header, "--version", version,
          "--branch", branch, "--latest-stable", latest_stable],
+        capture_output=True, text=True)
+
+
+def run_check_tag(tag, channel, version):
+    return subprocess.run(
+        [sys.executable, SCRIPT, "check-tag", "--tag", tag,
+         "--channel", channel, "--version", version],
         capture_output=True, text=True)
 
 
@@ -201,6 +209,38 @@ def main():
         p = run_channel(stable, "2.4.3", "orca-latest-parity-bambu", "2.4.2")
         check("stable supersedes its own prerelease", p.returncode == 0, p.stderr)
 
+        # --- the published tag itself ------------------------------------------
+        # Found by Codex on #130. Validating the version is not enough: the
+        # update check derives the offered version from the TAG, never from the
+        # binary, so every path that builds one can misrepresent the build.
+        ok = run_check_tag("helio-exp-v2.4.3-exp01", "experimental", "2.4.3-exp01")
+        check("tag check: plain experimental", ok.returncode == 0, ok.stderr)
+        ok = run_check_tag("helio-v2.4.2", "stable", "2.4.2")
+        check("tag check: plain stable", ok.returncode == 0, ok.stderr)
+
+        # `-<sha>` collisions: rejected outright on experimental (a second `-`
+        # component), and on stable they parse but sort BELOW the release being
+        # re-cut, so neither reaches a user.
+        bad = run_check_tag("helio-exp-v2.4.3-exp01-0123456", "experimental", "2.4.3-exp01")
+        check("tag check: -sha collision rejected (exp)", bad.returncode != 0, bad.stdout)
+        bad = run_check_tag("helio-v2.4.2-0123456", "stable", "2.4.2")
+        check("tag check: -sha collision rejected (stable)", bad.returncode != 0, bad.stdout)
+
+        # `+<sha>` build metadata is the accepted form: parseable, equal precedence.
+        ok = run_check_tag("helio-exp-v2.4.3-exp01+0123456", "experimental", "2.4.3-exp01")
+        check("tag check: +sha collision accepted", ok.returncode == 0, ok.stderr)
+        ok = run_check_tag("helio-v2.4.2+0123456", "stable", "2.4.2")
+        check("tag check: +sha accepted (stable)", ok.returncode == 0, ok.stderr)
+
+        # An override naming another version: right prefix, wrong build. Users
+        # would be offered a 2.4.3-exp01 binary as 9.9.9, for ever.
+        bad = run_check_tag("helio-exp-v9.9.9", "experimental", "2.4.3-exp01")
+        check("tag check: override renaming version rejected", bad.returncode != 0, bad.stdout)
+        check("  ... and says the tag decides", "from the tag" in bad.stderr, bad.stderr)
+
+        bad = run_check_tag("helio-v2.4.2", "experimental", "2.4.3-exp01")
+        check("tag check: wrong channel prefix rejected", bad.returncode != 0, bad.stdout)
+
         # --- the real tag step -------------------------------------------------
         # An override that changes the channel prefix would bypass the
         # channel/branch cross-check entirely: the assets and prerelease flag
@@ -210,8 +250,12 @@ def main():
         for label, prefix, version, override, want in (
             ("tag: stable", "helio-v", "2.4.2", "", "helio-v2.4.2"),
             ("tag: experimental", "helio-exp-v", "2.4.3-exp01", "", "helio-exp-v2.4.3-exp01"),
-            ("tag: override kept when in-channel", "helio-exp-v", "2.4.3-exp01",
-             "helio-exp-v2.4.3-exp01-hotfix", "helio-exp-v2.4.3-exp01-hotfix"),
+            ("tag: override with build metadata kept", "helio-exp-v", "2.4.3-exp01",
+             "helio-exp-v2.4.3-exp01+rebuild1", "helio-exp-v2.4.3-exp01+rebuild1"),
+            ("tag: override with -suffix rejected", "helio-exp-v", "2.4.3-exp01",
+             "helio-exp-v2.4.3-exp01-hotfix", None),
+            ("tag: override renaming the version rejected", "helio-exp-v", "2.4.3-exp01",
+             "helio-exp-v9.9.9", None),
             ("tag: cross-channel override rejected", "helio-exp-v", "2.4.3-exp01",
              "helio-v2.4.3", None),
             ("tag: experimental override on stable rejected", "helio-v", "2.4.2",
@@ -224,8 +268,11 @@ def main():
             # Run in a git repo with no remote: `git ls-remote` then fails, which
             # is the no-collision path.
             repo = os.path.join(tmp, "repo")
-            os.makedirs(repo, exist_ok=True)
+            os.makedirs(os.path.join(repo, "scripts", "helio"), exist_ok=True)
             subprocess.run(["git", "init", "-q", repo], check=True)
+            # The step calls `check-tag` on the tag it just built; copy the real
+            # script in rather than stubbing it, so the backstop is exercised.
+            shutil.copy2(SCRIPT, os.path.join(repo, "scripts", "helio", "version_channel.py"))
             r = subprocess.run(["bash", "-c", tag_step], cwd=repo, env=env,
                                capture_output=True, text=True)
             got = open(env["GITHUB_OUTPUT"]).read().strip()

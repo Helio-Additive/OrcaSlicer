@@ -87,7 +87,7 @@ jobs:
             orca-latest-parity-bambu|helio-experimental) ;;
             *) echo "Branch '$BRANCH' is not a release branch — channel check not applicable."; exit 0 ;;
           esac
-          python3 scripts/helio/version_channel.py \
+          python3 scripts/helio/version_channel.py check \
             --header src/libslic3r/HelioChannel.hpp \
             --version "$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)" \
             --branch "$BRANCH"

@@ -1010,6 +1010,23 @@ The zero-padding is the other half: prerelease identifiers that are not purely
 numeric compare as strings. Both facts were verified against the shipped matcher
 and against `deps_src/semver`, the library the app actually links.
 
+**The same constraint governs the tag, not just the version** — and that is the
+easier half to forget, because `consider_release()` takes the offered version
+from the **tag**, never from the binary's own `SoftFever_VERSION`. A tag can
+therefore misrepresent the build it points at, so `version_channel.py check-tag`
+validates the final tag on every path that can produce one:
+
+| tag | why it fails |
+|-|-|
+| `helio-exp-v2.4.3-exp01-<sha>` | a second `-` component; the deployed matcher rejects it and the rebuild reaches nobody |
+| `helio-v2.4.2-<sha>` | parses, but sorts *below* the 2.4.2 it re-cuts, so it is offered to nobody |
+| `helio-exp-v9.9.9` | right prefix, wrong version: a 2.4.3-exp01 binary would advertise itself as 9.9.9 for ever, and no later stable release would supersede it |
+
+So a collision is disambiguated with semver **build metadata** (`+<sha>`), which
+the matcher accepts and which has equal precedence — the right meaning for
+re-cutting a version that already shipped. A `tag_override` must likewise be the
+computed tag, optionally with build metadata.
+
 `scripts/helio/version_channel.py` enforces all of this at release time and
 refuses to publish otherwise; `scripts/helio/test_release_channel.py` pins the
 rules, including the silent case, and runs in `helio-sync-guard-tests.yml`.

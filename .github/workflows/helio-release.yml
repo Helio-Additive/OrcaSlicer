@@ -87,7 +87,7 @@ jobs:
             | sort -V \
             | tail -n1 || true)
           echo "Newest published stable release: ${latest_stable:-<none>}"
-          python3 scripts/helio/version_channel.py \
+          python3 scripts/helio/version_channel.py check \
             --header src/libslic3r/HelioChannel.hpp \
             --version "$VERSION" \
             --branch "$BRANCH" \
@@ -111,19 +111,25 @@ jobs:
               echo "Error: tag_override is not a valid Git tag name" >&2
               exit 1
             fi
-            # An override may customise the tag, but it may not change which
-            # channel the tag says the build belongs to. Without this, the
-            # channel/branch cross-check in the previous step is bypassed by a
-            # free-text input: an experimental binary could be published under a
-            # stable-looking `helio-v…` tag while its assets and prerelease flag
-            # still followed the real channel. The update check reads the tag
-            # prefix, so that tag is what users would be judging.
+            # An override may decorate the tag, but it may not change the channel
+            # or the version the tag claims — the update check derives both from
+            # the tag, never from the binary. So it must be the computed tag,
+            # optionally with `+<build metadata>`, which the deployed matcher
+            # accepts and semver gives equal precedence.
+            #
+            # A bare prefix check is not enough: `helio-exp-v9.9.9` carries the
+            # right prefix while making a 2.4.3-exp01 build advertise itself as
+            # 9.9.9, so it is re-offered for ever and no later stable release
+            # supersedes it. `check-tag` below is the backstop for all of this;
+            # this is the early, specific message.
             case "$TAG_OVERRIDE" in
-              "$TAG_PREFIX"*) ;;
+              "${TAG_PREFIX}${VERSION}"|"${TAG_PREFIX}${VERSION}+"*) ;;
               *)
-                echo "Error: tag_override '$TAG_OVERRIDE' does not start with '$TAG_PREFIX'." >&2
-                echo "This tree is a $CHANNEL build, and $CHANNEL releases are tagged '$TAG_PREFIX…'." >&2
-                echo "Publishing it under another channel's prefix would misrepresent the build." >&2
+                echo "Error: tag_override '$TAG_OVERRIDE' is not a tag for this build." >&2
+                echo "This tree is a $CHANNEL build of $VERSION, so the tag must be" >&2
+                echo "'${TAG_PREFIX}${VERSION}', optionally followed by '+<build metadata>'." >&2
+                echo "The update check takes the channel and the offered version from the" >&2
+                echo "tag, so any other tag misrepresents what users would be installing." >&2
                 exit 1
                 ;;
             esac
@@ -131,10 +137,32 @@ jobs:
           else
             tag="${TAG_PREFIX}${VERSION}"
           fi
-          # If tag already exists, append short SHA to avoid collision
+          # If the tag already exists, disambiguate with the short SHA as semver
+          # BUILD METADATA (`+sha`), not as a further `-sha` component.
+          #
+          # `-sha` is what this did before, and it is wrong in both channels: on
+          # the experimental channel `2.4.3-exp01-<sha>` carries a second `-`
+          # component, which the update check compiled into released builds
+          # rejects outright, so the rebuild reaches nobody; on the stable
+          # channel `2.4.2-<sha>` parses but sorts *below* the 2.4.2 it re-cuts,
+          # because a prerelease ranks under its release — so it is offered to
+          # nobody either. Build metadata is accepted by that matcher and has
+          # equal precedence, which is the correct meaning for re-cutting a
+          # version that already shipped.
+          #
+          # Any metadata already on the tag is replaced rather than appended, so
+          # the result always carries exactly one `+`.
           if git ls-remote --tags origin "refs/tags/$tag" | grep -qF "refs/tags/$tag$"; then
-            tag="${tag}-$(echo "$MERGE_SHA" | cut -c1-7)"
+            tag="${tag%%+*}+$(echo "$MERGE_SHA" | cut -c1-7)"
           fi
+
+          # Backstop: whatever produced this tag — the plain form, the collision
+          # path, or an override — it must be readable by the update check in
+          # builds users already have, and must name the version compiled into
+          # this one.
+          python3 scripts/helio/version_channel.py check-tag \
+            --tag "$tag" --channel "$CHANNEL" --version "$VERSION"
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build_linux:
