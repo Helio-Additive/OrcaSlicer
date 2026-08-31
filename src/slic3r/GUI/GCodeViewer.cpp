@@ -1451,19 +1451,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     m_viewer.reset_default_extrusion_roles_colors();
     m_viewer.load(std::move(data));
 
-    // Helio: expose simulation-only views only when their data is present.
-    m_has_thermal_index_data = false;
-    m_has_warpage_data.fill(false);
-    {
-        const size_t vcount = m_viewer.get_vertices_count();
-        for (size_t i = 0; i < vcount; ++i) {
-            const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
-            m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            update_warpage_availability(vertex, m_has_warpage_data);
-            if (m_has_thermal_index_data && std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
-                break;
-        }
-    }
+    update_simulation_data_availability();
     update_by_mode(wxGetApp().get_mode());
 
 // #if !VGCODE_ENABLE_COG_AND_TOOL_MARKERS
@@ -1753,19 +1741,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
     m_viewer.set_extrusion_role_color(libvgcode::EGCodeExtrusionRole::WipeTower,                { 127, 255, 127 });
     m_viewer.load(std::move(data));
 
-    // Helio: expose simulation-only views only when their data is present.
-    m_has_thermal_index_data = false;
-    m_has_warpage_data.fill(false);
-    {
-        const size_t vcount = m_viewer.get_vertices_count();
-        for (size_t i = 0; i < vcount; ++i) {
-            const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
-            m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
-            update_warpage_availability(vertex, m_has_warpage_data);
-            if (m_has_thermal_index_data && std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
-                break;
-        }
-    }
+    update_simulation_data_availability();
     update_by_mode(wxGetApp().get_mode());
 
     const auto current_view = get_view_type();
@@ -1779,6 +1755,22 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
     const libvgcode::AABox bbox = m_viewer.get_extrusion_bounding_box();
     const BoundingBoxf3 paths_bounding_box(libvgcode::convert(bbox[0]).cast<double>(), libvgcode::convert(bbox[1]).cast<double>());
     m_contained_in_bed = wxGetApp().plater()->build_volume().all_paths_inside(GCodeProcessorResult(), paths_bounding_box);
+}
+
+void GCodeViewer::update_simulation_data_availability()
+{
+    m_has_thermal_index_data = false;
+    m_has_warpage_data.fill(false);
+
+    const size_t vcount = m_viewer.get_vertices_count();
+    for (size_t i = 0; i < vcount; ++i) {
+        const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
+        m_has_thermal_index_data |= vertex.is_extrusion() && vertex.thermal_index_mean > -100.0f;
+        update_warpage_availability(vertex, m_has_warpage_data);
+        if (m_has_thermal_index_data &&
+            std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
+            break;
+    }
 }
 
 void GCodeViewer::update_shells_color_by_extruder(const DynamicPrintConfig *config)
