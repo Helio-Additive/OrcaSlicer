@@ -1710,6 +1710,8 @@ void GCodeProcessorResult::reset() {
     filament_change_count_map.clear();
     warnings.clear();
     is_helio_gcode = false;
+    warpage_wdm_p95 = NAN;
+    warpage_whs_p95 = NAN;
 
     //BBS: add mutex for protection of gcode result
     unlock();
@@ -3189,6 +3191,16 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
 
     // Helio thermal index and warpage fields are handled while processing moves so
     // they are available before the corresponding vertex is stored.
+
+    auto parse_warpage_percentile = [this, comment](const std::string_view prefix, float& value) {
+        if (!boost::starts_with(comment, prefix))
+            return false;
+        parse_number(comment.substr(prefix.size()), value);
+        return true;
+    };
+    if (parse_warpage_percentile(" WARPAGE_WDM_P95=", m_result.warpage_wdm_p95) ||
+        parse_warpage_percentile(" WARPAGE_WHS_P95=", m_result.warpage_whs_p95))
+        return;
 
     // wipe start tag
     if (boost::starts_with(comment, reserved_tag(ETags::Wipe_Start))) {
