@@ -33,7 +33,14 @@ import argparse
 import re
 import sys
 
-SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+# A prerelease identifier per semver §9: numeric identifiers carry no leading
+# zeroes, and no identifier may be empty. Spelling this out rather than using a
+# loose `[0-9A-Za-z.-]+` keeps the parser honest about what it claims to accept —
+# `2.4.3-exp..1` and `2.4.3-exp.01` are not versions, and a comparator asked to
+# order them has no defined answer.
+_IDENT = r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+SEMVER = re.compile(
+    r"^(\d+)\.(\d+)\.(\d+)(?:-(%s(?:\.%s)*))?(?:\+[0-9A-Za-z.-]+)?$" % (_IDENT, _IDENT))
 
 # The version regex compiled into every *released* build's update check
 # (`GUI_App.cpp`, `check_new_version_sf`). It is applied with `std::regex_match`,

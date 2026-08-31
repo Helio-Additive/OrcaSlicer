@@ -100,6 +100,7 @@ jobs:
           TAG_OVERRIDE: ${{ inputs.tag_override }}
           VERSION: ${{ steps.ver.outputs.version }}
           TAG_PREFIX: ${{ steps.channel.outputs.tag_prefix }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
         run: |
           set -euo pipefail
@@ -110,6 +111,22 @@ jobs:
               echo "Error: tag_override is not a valid Git tag name" >&2
               exit 1
             fi
+            # An override may customise the tag, but it may not change which
+            # channel the tag says the build belongs to. Without this, the
+            # channel/branch cross-check in the previous step is bypassed by a
+            # free-text input: an experimental binary could be published under a
+            # stable-looking `helio-v…` tag while its assets and prerelease flag
+            # still followed the real channel. The update check reads the tag
+            # prefix, so that tag is what users would be judging.
+            case "$TAG_OVERRIDE" in
+              "$TAG_PREFIX"*) ;;
+              *)
+                echo "Error: tag_override '$TAG_OVERRIDE' does not start with '$TAG_PREFIX'." >&2
+                echo "This tree is a $CHANNEL build, and $CHANNEL releases are tagged '$TAG_PREFIX…'." >&2
+                echo "Publishing it under another channel's prefix would misrepresent the build." >&2
+                exit 1
+                ;;
+            esac
             tag="$TAG_OVERRIDE"
           else
             tag="${TAG_PREFIX}${VERSION}"

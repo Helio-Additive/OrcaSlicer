@@ -244,7 +244,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   `constexpr`, not `#if`, so the stable build still compiles it
 
 #### `src/slic3r/GUI/GUI_App.hpp` (+4)
-- 5 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`, `show_helio_experimental_notice()`
+- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`, `show_helio_experimental_notice()`
 
 #### `src/slic3r/GUI/PartPlate.cpp` (+27)
 - Added `#include "../Utils/HelioDragon.hpp"`

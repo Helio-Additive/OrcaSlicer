@@ -109,6 +109,11 @@ def comparator_cases():
         check(label, got == want, "%s vs %s: got %d, want %d" % (a, b, got, want))
 
     check("cmp: rejects non-semver", v("2.4") is None and v("helio-v2.4.2") is None)
+    # Neither has a defined ordering, so accepting them would let the comparator
+    # answer a question semver does not define.
+    check("cmp: rejects empty prerelease identifier", v("2.4.3-exp..1") is None)
+    check("cmp: rejects leading-zero numeric identifier", v("2.4.3-exp.01") is None)
+    check("cmp: still accepts the published format", v("2.4.3-exp01") is not None)
 
 
 def main():
@@ -197,12 +202,23 @@ def main():
         check("stable supersedes its own prerelease", p.returncode == 0, p.stderr)
 
         # --- the real tag step -------------------------------------------------
+        # An override that changes the channel prefix would bypass the
+        # channel/branch cross-check entirely: the assets and prerelease flag
+        # would follow the real channel while the tag — which is what the update
+        # check reads — claimed the other one.
         tag_step = step_body("check", "Determine release tag")
-        for label, prefix, version, want in (
-            ("tag: stable", "helio-v", "2.4.2", "helio-v2.4.2"),
-            ("tag: experimental", "helio-exp-v", "2.4.3-exp01", "helio-exp-v2.4.3-exp01"),
+        for label, prefix, version, override, want in (
+            ("tag: stable", "helio-v", "2.4.2", "", "helio-v2.4.2"),
+            ("tag: experimental", "helio-exp-v", "2.4.3-exp01", "", "helio-exp-v2.4.3-exp01"),
+            ("tag: override kept when in-channel", "helio-exp-v", "2.4.3-exp01",
+             "helio-exp-v2.4.3-exp01-hotfix", "helio-exp-v2.4.3-exp01-hotfix"),
+            ("tag: cross-channel override rejected", "helio-exp-v", "2.4.3-exp01",
+             "helio-v2.4.3", None),
+            ("tag: experimental override on stable rejected", "helio-v", "2.4.2",
+             "helio-exp-v2.4.2", None),
         ):
-            env = dict(os.environ, TAG_OVERRIDE="", VERSION=version, TAG_PREFIX=prefix,
+            env = dict(os.environ, TAG_OVERRIDE=override, VERSION=version, TAG_PREFIX=prefix,
+                       CHANNEL="experimental" if "exp" in prefix else "stable",
                        MERGE_SHA="0123456789abcdef", GITHUB_OUTPUT=os.path.join(tmp, "out"))
             open(env["GITHUB_OUTPUT"], "w").close()
             # Run in a git repo with no remote: `git ls-remote` then fails, which
@@ -213,8 +229,12 @@ def main():
             r = subprocess.run(["bash", "-c", tag_step], cwd=repo, env=env,
                                capture_output=True, text=True)
             got = open(env["GITHUB_OUTPUT"]).read().strip()
-            check(label, r.returncode == 0 and got == "tag=%s" % want,
-                  "got %r, stderr %s" % (got, r.stderr))
+            if want is None:
+                check(label, r.returncode != 0 and got == "",
+                      "expected refusal, got rc=%d out=%r" % (r.returncode, got))
+            else:
+                check(label, r.returncode == 0 and got == "tag=%s" % want,
+                      "got %r, stderr %s" % (got, r.stderr))
 
     print()
     if failures:
