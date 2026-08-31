@@ -18,8 +18,21 @@ on:
         required: false
         default: ''
 
+# Serialised per release branch, which is one-to-one with the channel.
+#
+# Keying on the PR number let two release-labelled PRs merged inside the build
+# window (~1h) run at once. Both `check` jobs test whether the tag exists, both
+# see it absent, and both emit the same tag; the first run then creates it, and
+# the second publishes its assets onto the first run's release, because
+# `action-gh-release` updates an existing tag and `target_commitish` cannot move
+# one. The result is a release whose binaries are not from the commit it names.
+#
+# `cancel-in-progress: false` means the second run queues rather than being
+# dropped, and by the time it reaches `check` the tag exists, so the collision
+# path gives it a distinct one. Two releases then take twice as long, which is
+# the right trade against publishing mismatched assets.
 concurrency:
-  group: helio-release-${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.number }}
+  group: helio-release-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
