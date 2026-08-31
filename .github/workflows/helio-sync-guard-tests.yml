@@ -1,8 +1,15 @@
-# Runs the upstream-sync guard regression suite.
+# Runs the Helio workflow regression suites.
 #
-# `scripts/helio/test_sync_noop_guards.py` extracts the real `check` and `graft`
-# step bodies out of helio-upstream-sync.yml and runs them against synthetic
-# repositories. Until this workflow existed, nothing executed it: a ~700-line
+# Each suite extracts the real step bodies out of the workflow it covers and
+# runs them, so it tests the shipped code rather than a transcription of it:
+#
+#   * test_sync_noop_guards.py   — the `check` and `graft` steps of
+#     helio-upstream-sync.yml, against synthetic repositories.
+#   * test_release_channel.py    — the release-channel rules and the tag step of
+#     helio-release.yml. Its central case is a build that publishes cleanly and
+#     is then offered to nobody, which no other check would catch.
+#
+# Until this workflow existed, nothing executed the first of these: a ~700-line
 # suite pinning the workflow's most failure-prone logic ran only when someone
 # remembered to, which is precisely the rot the workflow inventory (#106) exists
 # to prevent.
@@ -16,13 +23,17 @@ on:
   push:
     paths:
       - '.github/workflows/helio-upstream-sync.yml'
+      - '.github/workflows/helio-release.yml'
       - '.github/workflows/helio-sync-guard-tests.yml'
       - 'scripts/helio/**'
+      - 'src/libslic3r/HelioChannel.hpp'
   pull_request:
     paths:
       - '.github/workflows/helio-upstream-sync.yml'
+      - '.github/workflows/helio-release.yml'
       - '.github/workflows/helio-sync-guard-tests.yml'
       - 'scripts/helio/**'
+      - 'src/libslic3r/HelioChannel.hpp'
   workflow_dispatch:
 
 permissions:
@@ -58,3 +69,25 @@ jobs:
 
       - name: Run guard suite
         run: python3 scripts/helio/test_sync_noop_guards.py
+
+      - name: Run release channel suite
+        run: python3 scripts/helio/test_release_channel.py
+
+      - name: Check this tree's own channel
+        # Runs the real rules against the real HelioChannel.hpp, so a release
+        # branch that has drifted into the wrong channel is caught here rather
+        # than at publish time. Only meaningful on the two release branches: the
+        # branch/channel rule rejects anything else by design, so on a feature
+        # branch this step would fail for a reason that is not a defect.
+        env:
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$BRANCH" in
+            orca-latest-parity-bambu|helio-experimental) ;;
+            *) echo "Branch '$BRANCH' is not a release branch — channel check not applicable."; exit 0 ;;
+          esac
+          python3 scripts/helio/version_channel.py \
+            --header src/libslic3r/HelioChannel.hpp \
+            --version "$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)" \
+            --branch "$BRANCH"

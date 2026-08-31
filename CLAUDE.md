@@ -58,11 +58,18 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Monitors upstream for new tags/releases and creates tracking issues
 
 ### Release (`helio-release.yml`)
-- Triggers on: merged PR with `release` label on `orca-latest-parity-bambu`, or manual `workflow_dispatch`
+- Triggers on: merged PR with `release` label on `orca-latest-parity-bambu` or `helio-experimental`, or manual `workflow_dispatch` from either branch
 - Builds all platforms (Linux, Windows, macOS universal) via reusable workflows
 - Creates GitHub Release with `Helio`-prefixed assets (DMG, AppImage, installer, portable zip)
-- Tag format: `helio-v{version}` (from `version.inc`)
-- Manual dispatch restricted to `orca-latest-parity-bambu` branch only
+- Tag format: `helio-v{version}` (from `version.inc`), or `helio-exp-v{version}` on the experimental channel
+- **Two channels, and the channel is a property of the tree, not of the request.** `src/libslic3r/HelioChannel.hpp` is the only file that names the channel, and it is what the binary compiles with. `scripts/helio/version_channel.py` reads it, cross-checks it against the branch, and refuses to publish on disagreement — so a build cannot go out under the other channel's tag. Experimental releases are always GitHub prereleases, and their assets carry `Helio_EXPERIMENTAL`
+
+### Experimental channel
+- **Experimental code lives on the release branch, not on a branch of its own**, behind `helio_experimental_features_enabled()`. `helio-experimental` is a *two-line* branch — the channel header and the version in `version.inc` — re-cut from the release branch whenever a build is wanted. So there is no long-lived divergence to reconcile, and a feature graduates by deleting its gate rather than by porting it: what stable ships is the same code the experimental testers ran
+- The channel has to come from checked-out content because the compile is done by upstream-owned `build_orca.yml`, which builds the ref as-is. Giving it a "build feature X" input would be an upstream file edit, and so a conflict on every sync
+- **Experimental builds are deliberately offered to stable users** through the ordinary in-app update prompt. That is a product decision, not an accident: the update check reads this fork's own releases (`AppConfig.cpp` `VERSION_CHECK_URL`) and `check_stable_update_only` **defaults to false**, so a prerelease reaches everyone who has not ticked that box. The dialog carries the checkbox next to Skip/Cancel, and the release body — which the dialog renders verbatim — leads with what the build is
+- **The version rule is what makes it work, and it is easy to get backwards.** An experimental version must sort *above* the newest stable release and *below* the stable release it anticipates: `2.4.3-exp.1` against a `2.4.2` stable. Too low (`2.4.2-exp.1`) and the update check skips it — the build publishes, looks healthy, and is offered to nobody. Too high, or missing the `-exp` marker, and testers are never moved back onto stable when it ships. `version_channel.py` enforces both, and `scripts/helio/test_release_channel.py` pins the rules
+- Cutting one: re-create `helio-experimental` from the release branch, flip `HELIO_EXPERIMENTAL_BUILD` to `1` and `HELIO_RELEASE_CHANNEL` to `"experimental"`, set `version.inc` to the next patch with an `-exp.N` marker, push, then dispatch `helio-release.yml` from that branch
 
 ### Build Pipeline (reusable workflows)
 - `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`

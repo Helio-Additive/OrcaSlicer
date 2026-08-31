@@ -19,7 +19,9 @@
 > `render_position_window()` — the Helio TI rows/cases live there now.
 
 ## Stats
-- **70 files changed**: 36 new, 34 modified, 0 deleted
+- **73 files changed**: 39 new, 34 modified, 0 deleted
+  (the release-channel work adds `HelioChannel.hpp`, `version_channel.py` and
+  `test_release_channel.py` — see "Experimental channel")
 - **+13,363 lines added, -195 lines removed** — measured at the v2.4.0-beta sync.
   The support-data catalog work (#95) adds ~1,000 further lines in the four new
   `HelioSupportData` / `HelioRetryPolicy` files, plus the region-change hook in
@@ -47,7 +49,7 @@ Key data flow:
 - `HelioCompletionEvent` — carries result path + quality metrics to UI thread
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
 
-## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
+## Helio-Only Files (39 files — NEVER exist upstream, always preserve)
 
 ### Core API Client
 
@@ -121,7 +123,10 @@ generation so work started under the old credential can never land.
 
 | File | Purpose |
 |-|-|
-| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
+| `src/libslic3r/HelioChannel.hpp` | The release channel (`stable` / `experimental`) and the gate for unfinished features. The only file that differs between the release branch and `helio-experimental` — see "Experimental channel" below |
+| `scripts/helio/version_channel.py` | Reads that header, cross-checks it against the branch, and enforces the experimental version rules at release time |
+| `scripts/helio/test_release_channel.py` | Regression suite for those rules and for `helio-release.yml`'s tag step |
+| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (from `orca-latest-parity-bambu` or `helio-experimental`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
 | `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
 | `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
@@ -222,14 +227,24 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - **Region combobox**: both region-write paths call `HelioQuery::invalidate_support_data_for_endpoint_change()` — region selects both the Helio endpoint and which regional PAT key is read, so the previous endpoint's catalogs must be dropped
 
 #### `src/slic3r/GUI/GUI_App.cpp` (+28)
-- Added `#include "../Utils/HelioDragon.hpp"`
+- Added `#include "../Utils/HelioDragon.hpp"` and `#include "libslic3r/HelioChannel.hpp"`
 - The startup block always requests the Helio supported-data catalogs (no "already loaded" guard)
-- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
+- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`,
+  `show_helio_experimental_notice()`
 - `OnExit()` calls `HelioQuery::shutdown_background_requests()` so support-data
   workers are torn down cleanly — keep this line when upstream reworks `OnExit()`
+- **`check_new_version_sf()` — the tag-prefix strip is Helio's and is load-bearing.**
+  It turns `helio-v1.2.3` and `helio-exp-v1.2.3-exp.1` into versions the update
+  check can compare. `VERSION_CHECK_URL` in `AppConfig.cpp` points at *this
+  fork's* releases, so dropping this in a merge does not fall back to something
+  harmless: every release stops parsing and users are silently never told about
+  an update. See "Experimental channel" below
+- `show_helio_experimental_notice()` is called immediately after
+  `mainframe->Show(true)`. It is a no-op on the stable channel — guarded by a
+  `constexpr`, not `#if`, so the stable build still compiles it
 
 #### `src/slic3r/GUI/GUI_App.hpp` (+4)
-- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
+- 5 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`, `show_helio_experimental_notice()`
 
 #### `src/slic3r/GUI/PartPlate.cpp` (+27)
 - Added `#include "../Utils/HelioDragon.hpp"`
@@ -911,6 +926,86 @@ upstream-identical code on the strength of a stale line in a document, which is
 the divergence this rule exists to stop. The map says *where to look and what the
 touchpoint was for*; `git diff` against the synced baseline says whether it is
 still there.
+
+## Experimental channel
+
+Helio ships unfinished features on a second release channel. The design goal is
+that an experimental build is **impossible to mistake for a finished one**, and
+that graduating a feature to stable costs nothing.
+
+### The shape
+
+**Experimental code lives on the release branch**, behind
+`helio_experimental_features_enabled()` in `src/libslic3r/HelioChannel.hpp`. It
+is present in the source and absent from a stable build. `helio-experimental` is
+a **two-line branch** — that header and the version in `version.inc` — re-cut
+from the release branch whenever a build is wanted.
+
+That is the opposite of the obvious arrangement (feature branch holds the code),
+and the reason is graduation. Code on a branch has to be *ported* to stable: a
+merge, a re-review, a re-test of something that has already been tested. Code on
+the release branch graduates by deleting its gate, and what stable ships is
+byte-identical to what the testers ran.
+
+The channel comes from checked-out content rather than a build flag because the
+compile is done by upstream-owned `build_orca.yml`, which builds the ref as-is.
+Teaching it a "build with feature X" input means editing an upstream file, and so
+a conflict on every future sync. A two-line branch costs nothing and cannot
+disagree with what was actually compiled.
+
+Gates are `constexpr`, never `#if`, so both sides of every channel-dependent path
+are compiled on both channels. A typo in experimental-only code then fails the
+stable build instead of surviving until an experimental release is cut.
+
+### Experimental builds are offered to stable users on purpose
+
+This is a product decision and it is easy to mistake for a bug, so it is written
+down here. The in-app update check reads **this fork's own releases**
+(`VERSION_CHECK_URL` in `AppConfig.cpp`), and `check_stable_update_only`
+**defaults to false**. A GitHub prerelease is therefore offered to every user who
+has not ticked that box — which is the intended behaviour: users should know the
+experimental build exists and be able to try it.
+
+What keeps it honest:
+
+- the release is a **prerelease**, so it is not "Latest release" and a user who
+  has ticked *Check for stable updates only* is never shown it;
+- the update dialog carries that checkbox next to Skip / Cancel, so the opt-out
+  is one click away at the moment it matters;
+- the dialog renders the **release body verbatim**, and `helio-release.yml`
+  makes that body lead with what the build is, that it replaces the existing
+  install, and how to stop being offered them;
+- the app says it again on first launch of each experimental version, and marks
+  experimental features where they appear.
+
+### The version rule (the part that is easy to get backwards)
+
+An experimental version must sort **above the newest stable release** and **below
+the stable release it anticipates**: `2.4.3-exp.1` against a `2.4.2` stable.
+
+| version | result |
+|-|-|
+| `2.4.3-exp.1` | correct — offered to 2.4.2 users, superseded when 2.4.3 ships |
+| `2.4.2-exp.1` | **publishes, looks healthy, is offered to nobody** — the update check skips any release not newer than what the user runs |
+| `2.4.3` (no marker) | replaces the stable release in the prompt instead of being a preview; testers are never moved back onto stable |
+
+`scripts/helio/version_channel.py` enforces all of this at release time and
+refuses to publish otherwise; `scripts/helio/test_release_channel.py` pins the
+rules, including the silent case, and runs in `helio-sync-guard-tests.yml`.
+
+### Cutting an experimental release
+
+1. Re-create the branch from the release branch:
+   `git checkout -B helio-experimental orca-latest-parity-bambu`
+2. In `src/libslic3r/HelioChannel.hpp`, set `HELIO_EXPERIMENTAL_BUILD` to `1` and
+   `HELIO_RELEASE_CHANNEL` to `"experimental"`. **Both lines** — the release
+   workflow refuses a header that contradicts itself.
+3. In `version.inc`, set `SoftFever_VERSION` to the next patch with an `-exp.N`
+   marker (`2.4.3-exp.1`).
+4. Push, then dispatch `helio-release.yml` from that branch.
+
+The graduation step, when a feature is ready, is to delete its
+`helio_experimental_features_enabled()` call. Nothing moves between branches.
 
 ## Upstream Sync: squash merges & the merge-base graft
 
