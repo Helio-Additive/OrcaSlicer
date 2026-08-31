@@ -2937,7 +2937,27 @@ bool GUI_App::on_init_inner()
                 bool skip_this_version = false;
                 if (!skip_version_str.empty()) {
                     BOOST_LOG_TRIVIAL(info) << "new version = " << version_info.version_str << ", skip version = " << skip_version_str;
-                    if (version_info.version_str <= skip_version_str) {
+                    // Helio: compare semantically rather than as strings.
+                    //
+                    // These are `std::string`s, and a lexicographic compare gets
+                    // prereleases backwards: "2.4.3" <= "2.4.3-exp01" is true,
+                    // because the shorter string sorts first. So a user who
+                    // pressed Skip on an experimental preview would have the
+                    // dialog for the *final* 2.4.3 suppressed as well, and would
+                    // hear nothing until 2.4.4 — the release they were waiting
+                    // for is the one they are not told about.
+                    //
+                    // Harmless before the experimental channel existed, since
+                    // every tag was a plain X.Y.Z; routine once previews ship.
+                    // (It also fixes the same-shaped "2.4.10" <= "2.4.9" case.)
+                    // Falls back to the original comparison when either value is
+                    // not a version, so an unparseable stored value behaves as
+                    // it always did.
+                    const boost::optional<Semver> offered = Semver::parse(version_info.version_str);
+                    const boost::optional<Semver> skipped = Semver::parse(skip_version_str);
+                    const bool not_newer = (offered && skipped) ? (*offered <= *skipped)
+                                                               : (version_info.version_str <= skip_version_str);
+                    if (not_newer) {
                         skip_this_version = true;
                     } else {
                         app_config->set("skip_version", "");
