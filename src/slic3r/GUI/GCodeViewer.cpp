@@ -1712,7 +1712,7 @@ void GCodeViewer::update_simulation_data_availability()
     const size_t vertices_count = m_viewer.get_vertices_count();
     for (size_t i = 0; i < vertices_count; ++i) {
         const libvgcode::PathVertex& vertex = m_viewer.get_vertex_at(i);
-        m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
+        m_has_thermal_index_data |= vertex.is_extrusion() && vertex.thermal_index_mean > -100.0f;
         update_warpage_availability(vertex, m_has_warpage_data);
         if (m_has_thermal_index_data &&
             std::all_of(m_has_warpage_data.begin(), m_has_warpage_data.end(), [](bool available) { return available; }))
