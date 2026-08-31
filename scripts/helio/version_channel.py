@@ -148,7 +148,7 @@ def read_channel(header_path):
     return by_flag
 
 
-def validate(channel, version, branch, latest_stable):
+def validate(channel, version, branch, latest_stable, latest_experimental=""):
     expected_branch = BRANCH_FOR_CHANNEL[channel]
     if branch != expected_branch:
         die("this tree is a %s build (per HelioChannel.hpp) but the release was "
@@ -186,6 +186,22 @@ def validate(channel, version, branch, latest_stable):
             "released builds (see DEPLOYED_MATCHER).\n"
             "Those builds would parse it as invalid and skip this release "
             "silently — it would be published and offered to nobody." % version)
+
+    # A preview must also sort above the newest preview already published, or it
+    # is invisible to exactly the people testing this channel. The stable check
+    # below does not imply it: `2.4.3-exp01` sorts above a `2.4.2` stable and
+    # below an existing `2.4.3-exp02`, so a mistyped or reused NN passes every
+    # other guard and reaches nobody who is already on the preview.
+    if channel == "experimental" and latest_experimental:
+        newest_exp = parse_semver(latest_experimental)
+        if newest_exp is None:
+            die("--latest-experimental %r is not a semantic version" % latest_experimental)
+        if semver_cmp(parsed, newest_exp) <= 0:
+            die("experimental version %r does not sort above the newest published "
+                "preview %r.\n"
+                "Testers already on that preview would never be offered this build: "
+                "the update check skips any release not newer than what they are "
+                "running. Bump the -expNN counter." % (version, latest_experimental))
 
     if channel == "experimental" and latest_stable:
         newest = parse_semver(latest_stable)
@@ -262,6 +278,8 @@ def main(argv=None):
     check.add_argument("--branch", required=True, help="branch the release is cut from")
     check.add_argument("--latest-stable", default="",
                        help="newest published stable version; ordering is unchecked when empty")
+    check.add_argument("--latest-experimental", default="",
+                       help="newest published preview version; ordering is unchecked when empty")
 
     tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
     tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
@@ -276,7 +294,8 @@ def main(argv=None):
         return 0
 
     channel = read_channel(args.header)
-    validate(channel, args.version, args.branch, args.latest_stable)
+    validate(channel, args.version, args.branch, args.latest_stable,
+             args.latest_experimental)
 
     tag_prefix, prerelease, asset_tag, suffix = CHANNELS[channel]
     for line in (

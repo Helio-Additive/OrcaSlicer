@@ -60,10 +60,11 @@ def write_header(tmp, flag, name):
     return path
 
 
-def run_channel(header, version, branch, latest_stable=""):
+def run_channel(header, version, branch, latest_stable="", latest_experimental=""):
     return subprocess.run(
         [sys.executable, SCRIPT, "check", "--header", header, "--version", version,
-         "--branch", branch, "--latest-stable", latest_stable],
+         "--branch", branch, "--latest-stable", latest_stable,
+         "--latest-experimental", latest_experimental],
         capture_output=True, text=True)
 
 
@@ -251,6 +252,28 @@ def main():
 
         bad = run_check_tag("helio-v2.4.2", "experimental", "2.4.3-exp01")
         check("tag check: wrong channel prefix rejected", bad.returncode != 0, bad.stdout)
+
+        # --- ordering against the newest preview --------------------------------
+        # Found by Codex on #130. Sorting above the newest stable release does
+        # not imply sorting above the newest preview, so a reused or mistyped NN
+        # passed every guard and reached nobody already testing this channel.
+        p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "2.4.2", "2.4.3-exp02")
+        check("preview below an existing preview", p.returncode != 0, p.stdout)
+        check("  ... and says who misses it", "already on that preview" in p.stderr, p.stderr)
+
+        p = run_channel(experimental, "2.4.3-exp02", "helio-experimental", "2.4.2", "2.4.3-exp02")
+        check("preview reusing the newest NN", p.returncode != 0, p.stdout)
+
+        p = run_channel(experimental, "2.4.3-exp03", "helio-experimental", "2.4.2", "2.4.3-exp02")
+        check("preview above the newest preview", p.returncode == 0, p.stderr)
+
+        # A preview of the next version supersedes previews of the previous one.
+        p = run_channel(experimental, "2.4.4-exp01", "helio-experimental", "2.4.3", "2.4.3-exp02")
+        check("preview of a newer version", p.returncode == 0, p.stderr)
+
+        # First preview ever: nothing to compare against, must not be fatal.
+        p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "2.4.2", "")
+        check("first preview, no previous", p.returncode == 0, p.stderr)
 
         # --- the real baseline step --------------------------------------------
         # The ordering guard is only as good as the baseline it is given. A

@@ -116,11 +116,27 @@ jobs:
             | sort -V \
             | tail -n1 || true)
           echo "Newest published stable release: ${latest_stable:-<none>}"
+
+          # Newest published preview, for the other half of the ordering check.
+          # Sorting above the newest *stable* release does not imply sorting
+          # above the newest *preview*: 2.4.3-exp01 clears a 2.4.2 stable while
+          # sitting below an existing 2.4.3-exp02, so a reused or mistyped NN
+          # would publish and be invisible to precisely the people testing this
+          # channel. `sort -V` only picks a candidate; version_channel.py does
+          # the real comparison.
+          latest_experimental=$(git tag --list 'helio-exp-v*' \
+            | sed 's/^helio-exp-v//; s/+.*$//' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-exp[0-9]+$' \
+            | sort -V \
+            | tail -n1 || true)
+          echo "Newest published preview: ${latest_experimental:-<none>}"
+
           python3 scripts/helio/version_channel.py check \
             --header src/libslic3r/HelioChannel.hpp \
             --version "$VERSION" \
             --branch "$BRANCH" \
-            --latest-stable "$latest_stable" >> "$GITHUB_OUTPUT"
+            --latest-stable "$latest_stable" \
+            --latest-experimental "$latest_experimental" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: Determine release tag
