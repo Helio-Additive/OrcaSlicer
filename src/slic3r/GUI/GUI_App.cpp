@@ -4,6 +4,7 @@
 #include "GUI_App.hpp"
 #include "GUI_Init.hpp"
 #include "../Utils/HelioDragon.hpp"
+#include "libslic3r/HelioChannel.hpp"
 #include "GUI_ObjectList.hpp"
 #include "slic3r/GUI/UserManager.hpp"
 #include "slic3r/GUI/TaskManager.hpp"
@@ -2936,7 +2937,27 @@ bool GUI_App::on_init_inner()
                 bool skip_this_version = false;
                 if (!skip_version_str.empty()) {
                     BOOST_LOG_TRIVIAL(info) << "new version = " << version_info.version_str << ", skip version = " << skip_version_str;
-                    if (version_info.version_str <= skip_version_str) {
+                    // Helio: compare semantically rather than as strings.
+                    //
+                    // These are `std::string`s, and a lexicographic compare gets
+                    // prereleases backwards: "2.4.3" <= "2.4.3-exp01" is true,
+                    // because the shorter string sorts first. So a user who
+                    // pressed Skip on an experimental preview would have the
+                    // dialog for the *final* 2.4.3 suppressed as well, and would
+                    // hear nothing until 2.4.4 — the release they were waiting
+                    // for is the one they are not told about.
+                    //
+                    // Harmless before the experimental channel existed, since
+                    // every tag was a plain X.Y.Z; routine once previews ship.
+                    // (It also fixes the same-shaped "2.4.10" <= "2.4.9" case.)
+                    // Falls back to the original comparison when either value is
+                    // not a version, so an unparseable stored value behaves as
+                    // it always did.
+                    const boost::optional<Semver> offered = Semver::parse(version_info.version_str);
+                    const boost::optional<Semver> skipped = Semver::parse(skip_version_str);
+                    const bool not_newer = (offered && skipped) ? (*offered <= *skipped)
+                                                               : (version_info.version_str <= skip_version_str);
+                    if (not_newer) {
                         skip_this_version = true;
                     } else {
                         app_config->set("skip_version", "");
@@ -3152,6 +3173,11 @@ bool GUI_App::on_init_inner()
     // Close the splash now that the main UI is visible.
     if (scrn) { scrn->Destroy(); scrn = nullptr; }
     BOOST_LOG_TRIVIAL(info) << "main frame firstly shown";
+
+    // Helio: an experimental build says what it is, once per version. A user
+    // can arrive here from the ordinary update prompt, so this is the first
+    // point at which they are certain to have been told.
+    show_helio_experimental_notice();
 
 //#if BBL_HAS_FIRST_PAGE
     //BBS: set tp3DEditor firstly
@@ -5694,9 +5720,25 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
                     return;
 
                 std::string tag = *tag_opt;
-                // Strip Helio tag prefix (helio-v1.2.3 → 1.2.3)
-                const std::string helio_prefix = "helio-v";
-                if (tag.size() > helio_prefix.size() &&
+
+                // Strip Helio tag prefix (helio-v1.2.3 → 1.2.3,
+                // helio-exp-v1.2.3-exp01 → 1.2.3-exp01).
+                //
+                // Experimental releases are published as GitHub prereleases and
+                // are deliberately offered to stable users: they land in
+                // best_pre below, so a user sees one only while "Check for
+                // stable updates only" is unticked, and the update dialog
+                // carries that checkbox next to Skip/Cancel. The experimental
+                // version sorts above the stable release it branches from and
+                // below the next stable one (2.4.3-exp01), so testers are
+                // offered it now and rolled back onto stable when 2.4.3 ships.
+                // helio-release.yml enforces both properties at publish time.
+                const std::string helio_prefix = HELIO_STABLE_TAG_PREFIX;
+                const std::string helio_exp_prefix = HELIO_EXPERIMENTAL_TAG_PREFIX;
+                if (tag.size() > helio_exp_prefix.size() &&
+                    tag.compare(0, helio_exp_prefix.size(), helio_exp_prefix) == 0)
+                    tag.erase(0, helio_exp_prefix.size());
+                else if (tag.size() > helio_prefix.size() &&
                     tag.compare(0, helio_prefix.size(), helio_prefix) == 0)
                     tag.erase(0, helio_prefix.size());
                 else if (!tag.empty() && tag.front() == 'v')
@@ -8843,6 +8885,45 @@ void GUI_App::remove_ping_bind_dialog()
     }
 }
 
+
+// Helio experimental channel
+//
+// Shown once per experimental version, after the main window is up. Compiled on
+// both channels and switched by a constexpr, so a stable build carries a dead
+// branch the optimiser removes rather than code the compiler never sees — a
+// mistake in here fails the stable build instead of surviving until an
+// experimental release is cut.
+void GUI_App::show_helio_experimental_notice()
+{
+    if (!helio_experimental_features_enabled())
+        return;
+    if (!app_config)
+        return;
+
+    // Keyed on the version, so each new experimental build says its piece once
+    // and then stays out of the way.
+    static const std::string notice_key = "helio_experimental_notice_version";
+    if (app_config->get("app", notice_key) == SoftFever_VERSION)
+        return;
+
+    MessageDialog dlg(mainframe,
+        _L("This is an experimental build of OrcaSlicer with Helio Additive.\n\n"
+           "It carries features that are still being developed. They are incomplete, they can "
+           "change or disappear in a later build, and their results are not yet reliable enough "
+           "to base a real print on.\n\n"
+           "Use the regular release for production work. Experimental features are marked "
+           "\"experimental\" where they appear."),
+        _L("Experimental build"),
+        wxOK | wxICON_WARNING);
+    dlg.ShowModal();
+
+    // std::string(), not the bare macro: AppConfig::set has a bool overload, and
+    // const char* -> bool is a standard conversion while const char* ->
+    // std::string is a user-defined one, so the literal would silently select
+    // the bool overload and store "true" as the version.
+    app_config->set("app", notice_key, std::string(SoftFever_VERSION));
+    app_config->save();
+}
 
 // Helio cloud processing
 bool GUI_App::is_helio_enable()

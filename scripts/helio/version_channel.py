@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Decide, and validate, which release channel a build belongs to.
+
+`helio-release.yml` calls this once per release and uses its output for the tag,
+the asset names and the prerelease flag. It lives here rather than inline in the
+workflow so the rules it enforces can be tested against real inputs
+(`test_release_channel.py`) instead of only against a release nobody wants to
+re-cut.
+
+The rules exist because the experimental channel is *deliberately* offered to
+stable users, through the ordinary in-app update prompt:
+
+  * The channel comes from `HelioChannel.hpp` in the checked-out tree, which is
+    what the binary actually compiled with. The branch is cross-checked against
+    it, so a build cannot be published under the other channel's tag.
+
+  * An experimental version must be exactly `X.Y.Z-expNN` — see DEPLOYED_MATCHER
+    below for why the shape is this rigid — and must sort strictly above the
+    newest stable release. Both halves matter, and they pull in opposite
+    directions:
+
+      - above the newest stable release, or the update check skips it
+        (`chosen_version <= current_version` returns early) and no stable user is
+        ever offered it;
+      - below the stable release it anticipates, so that when 2.4.3 ships, the
+        testers running 2.4.3-exp01 are moved onto it rather than stranded on a
+        prerelease for ever. The prerelease marker gives that for free.
+
+    2.4.3-exp01 against a 2.4.2 stable satisfies both. 2.4.2-exp01 would be
+    published, look correct, and be silently invisible to every stable user.
+"""
+import argparse
+import re
+import sys
+
+# A prerelease identifier per semver §9: numeric identifiers carry no leading
+# zeroes, and no identifier may be empty. Spelling this out rather than using a
+# loose `[0-9A-Za-z.-]+` keeps the parser honest about what it claims to accept —
+# `2.4.3-exp..1` and `2.4.3-exp.01` are not versions, and a comparator asked to
+# order them has no defined answer.
+_IDENT = r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+SEMVER = re.compile(
+    r"^(\d+)\.(\d+)\.(\d+)(?:-(%s(?:\.%s)*))?(?:\+[0-9A-Za-z.-]+)?$" % (_IDENT, _IDENT))
+
+# The version regex compiled into every *released* build's update check
+# (`GUI_App.cpp`, `check_new_version_sf`). It is applied with `std::regex_match`,
+# so it must match the WHOLE version string; a version it rejects parses as
+# invalid and that release is skipped silently — never shown to anyone, with
+# nothing failing anywhere.
+#
+# This is the constraint that cannot be fixed by changing the C++. The clients
+# that have to read an experimental release are the stable builds already
+# installed on users' machines, and their copy of this regex was fixed when they
+# were compiled. Widening the parser today would only help builds that do not
+# exist yet, so the *published version format* is what has to comply.
+#
+# Two consequences, both verified against the shipped matcher and the semver
+# library the app links:
+#   * no dot in the prerelease — `2.4.3-exp.1` is rejected outright;
+#   * zero-padded, because prerelease identifiers compare as strings once they
+#     are not purely numeric: `exp9` sorts ABOVE `exp10`, so the tenth build of a
+#     version would be treated as older than the ninth. `exp09` < `exp10`.
+DEPLOYED_MATCHER = re.compile(r"[0-9]+\.[0-9]+(\.[0-9]+)*(-[A-Za-z0-9]+)?(\+[A-Za-z0-9]+)?")
+
+EXPERIMENTAL_VERSION = re.compile(r"^\d+\.\d+\.\d+-exp\d{2}$")
+
+STABLE_BRANCH = "orca-latest-parity-bambu"
+EXPERIMENTAL_BRANCH = "helio-experimental"
+
+CHANNELS = {
+    # channel: (tag prefix, prerelease, asset infix, release-name suffix)
+    "stable": ("helio-v", False, "Helio", ""),
+    "experimental": ("helio-exp-v", True, "Helio_EXPERIMENTAL", " — EXPERIMENTAL"),
+}
+
+BRANCH_FOR_CHANNEL = {"stable": STABLE_BRANCH, "experimental": EXPERIMENTAL_BRANCH}
+
+
+def die(msg):
+    print("Error: " + msg, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def parse_semver(text):
+    """Return (major, minor, patch, prerelease-identifiers or None), or None."""
+    m = SEMVER.match(text.strip())
+    if not m:
+        return None
+    pre = m.group(4).split(".") if m.group(4) else None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), pre)
+
+
+def _cmp_pre(a, b):
+    """Compare prerelease identifier lists per semver §11."""
+    for x, y in zip(a, b):
+        xn, yn = x.isdigit(), y.isdigit()
+        if xn and yn:
+            if int(x) != int(y):
+                return -1 if int(x) < int(y) else 1
+        elif xn != yn:
+            # Numeric identifiers always have lower precedence than alphanumeric.
+            return -1 if xn else 1
+        elif x != y:
+            return -1 if x < y else 1
+    if len(a) != len(b):
+        return -1 if len(a) < len(b) else 1
+    return 0
+
+
+def semver_cmp(a, b):
+    """-1 / 0 / 1 for parsed versions. A prerelease sorts below its release."""
+    for i in range(3):
+        if a[i] != b[i]:
+            return -1 if a[i] < b[i] else 1
+    if a[3] is None and b[3] is None:
+        return 0
+    if a[3] is None:
+        return 1
+    if b[3] is None:
+        return -1
+    return _cmp_pre(a[3], b[3])
+
+
+def read_channel(header_path):
+    """Read the channel out of HelioChannel.hpp, rejecting a self-contradiction."""
+    try:
+        with open(header_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        die("cannot read %s: %s\nWithout it the release channel is unknown." % (header_path, exc))
+
+    flag = re.search(r"^#define\s+HELIO_EXPERIMENTAL_BUILD\s+(\d+)\s*$", text, re.M)
+    name = re.search(r'^#define\s+HELIO_RELEASE_CHANNEL\s+"([^"]*)"\s*$', text, re.M)
+    if not flag:
+        die("%s does not define HELIO_EXPERIMENTAL_BUILD" % header_path)
+    if not name:
+        die("%s does not define HELIO_RELEASE_CHANNEL" % header_path)
+
+    by_flag = {"0": "stable", "1": "experimental"}.get(flag.group(1))
+    if by_flag is None:
+        die("HELIO_EXPERIMENTAL_BUILD is %r; expected 0 or 1" % flag.group(1))
+    if name.group(1) != by_flag:
+        # The two are edited together by hand when the experimental branch is
+        # cut. Disagreement means one was missed, and the binary and its label
+        # would describe different things.
+        die("%s contradicts itself: HELIO_EXPERIMENTAL_BUILD says %r but "
+            "HELIO_RELEASE_CHANNEL says %r" % (header_path, by_flag, name.group(1)))
+    return by_flag
+
+
+def validate(channel, version, branch, latest_stable, latest_experimental=""):
+    expected_branch = BRANCH_FOR_CHANNEL[channel]
+    if branch != expected_branch:
+        die("this tree is a %s build (per HelioChannel.hpp) but the release was "
+            "requested from %r, and %s releases are cut from %r.\n"
+            "Publishing anyway would ship a %s binary under the other channel's tag."
+            % (channel, branch, channel, expected_branch, channel))
+
+    parsed = parse_semver(version)
+    if parsed is None:
+        die("version %r is not a semantic version" % version)
+
+    is_marked = parsed[3] is not None and any(p.startswith("exp") for p in parsed[3])
+    if channel == "experimental":
+        if not is_marked:
+            die("experimental version %r carries no -exp prerelease marker.\n"
+                "Without it the build sorts as a final release: it would replace the "
+                "stable release in the update prompt instead of being offered as a "
+                "preview, and testers would never be moved back onto stable."
+                % version)
+        if not EXPERIMENTAL_VERSION.match(version):
+            die("experimental version %r is not of the form X.Y.Z-expNN "
+                "(two digits, zero-padded, no dot).\n"
+                "The shape is dictated by the update check compiled into builds "
+                "users already have — see DEPLOYED_MATCHER. A dot ('2.4.3-exp.1') "
+                "is rejected by it and the release is skipped in silence; an "
+                "unpadded number sorts wrongly, with 'exp9' ABOVE 'exp10'."
+                % version)
+    if channel == "stable" and is_marked:
+        die("stable version %r carries an -exp prerelease marker" % version)
+
+    # Belt and braces, for both channels: whatever we publish must be readable by
+    # the update check already in users' hands, or nobody is ever told about it.
+    if not DEPLOYED_MATCHER.fullmatch(version):
+        die("version %r is not accepted by the update check compiled into "
+            "released builds (see DEPLOYED_MATCHER).\n"
+            "Those builds would parse it as invalid and skip this release "
+            "silently — it would be published and offered to nobody." % version)
+
+    # A preview must also sort above the newest preview already published, or it
+    # is invisible to exactly the people testing this channel. The stable check
+    # below does not imply it: `2.4.3-exp01` sorts above a `2.4.2` stable and
+    # below an existing `2.4.3-exp02`, so a mistyped or reused NN passes every
+    # other guard and reaches nobody who is already on the preview.
+    if channel == "experimental" and latest_experimental:
+        newest_exp = parse_semver(latest_experimental)
+        if newest_exp is None:
+            die("--latest-experimental %r is not a semantic version" % latest_experimental)
+        if semver_cmp(parsed, newest_exp) <= 0:
+            die("experimental version %r does not sort above the newest published "
+                "preview %r.\n"
+                "Testers already on that preview would never be offered this build: "
+                "the update check skips any release not newer than what they are "
+                "running. Bump the -expNN counter." % (version, latest_experimental))
+
+    if channel == "experimental" and latest_stable:
+        newest = parse_semver(latest_stable)
+        if newest is None:
+            die("--latest-stable %r is not a semantic version" % latest_stable)
+        if semver_cmp(parsed, newest) <= 0:
+            die("experimental version %r does not sort above the newest stable "
+                "release %r.\n"
+                "The in-app update check skips any release that is not newer than "
+                "what the user is running, so this build would be published and "
+                "then offered to nobody. Use the next patch version with an -exp "
+                "marker (e.g. %d.%d.%d-exp01)."
+                % (version, latest_stable, newest[0], newest[1], newest[2] + 1))
+
+
+def validate_tag(tag, channel, version):
+    """Check the tag that will actually be published.
+
+    Validating the *version* is not enough, because the tag is what the update
+    check reads: `consider_release()` strips the prefix and derives the offered
+    version from what is left, never from the binary's own `SoftFever_VERSION`.
+    A tag can therefore misrepresent the build it points at, and every path that
+    builds one — the plain form, a collision suffix, a manual override — is a
+    chance to do so. This is the single place all of them are checked, rather
+    than each being trusted to be careful.
+
+    Two ways it has gone wrong, both caught here:
+      * a collision suffix appended as `-<sha>` produces `2.4.3-exp01-<sha>`,
+        which the deployed matcher rejects outright (a second `-` component), and
+        `2.4.2-<sha>` on the stable channel, which parses but sorts *below* the
+        2.4.2 it re-cuts — so the rebuild is offered to nobody either way;
+      * an override naming a different version (`helio-exp-v9.9.9`) makes a
+        2.4.3-exp01 binary advertise itself as 9.9.9, so it is re-offered for
+        ever and no later stable release supersedes it.
+
+    Build metadata (`+<sha>`) is the one accepted decoration: the deployed
+    matcher takes it, and semver gives it equal precedence, which is the right
+    meaning for re-cutting a version that already shipped.
+    """
+    prefix = CHANNELS[channel][0]
+    if not tag.startswith(prefix):
+        die("tag %r does not start with %r, the prefix for the %s channel.\n"
+            "The update check reads the channel from the tag, so this tag would "
+            "misrepresent the build." % (tag, prefix, channel))
+
+    rest = tag[len(prefix):]
+    if not DEPLOYED_MATCHER.fullmatch(rest):
+        die("tag %r leaves %r after its prefix, which the update check compiled "
+            "into released builds cannot parse (see DEPLOYED_MATCHER).\n"
+            "Those builds skip the release in silence — it would be published "
+            "and offered to nobody." % (tag, rest))
+
+    # Compare the undecorated versions. Build metadata is a tag-side decoration
+    # — the collision path adds or replaces it — but `version.inc` may carry its
+    # own (`2.4.2+rebuild1`), and stripping it from only one side would reject
+    # every release of such a version.
+    named = rest.split("+", 1)[0]
+    compiled = version.split("+", 1)[0]
+    if named != compiled:
+        die("tag %r names version %r, but the tree being published is %r.\n"
+            "The update check takes the offered version from the tag rather than "
+            "from the binary, so users would be offered this build under a "
+            "version it is not, and ordering against later releases would be "
+            "decided by that wrong number." % (tag, named, version))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest="mode", required=True)
+
+    check = sub.add_parser("check", help="derive and validate the release channel")
+    check.add_argument("--header", required=True, help="path to HelioChannel.hpp")
+    check.add_argument("--version", required=True, help="version from version.inc")
+    check.add_argument("--branch", required=True, help="branch the release is cut from")
+    check.add_argument("--latest-stable", default="",
+                       help="newest published stable version; ordering is unchecked when empty")
+    check.add_argument("--latest-experimental", default="",
+                       help="newest published preview version; ordering is unchecked when empty")
+
+    tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
+    tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
+    tagp.add_argument("--channel", required=True, choices=sorted(CHANNELS))
+    tagp.add_argument("--version", required=True, help="version from version.inc")
+
+    args = ap.parse_args(argv)
+
+    if args.mode == "check-tag":
+        validate_tag(args.tag, args.channel, args.version)
+        print("tag %r is readable by released builds and names %s" % (args.tag, args.version))
+        return 0
+
+    channel = read_channel(args.header)
+    validate(channel, args.version, args.branch, args.latest_stable,
+             args.latest_experimental)
+
+    tag_prefix, prerelease, asset_tag, suffix = CHANNELS[channel]
+    for line in (
+        "channel=%s" % channel,
+        "tag_prefix=%s" % tag_prefix,
+        "prerelease=%s" % ("true" if prerelease else "false"),
+        "asset_tag=%s" % asset_tag,
+        "release_suffix=%s" % suffix,
+    ):
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

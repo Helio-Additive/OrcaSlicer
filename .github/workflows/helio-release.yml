@@ -8,26 +8,52 @@ on:
     types: [closed]
     branches:
       - orca-latest-parity-bambu
+      - helio-experimental
 
   workflow_dispatch:
     inputs:
       tag_override:
-        description: 'Optional tag name (default: helio-v{version})'
+        description: 'Optional tag name (default: helio-v{version}, or helio-exp-v{version} on the experimental channel)'
         type: string
         required: false
         default: ''
 
+# Serialised per release branch, which is one-to-one with the channel.
+#
+# Keying on the PR number let two release-labelled PRs merged inside the build
+# window (~1h) run at once. Both `check` jobs test whether the tag exists, both
+# see it absent, and both emit the same tag; the first run then creates it, and
+# the second publishes its assets onto the first run's release, because
+# `action-gh-release` updates an existing tag and `target_commitish` cannot move
+# one. The result is a release whose binaries are not from the commit it names.
+#
+# `cancel-in-progress: false` means the in-flight run is not killed, and the
+# next one waits; by the time it reaches `check` the tag exists, so the
+# collision path gives it a distinct one. Two releases then take twice as long,
+# which is the right trade against publishing mismatched assets.
+#
+# It is NOT a lossless queue, and must not be read as one. GitHub keeps at most
+# **one** pending run per group: if a third release arrives while one is running
+# and one is already pending, the third replaces the second and the second is
+# cancelled — never reaching `check`, let alone publishing. That is a real gap
+# for three same-channel releases in one build window, which this fork has never
+# had, and closing it properly needs an explicit queue rather than a concurrency
+# key. Recorded here rather than half-solved.
 concurrency:
-  group: helio-release-${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.number }}
+  group: helio-release-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   # Gate: for PR triggers, only run when a labeled, same-repo PR is actually merged
-  # For workflow_dispatch, only run on the release branch
+  # For workflow_dispatch, only run on a release branch — the stable one, or the
+  # experimental branch. Which channel is actually being published is decided by
+  # the checked-out HelioChannel.hpp, not by this condition; the `channel` step
+  # refuses when the two disagree.
   check:
     if: >-
       (github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/orca-latest-parity-bambu') || (
+        (github.ref == 'refs/heads/orca-latest-parity-bambu' ||
+         github.ref == 'refs/heads/helio-experimental')) || (
         github.event.pull_request.merged == true &&
         contains(github.event.pull_request.labels.*.name, 'release') &&
         github.event.pull_request.head.repo.full_name == github.repository
@@ -36,8 +62,16 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.tag.outputs.tag }}
+      channel: ${{ steps.channel.outputs.channel }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+      asset_tag: ${{ steps.channel.outputs.asset_tag }}
+      release_suffix: ${{ steps.channel.outputs.release_suffix }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # version_channel.py compares the version against the newest published
+          # stable release, which is read from the tags.
+          fetch-depth: 0
       - name: Extract version from version.inc
         id: ver
         run: |
@@ -53,10 +87,66 @@ jobs:
             exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Determine release channel
+        id: channel
+        # The channel is a property of the tree being built, not of who asked
+        # for the release: HelioChannel.hpp is what the binary compiles with.
+        # version_channel.py cross-checks it against the branch and enforces the
+        # version rules that make an experimental build visible to stable users
+        # in the update prompt — see the module docstring.
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Newest published stable release, for the ordering check. Tags are
+          # `helio-v<version>`; `sort -V` is only used to pick a candidate, and
+          # version_channel.py does the real semver comparison.
+          #
+          # Build metadata is stripped before filtering, not filtered out with
+          # the tag: `helio-v2.4.2+rebuild1` is a release of 2.4.2, and metadata
+          # carries no precedence. Dropping it would report the *previous*
+          # release as newest, and an experimental `2.4.2-exp01` would then pass
+          # the ordering guard while actually sorting below the real 2.4.2 — so
+          # everyone on 2.4.2 would never be offered it. The same silent shape
+          # the guard exists to catch, arriving through the guard's own input.
+          latest_stable=$(git tag --list 'helio-v*' \
+            | sed 's/^helio-v//; s/+.*$//' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -n1 || true)
+          echo "Newest published stable release: ${latest_stable:-<none>}"
+
+          # Newest published preview, for the other half of the ordering check.
+          # Sorting above the newest *stable* release does not imply sorting
+          # above the newest *preview*: 2.4.3-exp01 clears a 2.4.2 stable while
+          # sitting below an existing 2.4.3-exp02, so a reused or mistyped NN
+          # would publish and be invisible to precisely the people testing this
+          # channel. `sort -V` only picks a candidate; version_channel.py does
+          # the real comparison.
+          latest_experimental=$(git tag --list 'helio-exp-v*' \
+            | sed 's/^helio-exp-v//; s/+.*$//' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-exp[0-9]+$' \
+            | sort -V \
+            | tail -n1 || true)
+          echo "Newest published preview: ${latest_experimental:-<none>}"
+
+          python3 scripts/helio/version_channel.py check \
+            --header src/libslic3r/HelioChannel.hpp \
+            --version "$VERSION" \
+            --branch "$BRANCH" \
+            --latest-stable "$latest_stable" \
+            --latest-experimental "$latest_experimental" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
       - name: Determine release tag
         id: tag
         env:
           TAG_OVERRIDE: ${{ inputs.tag_override }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG_PREFIX: ${{ steps.channel.outputs.tag_prefix }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
         run: |
           set -euo pipefail
           # Use override if provided, otherwise auto-generate
@@ -66,15 +156,58 @@ jobs:
               echo "Error: tag_override is not a valid Git tag name" >&2
               exit 1
             fi
+            # An override may decorate the tag, but it may not change the channel
+            # or the version the tag claims — the update check derives both from
+            # the tag, never from the binary. So it must be the computed tag,
+            # optionally with `+<build metadata>`, which the deployed matcher
+            # accepts and semver gives equal precedence.
+            #
+            # A bare prefix check is not enough: `helio-exp-v9.9.9` carries the
+            # right prefix while making a 2.4.3-exp01 build advertise itself as
+            # 9.9.9, so it is re-offered for ever and no later stable release
+            # supersedes it. `check-tag` below is the backstop for all of this;
+            # this is the early, specific message.
+            case "$TAG_OVERRIDE" in
+              "${TAG_PREFIX}${VERSION}"|"${TAG_PREFIX}${VERSION}+"*) ;;
+              *)
+                echo "Error: tag_override '$TAG_OVERRIDE' is not a tag for this build." >&2
+                echo "This tree is a $CHANNEL build of $VERSION, so the tag must be" >&2
+                echo "'${TAG_PREFIX}${VERSION}', optionally followed by '+<build metadata>'." >&2
+                echo "The update check takes the channel and the offered version from the" >&2
+                echo "tag, so any other tag misrepresents what users would be installing." >&2
+                exit 1
+                ;;
+            esac
             tag="$TAG_OVERRIDE"
           else
-            tag="helio-v${{ steps.ver.outputs.version }}"
+            tag="${TAG_PREFIX}${VERSION}"
           fi
-          # If tag already exists, append short SHA to avoid collision
+          # If the tag already exists, disambiguate with the short SHA as semver
+          # BUILD METADATA (`+sha`), not as a further `-sha` component.
+          #
+          # `-sha` is what this did before, and it is wrong in both channels: on
+          # the experimental channel `2.4.3-exp01-<sha>` carries a second `-`
+          # component, which the update check compiled into released builds
+          # rejects outright, so the rebuild reaches nobody; on the stable
+          # channel `2.4.2-<sha>` parses but sorts *below* the 2.4.2 it re-cuts,
+          # because a prerelease ranks under its release — so it is offered to
+          # nobody either. Build metadata is accepted by that matcher and has
+          # equal precedence, which is the correct meaning for re-cutting a
+          # version that already shipped.
+          #
+          # Any metadata already on the tag is replaced rather than appended, so
+          # the result always carries exactly one `+`.
           if git ls-remote --tags origin "refs/tags/$tag" | grep -qF "refs/tags/$tag$"; then
-            sha="${{ github.event.pull_request.merge_commit_sha || github.sha }}"
-            tag="${tag}-$(echo $sha | cut -c1-7)"
+            tag="${tag%%+*}+$(echo "$MERGE_SHA" | cut -c1-7)"
           fi
+
+          # Backstop: whatever produced this tag — the plain form, the collision
+          # path, or an override — it must be readable by the update check in
+          # builds users already have, and must name the version compiled into
+          # this one.
+          python3 scripts/helio/version_channel.py check-tag \
+            --tag "$tag" --channel "$CHANNEL" --version "$VERSION"
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build_linux:
@@ -129,20 +262,47 @@ jobs:
 
       - name: Prepare release body
         id: body
+        # This text is not just for the Releases page: the in-app update dialog
+        # renders the release body verbatim, so for an experimental build it is
+        # the whole of what a stable user is told before deciding to install it.
+        # It leads with the warning for that reason.
         env:
           PR_BODY: ${{ github.event.pull_request.body || '' }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
+          VERSION: ${{ needs.check.outputs.version }}
+          CHANNEL: ${{ needs.check.outputs.channel }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           delim="HELIO_EOF_$(openssl rand -hex 8)"
           {
             echo "content<<$delim"
-            echo "## OrcaSlicer with Helio Additive — v${{ needs.check.outputs.version }}"
-            echo ""
+            if [ "$CHANNEL" = "experimental" ]; then
+              echo "## OrcaSlicer with Helio Additive — v${VERSION} (experimental preview)"
+              echo ""
+              echo "> **This is an early experimental build, not a finished release.**"
+              echo ">"
+              echo "> It exists so you can try features while they are still being developed."
+              echo "> They are incomplete, they may change or disappear in a later build, and"
+              echo "> their results are not yet reliable enough to base a real print on."
+              echo "> Anything experimental is marked as such where it appears in the app."
+              echo ">"
+              echo "> Installing this **replaces** your current installation. To go back before"
+              echo "> the next stable release, download the previous release from this page."
+              echo ">"
+              echo "> To stop being offered these builds, tick **Check for stable updates only**"
+              echo "> in the update dialog or in Preferences."
+              echo ""
+              echo "Feedback and bug reports are the point of this build — please send them."
+              echo ""
+            else
+              echo "## OrcaSlicer with Helio Additive — v${VERSION}"
+              echo ""
+            fi
             if [ -n "$PR_NUMBER" ]; then
               echo "Released from PR #${PR_NUMBER}: ${PR_TITLE}"
             else
-              echo "Manual release from branch ${{ github.ref_name }}"
+              echo "Manual release from branch ${REF_NAME}"
             fi
             echo ""
             echo "$PR_BODY"
@@ -150,6 +310,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Collect release assets
+        # ASSET_TAG carries the channel into every filename, so a downloaded
+        # file still says what it is once it is out of the browser and the
+        # release page is no longer in front of the user.
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          ASSET_TAG: ${{ needs.check.outputs.asset_tag }}
         run: |
           set -euo pipefail
           mkdir -p release
@@ -158,7 +324,7 @@ jobs:
           # macOS universal DMG
           dmg=$(find artifacts -name 'OrcaSlicer_Mac_universal_*.dmg' -print -quit)
           if [ -n "$dmg" ]; then
-            cp "$dmg" "release/OrcaSlicer_Helio_Mac_universal_${{ needs.check.outputs.version }}.dmg"
+            cp "$dmg" "release/OrcaSlicer_${ASSET_TAG}_Mac_universal_${VERSION}.dmg"
           else
             missing="$missing macOS-DMG"
           fi
@@ -166,7 +332,7 @@ jobs:
           # Windows installer
           installer=$(find artifacts -name 'OrcaSlicer_Windows_Installer_*.exe' -print -quit)
           if [ -n "$installer" ]; then
-            cp "$installer" "release/OrcaSlicer_Helio_Windows_Installer_${{ needs.check.outputs.version }}.exe"
+            cp "$installer" "release/OrcaSlicer_${ASSET_TAG}_Windows_Installer_${VERSION}.exe"
           else
             missing="$missing Windows-Installer"
           fi
@@ -174,7 +340,7 @@ jobs:
           # Windows portable — the artifact is a directory, re-zip it
           portable_dir=$(find artifacts -maxdepth 1 -type d -name 'OrcaSlicer_Windows_*_portable' -print -quit)
           if [ -n "$portable_dir" ]; then
-            (cd "$portable_dir" && zip -r "$GITHUB_WORKSPACE/release/OrcaSlicer_Helio_Windows_${{ needs.check.outputs.version }}_portable.zip" .)
+            (cd "$portable_dir" && zip -r "$GITHUB_WORKSPACE/release/OrcaSlicer_${ASSET_TAG}_Windows_${VERSION}_portable.zip" .)
           else
             missing="$missing Windows-Portable"
           fi
@@ -182,7 +348,7 @@ jobs:
           # Linux AppImage
           appimage=$(find artifacts -name 'OrcaSlicer_Linux_AppImage*.AppImage' -print -quit)
           if [ -n "$appimage" ]; then
-            cp "$appimage" "release/OrcaSlicer_Helio_Linux_${{ needs.check.outputs.version }}.AppImage"
+            cp "$appimage" "release/OrcaSlicer_${ASSET_TAG}_Linux_${VERSION}.AppImage"
           else
             missing="$missing Linux-AppImage"
           fi
@@ -199,13 +365,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check.outputs.tag }}
-          name: "Helio v${{ needs.check.outputs.version }}"
+          name: "Helio v${{ needs.check.outputs.version }}${{ needs.check.outputs.release_suffix }}"
           target_commitish: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           body: ${{ steps.body.outputs.content }}
           files: release/*
           draft: false
+          # An experimental release is always a prerelease: that keeps it off
+          # "Latest release" on the repository page, and it is what the in-app
+          # update check reads to treat it as a preview rather than as the
+          # current release — a user who has ticked "Check for stable updates
+          # only" is then not offered it.
           prerelease: >-
             ${{
+              needs.check.outputs.prerelease == 'true' ||
               contains(needs.check.outputs.version, 'rc') ||
               contains(needs.check.outputs.version, 'RC') ||
               contains(needs.check.outputs.version, 'beta') ||

@@ -678,6 +678,9 @@ public:
     static void     request_helio_pat(std::function<void(std::string)> func);
     static void     request_helio_supported_data(bool force_refresh = false);
 
+    // Helio experimental channel: no-op in a stable build.
+    void            show_helio_experimental_notice();
+
     // Parameters extracted from the command line to be passed to GUI after initialization.
     GUI_InitParams* init_params { nullptr };
 
