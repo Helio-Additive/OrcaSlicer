@@ -97,6 +97,11 @@ def comparator_cases():
         ("cmp: prerelease above older release", "2.4.3-exp.1", "2.4.2", 1),
         ("cmp: exp.2 after exp.1", "2.4.3-exp.1", "2.4.3-exp.2", -1),
         ("cmp: exp.10 after exp.9", "2.4.3-exp.9", "2.4.3-exp.10", -1),
+        ("cmp: published format below its release", "2.4.3-exp01", "2.4.3", -1),
+        ("cmp: published format above older release", "2.4.3-exp01", "2.4.2", 1),
+        ("cmp: exp02 after exp01", "2.4.3-exp01", "2.4.3-exp02", -1),
+        ("cmp: exp10 after exp09 (padding)", "2.4.3-exp09", "2.4.3-exp10", -1),
+        ("cmp: unpadded would invert", "2.4.3-exp9", "2.4.3-exp10", 1),
         ("cmp: numeric below alphanumeric", "2.4.3-1", "2.4.3-exp", -1),
         ("cmp: longer prerelease wins ties", "2.4.3-exp", "2.4.3-exp.1", -1),
     ):
@@ -120,14 +125,35 @@ def main():
               and o.get("tag_prefix") == "helio-v" and o.get("prerelease") == "false"
               and o.get("asset_tag") == "Helio", p.stderr)
 
-        p = run_channel(experimental, "2.4.3-exp.1", "helio-experimental", "2.4.2")
+        p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "2.4.2")
         o = outputs(p)
         check("experimental release", p.returncode == 0 and o.get("channel") == "experimental"
               and o.get("tag_prefix") == "helio-exp-v" and o.get("prerelease") == "true"
               and o.get("asset_tag") == "Helio_EXPERIMENTAL", p.stderr)
 
+        # --- the format the deployed update check can actually read -----------
+        # Found by Codex on #130. `get_version()` applies the shipped regex with
+        # std::regex_match — whole-string — and its prerelease group is
+        # `(-[A-Za-z0-9]+)?`, which forbids a dot. The originally-specified
+        # `-exp.1` therefore parses as invalid in every released build and the
+        # release is skipped in silence: published, visible on the Releases page,
+        # offered to nobody. This is not fixable in the C++, because the clients
+        # that must read the tag are the builds already installed.
+        p = run_channel(experimental, "2.4.3-exp.1", "helio-experimental", "2.4.2")
+        check("dotted prerelease rejected", p.returncode != 0, p.stdout)
+        check("  ... and names the cause", "DEPLOYED_MATCHER" in p.stderr or "expNN" in p.stderr,
+              p.stderr)
+
+        # Unpadded sorts wrongly at the tenth build: prerelease identifiers that
+        # are not purely numeric compare as strings, so `exp9` > `exp10`.
+        p = run_channel(experimental, "2.4.3-exp1", "helio-experimental", "2.4.2")
+        check("unpadded exp number rejected", p.returncode != 0, p.stdout)
+
+        p = run_channel(experimental, "2.4.3-exp10", "helio-experimental", "2.4.2")
+        check("two-digit exp number accepted", p.returncode == 0, p.stderr)
+
         # --- channel/branch disagreement -------------------------------------
-        p = run_channel(experimental, "2.4.3-exp.1", "orca-latest-parity-bambu", "2.4.2")
+        p = run_channel(experimental, "2.4.3-exp01", "orca-latest-parity-bambu", "2.4.2")
         check("experimental tree, stable branch", p.returncode != 0, p.stdout)
 
         p = run_channel(stable, "2.4.2", "helio-experimental", "2.4.1")
@@ -139,29 +165,30 @@ def main():
         # A header that contradicts itself means one of the two lines was missed
         # when the experimental branch was cut; the binary and its label would
         # then describe different things.
-        p = run_channel(contradictory, "2.4.3-exp.1", "helio-experimental", "2.4.2")
+        p = run_channel(contradictory, "2.4.3-exp01", "helio-experimental", "2.4.2")
         check("self-contradictory header", p.returncode != 0, p.stdout)
 
         # --- version markers --------------------------------------------------
         p = run_channel(experimental, "2.4.3", "helio-experimental", "2.4.2")
         check("experimental without -exp marker", p.returncode != 0, p.stdout)
 
-        p = run_channel(stable, "2.4.3-exp.1", "orca-latest-parity-bambu", "2.4.2")
+        p = run_channel(stable, "2.4.3-exp01", "orca-latest-parity-bambu", "2.4.2")
         check("stable carrying -exp marker", p.returncode != 0, p.stdout)
 
         # --- ordering: the silent one -----------------------------------------
-        # 2.4.2-exp.1 sorts *below* the 2.4.2 stable release, so the update check
-        # skips it and no stable user is ever shown it.
-        p = run_channel(experimental, "2.4.2-exp.1", "helio-experimental", "2.4.2")
+        # 2.4.2-exp01 sorts *below* the 2.4.2 stable release, so the update check
+        # skips it and no stable user is ever shown it. The version is otherwise
+        # well-formed, so this fails on ordering alone.
+        p = run_channel(experimental, "2.4.2-exp01", "helio-experimental", "2.4.2")
         check("experimental_not_above_stable", p.returncode != 0, p.stdout)
         check("  ... and says why", "offered to nobody" in p.stderr, p.stderr)
 
-        p = run_channel(experimental, "2.4.1-exp.1", "helio-experimental", "2.4.2")
+        p = run_channel(experimental, "2.4.1-exp01", "helio-experimental", "2.4.2")
         check("experimental below an older stable", p.returncode != 0, p.stdout)
 
         # Ordering is unenforceable with no published stable release; that must
         # not be fatal, or the very first release could never be cut.
-        p = run_channel(experimental, "2.4.3-exp.1", "helio-experimental", "")
+        p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "")
         check("no stable release published yet", p.returncode == 0, p.stderr)
 
         # The prerelease must stay below the release it anticipates, or testers
@@ -173,7 +200,7 @@ def main():
         tag_step = step_body("check", "Determine release tag")
         for label, prefix, version, want in (
             ("tag: stable", "helio-v", "2.4.2", "helio-v2.4.2"),
-            ("tag: experimental", "helio-exp-v", "2.4.3-exp.1", "helio-exp-v2.4.3-exp.1"),
+            ("tag: experimental", "helio-exp-v", "2.4.3-exp01", "helio-exp-v2.4.3-exp01"),
         ):
             env = dict(os.environ, TAG_OVERRIDE="", VERSION=version, TAG_PREFIX=prefix,
                        MERGE_SHA="0123456789abcdef", GITHUB_OUTPUT=os.path.join(tmp, "out"))

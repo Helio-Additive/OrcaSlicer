@@ -234,7 +234,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - `OnExit()` calls `HelioQuery::shutdown_background_requests()` so support-data
   workers are torn down cleanly — keep this line when upstream reworks `OnExit()`
 - **`check_new_version_sf()` — the tag-prefix strip is Helio's and is load-bearing.**
-  It turns `helio-v1.2.3` and `helio-exp-v1.2.3-exp.1` into versions the update
+  It turns `helio-v1.2.3` and `helio-exp-v1.2.3-exp01` into versions the update
   check can compare. `VERSION_CHECK_URL` in `AppConfig.cpp` points at *this
   fork's* releases, so dropping this in a merge does not fall back to something
   harmless: every release stops parsing and users are silently never told about
@@ -980,14 +980,35 @@ What keeps it honest:
 
 ### The version rule (the part that is easy to get backwards)
 
-An experimental version must sort **above the newest stable release** and **below
-the stable release it anticipates**: `2.4.3-exp.1` against a `2.4.2` stable.
+An experimental version must be exactly `X.Y.Z-expNN`, must sort **above the
+newest stable release**, and must sort **below the stable release it
+anticipates**: `2.4.3-exp01` against a `2.4.2` stable.
 
 | version | result |
 |-|-|
-| `2.4.3-exp.1` | correct — offered to 2.4.2 users, superseded when 2.4.3 ships |
-| `2.4.2-exp.1` | **publishes, looks healthy, is offered to nobody** — the update check skips any release not newer than what the user runs |
+| `2.4.3-exp01` | correct — offered to 2.4.2 users, superseded when 2.4.3 ships |
+| `2.4.2-exp01` | **publishes, looks healthy, is offered to nobody** — the update check skips any release not newer than what the user runs |
 | `2.4.3` (no marker) | replaces the stable release in the prompt instead of being a preview; testers are never moved back onto stable |
+| `2.4.3-exp.1` | **invalid to every released build** — see below |
+| `2.4.3-exp1` | parses, but `exp9` sorts *above* `exp10`, so the tenth build of a version looks older than the ninth |
+
+**Why the format is this rigid — and why the C++ cannot fix it.** `get_version()`
+applies its regex with `std::regex_match`, so the *whole* version string must
+match, and the prerelease group is `(-[A-Za-z0-9]+)?` — no dot. A dotted
+prerelease parses as invalid, and `consider_release()` drops that release
+without a word: published, listed on the Releases page, offered to nobody.
+
+The instinct is to widen the parser. It does not work. The clients that have to
+read an experimental release are the **stable builds already installed on users'
+machines**, and their copy of that regex was fixed when they were compiled.
+Widening it today would only help builds that do not exist yet, so the published
+*version format* is the only side of this that can be changed. `version_channel.py`
+therefore carries the deployed regex verbatim as `DEPLOYED_MATCHER` and refuses
+anything it would reject — for both channels.
+
+The zero-padding is the other half: prerelease identifiers that are not purely
+numeric compare as strings. Both facts were verified against the shipped matcher
+and against `deps_src/semver`, the library the app actually links.
 
 `scripts/helio/version_channel.py` enforces all of this at release time and
 refuses to publish otherwise; `scripts/helio/test_release_channel.py` pins the
@@ -1000,8 +1021,8 @@ rules, including the silent case, and runs in `helio-sync-guard-tests.yml`.
 2. In `src/libslic3r/HelioChannel.hpp`, set `HELIO_EXPERIMENTAL_BUILD` to `1` and
    `HELIO_RELEASE_CHANNEL` to `"experimental"`. **Both lines** — the release
    workflow refuses a header that contradicts itself.
-3. In `version.inc`, set `SoftFever_VERSION` to the next patch with an `-exp.N`
-   marker (`2.4.3-exp.1`).
+3. In `version.inc`, set `SoftFever_VERSION` to the next patch with an `-expNN`
+   marker (`2.4.3-exp01`) — two digits, zero-padded, no dot.
 4. Push, then dispatch `helio-release.yml` from that branch.
 
 The graduation step, when a feature is ready, is to delete its

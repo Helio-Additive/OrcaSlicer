@@ -14,18 +14,19 @@ stable users, through the ordinary in-app update prompt:
     what the binary actually compiled with. The branch is cross-checked against
     it, so a build cannot be published under the other channel's tag.
 
-  * An experimental version must carry an `-exp` prerelease marker, and must sort
-    strictly above the newest stable release. Both halves matter, and they pull
-    in opposite directions:
+  * An experimental version must be exactly `X.Y.Z-expNN` — see DEPLOYED_MATCHER
+    below for why the shape is this rigid — and must sort strictly above the
+    newest stable release. Both halves matter, and they pull in opposite
+    directions:
 
       - above the newest stable release, or the update check skips it
         (`chosen_version <= current_version` returns early) and no stable user is
         ever offered it;
       - below the stable release it anticipates, so that when 2.4.3 ships, the
-        testers running 2.4.3-exp.1 are moved onto it rather than stranded on a
-        prerelease for ever. `-exp` gives that for free under semver.
+        testers running 2.4.3-exp01 are moved onto it rather than stranded on a
+        prerelease for ever. The prerelease marker gives that for free.
 
-    2.4.3-exp.1 against a 2.4.2 stable satisfies both. 2.4.2-exp.1 would be
+    2.4.3-exp01 against a 2.4.2 stable satisfies both. 2.4.2-exp01 would be
     published, look correct, and be silently invisible to every stable user.
 """
 import argparse
@@ -33,6 +34,28 @@ import re
 import sys
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+
+# The version regex compiled into every *released* build's update check
+# (`GUI_App.cpp`, `check_new_version_sf`). It is applied with `std::regex_match`,
+# so it must match the WHOLE version string; a version it rejects parses as
+# invalid and that release is skipped silently — never shown to anyone, with
+# nothing failing anywhere.
+#
+# This is the constraint that cannot be fixed by changing the C++. The clients
+# that have to read an experimental release are the stable builds already
+# installed on users' machines, and their copy of this regex was fixed when they
+# were compiled. Widening the parser today would only help builds that do not
+# exist yet, so the *published version format* is what has to comply.
+#
+# Two consequences, both verified against the shipped matcher and the semver
+# library the app links:
+#   * no dot in the prerelease — `2.4.3-exp.1` is rejected outright;
+#   * zero-padded, because prerelease identifiers compare as strings once they
+#     are not purely numeric: `exp9` sorts ABOVE `exp10`, so the tenth build of a
+#     version would be treated as older than the ninth. `exp09` < `exp10`.
+DEPLOYED_MATCHER = re.compile(r"[0-9]+\.[0-9]+(\.[0-9]+)*(-[A-Za-z0-9]+)?(\+[A-Za-z0-9]+)?")
+
+EXPERIMENTAL_VERSION = re.compile(r"^\d+\.\d+\.\d+-exp\d{2}$")
 
 STABLE_BRANCH = "orca-latest-parity-bambu"
 EXPERIMENTAL_BRANCH = "helio-experimental"
@@ -131,14 +154,31 @@ def validate(channel, version, branch, latest_stable):
         die("version %r is not a semantic version" % version)
 
     is_marked = parsed[3] is not None and any(p.startswith("exp") for p in parsed[3])
-    if channel == "experimental" and not is_marked:
-        die("experimental version %r carries no -exp prerelease marker.\n"
-            "Without it the build sorts as a final release: it would replace the "
-            "stable release in the update prompt instead of being offered as a "
-            "preview, and testers would never be moved back onto stable."
-            % version)
+    if channel == "experimental":
+        if not is_marked:
+            die("experimental version %r carries no -exp prerelease marker.\n"
+                "Without it the build sorts as a final release: it would replace the "
+                "stable release in the update prompt instead of being offered as a "
+                "preview, and testers would never be moved back onto stable."
+                % version)
+        if not EXPERIMENTAL_VERSION.match(version):
+            die("experimental version %r is not of the form X.Y.Z-expNN "
+                "(two digits, zero-padded, no dot).\n"
+                "The shape is dictated by the update check compiled into builds "
+                "users already have — see DEPLOYED_MATCHER. A dot ('2.4.3-exp.1') "
+                "is rejected by it and the release is skipped in silence; an "
+                "unpadded number sorts wrongly, with 'exp9' ABOVE 'exp10'."
+                % version)
     if channel == "stable" and is_marked:
         die("stable version %r carries an -exp prerelease marker" % version)
+
+    # Belt and braces, for both channels: whatever we publish must be readable by
+    # the update check already in users' hands, or nobody is ever told about it.
+    if not DEPLOYED_MATCHER.fullmatch(version):
+        die("version %r is not accepted by the update check compiled into "
+            "released builds (see DEPLOYED_MATCHER).\n"
+            "Those builds would parse it as invalid and skip this release "
+            "silently — it would be published and offered to nobody." % version)
 
     if channel == "experimental" and latest_stable:
         newest = parse_semver(latest_stable)
@@ -150,7 +190,7 @@ def validate(channel, version, branch, latest_stable):
                 "The in-app update check skips any release that is not newer than "
                 "what the user is running, so this build would be published and "
                 "then offered to nobody. Use the next patch version with an -exp "
-                "marker (e.g. %d.%d.%d-exp.1)."
+                "marker (e.g. %d.%d.%d-exp01)."
                 % (version, latest_stable, newest[0], newest[1], newest[2] + 1))
 
 

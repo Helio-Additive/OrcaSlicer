@@ -5702,7 +5702,7 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
                 std::string tag = *tag_opt;
 
                 // Strip Helio tag prefix (helio-v1.2.3 → 1.2.3,
-                // helio-exp-v1.2.3-exp.1 → 1.2.3-exp.1).
+                // helio-exp-v1.2.3-exp01 → 1.2.3-exp01).
                 //
                 // Experimental releases are published as GitHub prereleases and
                 // are deliberately offered to stable users: they land in
@@ -5710,7 +5710,7 @@ void GUI_App::check_new_version_sf(bool show_tips, int by_user)
                 // stable updates only" is unticked, and the update dialog
                 // carries that checkbox next to Skip/Cancel. The experimental
                 // version sorts above the stable release it branches from and
-                // below the next stable one (2.4.3-exp.1), so testers are
+                // below the next stable one (2.4.3-exp01), so testers are
                 // offered it now and rolled back onto stable when 2.4.3 ships.
                 // helio-release.yml enforces both properties at publish time.
                 const std::string helio_prefix = HELIO_STABLE_TAG_PREFIX;
