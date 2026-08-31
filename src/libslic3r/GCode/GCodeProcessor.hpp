@@ -172,6 +172,8 @@ class Print;
         FilamentPrintableResult filament_printable_reuslt;
         float initial_layer_time;
         bool is_helio_gcode{false};
+        float warpage_wdm_p95{ NAN };
+        float warpage_whs_p95{ NAN };
 
         struct SettingsIds
         {
@@ -329,6 +331,8 @@ class Print;
             filament_change_count_map = other.filament_change_count_map;
             initial_layer_time = other.initial_layer_time;
             is_helio_gcode = other.is_helio_gcode;
+            warpage_wdm_p95 = other.warpage_wdm_p95;
+            warpage_whs_p95 = other.warpage_whs_p95;
 #if ENABLE_GCODE_VIEWER_STATISTICS
             time = other.time;
 #endif

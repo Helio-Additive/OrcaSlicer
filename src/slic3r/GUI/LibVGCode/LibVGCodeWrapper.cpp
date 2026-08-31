@@ -192,6 +192,8 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
     const std::vector<std::string>& str_color_print_colors, const Viewer& viewer)
 {
     GCodeInputData ret;
+    ret.warpage_wdm_p95 = result.warpage_wdm_p95;
+    ret.warpage_whs_p95 = result.warpage_whs_p95;
 
     // collect tool colors
     ret.tools_colors.reserve(str_tool_colors.size());

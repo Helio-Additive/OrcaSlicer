@@ -995,6 +995,8 @@ void ViewerImpl::load(GCodeInputData&& gcode_data)
     m_vertices = std::move(gcode_data.vertices);
     m_tool_colors = std::move(gcode_data.tools_colors);
     m_color_print_colors = std::move(gcode_data.color_print_colors);
+    m_warpage_wdm_p95 = gcode_data.warpage_wdm_p95;
+    m_warpage_whs_p95 = gcode_data.warpage_whs_p95;
     m_vertices_colors.resize(m_vertices.size());
 
     m_settings.spiral_vase_mode = gcode_data.spiral_vase_mode;
@@ -1964,7 +1966,22 @@ void ViewerImpl::update_color_ranges()
     m_warpage_ranges[1].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[2].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[3].set_palette(WARPAGE_DIVERGING);
+    m_warpage_ranges[5].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[7].set_palette(WARPAGE_DARK);
+    m_warpage_ranges[4].update(0.0f);
+    m_warpage_ranges[4].update(1.0f);
+    if (!std::isnan(m_warpage_wdm_p95)) {
+        m_warpage_ranges[0].update(0.0f);
+        m_warpage_ranges[0].update(m_warpage_wdm_p95);
+        for (size_t i = 1; i <= 3; ++i) {
+            m_warpage_ranges[i].update(-m_warpage_wdm_p95);
+            m_warpage_ranges[i].update(m_warpage_wdm_p95);
+        }
+    }
+    if (!std::isnan(m_warpage_whs_p95)) {
+        m_warpage_ranges[7].update(0.0f);
+        m_warpage_ranges[7].update(m_warpage_whs_p95);
+    }
     // Anchor to fixed [-100, +100] so colors always match the legend
     m_thermal_index_mean_range.update(-100.0f);
     m_thermal_index_mean_range.update(100.0f);
@@ -2002,7 +2019,9 @@ void ViewerImpl::update_color_ranges()
                 v.warpage_disp_z, v.warpage_risk, v.warpage_ti_gradient, v.warpage_thermal_strain,
                 v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
             for (size_t j = 0; j < warpage_values.size(); ++j)
-                if (!std::isnan(warpage_values[j]))
+                if (!std::isnan(warpage_values[j]) && j != 4 &&
+                    (std::isnan(m_warpage_wdm_p95) || j > 3) &&
+                    (std::isnan(m_warpage_whs_p95) || j != 7))
                     m_warpage_ranges[j].update(warpage_values[j]);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
@@ -2014,16 +2033,6 @@ void ViewerImpl::update_color_ranges()
             m_acceleration_range.update(v.acceleration);
             // ORCA: Add Jerk visualization support
             m_jerk_range.update(v.jerk);
-        }
-    }
-
-    // Directional displacement uses a diverging palette, whose middle color must represent zero.
-    for (size_t i = 1; i <= 3; ++i) {
-        const std::array<float, 2>& range = m_warpage_ranges[i].get_range();
-        if (range[0] <= range[1]) {
-            const float extent = std::max(std::abs(range[0]), std::abs(range[1]));
-            m_warpage_ranges[i].update(-extent);
-            m_warpage_ranges[i].update(extent);
         }
     }
 

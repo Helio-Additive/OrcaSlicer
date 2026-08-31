@@ -22,6 +22,7 @@
 
 #include <string>
 #include <optional>
+#include <limits>
 
 namespace libvgcode {
 
@@ -300,6 +301,8 @@ private:
     ColorRange m_thermal_index_min_range;
     ColorRange m_thermal_index_max_range;
     std::array<ColorRange, 9> m_warpage_ranges;
+    float m_warpage_wdm_p95{ std::numeric_limits<float>::quiet_NaN() };
+    float m_warpage_whs_p95{ std::numeric_limits<float>::quiet_NaN() };
     ColorRange m_volumetric_rate_range;
     ColorRange m_actual_volumetric_rate_range;
     std::array<ColorRange, COLOR_RANGE_TYPES_COUNT> m_layer_time_range{
