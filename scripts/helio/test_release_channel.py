@@ -287,6 +287,47 @@ def main():
                            capture_output=True, text=True)
         check("baseline: above it is accepted", r.returncode == 0, r.stderr[:200])
 
+        # --- the first experimental release ------------------------------------
+        # The case that will actually run first, and the one no other case
+        # covers: a stable release exists, no experimental one does yet. Worth
+        # pinning because the ordering guard reads only `helio-v*` tags, so
+        # "no experimental releases yet" must not be a distinct input — and
+        # `helio-exp-v…` must not be picked up by that glob, or the baseline
+        # would start comparing experimental releases against each other.
+        first = os.path.join(tmp, "first")
+        os.makedirs(os.path.join(first, "scripts", "helio"), exist_ok=True)
+        os.makedirs(os.path.join(first, "src", "libslic3r"), exist_ok=True)
+        shutil.copy2(SCRIPT, os.path.join(first, "scripts", "helio", "version_channel.py"))
+        shutil.copy2(experimental, os.path.join(first, "src", "libslic3r", "HelioChannel.hpp"))
+        subprocess.run(["git", "init", "-q", first], check=True)
+        gitenv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
+                      GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+        subprocess.run(["git", "-C", first, "commit", "-q", "--allow-empty", "-m", "x"],
+                       check=True, env=gitenv)
+        subprocess.run(["git", "-C", first, "tag", "helio-v2.4.2"], check=True)
+
+        env = dict(os.environ, VERSION="2.4.3-exp01", BRANCH="helio-experimental",
+                   GITHUB_OUTPUT=os.path.join(tmp, "fout"))
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=first, env=env,
+                           capture_output=True, text=True)
+        out = open(env["GITHUB_OUTPUT"]).read()
+        check("first experimental release accepted",
+              r.returncode == 0 and "channel=experimental" in out and "prerelease=true" in out,
+              "rc=%d out=%r err=%s" % (r.returncode, out, r.stderr[:200]))
+        check("  ... baseline saw the stable release",
+              "Newest published stable release: 2.4.2" in r.stdout, r.stdout[:200])
+
+        # Once one exists, it must not become the stable baseline.
+        subprocess.run(["git", "-C", first, "tag", "helio-exp-v2.4.3-exp01"], check=True)
+        env["VERSION"] = "2.4.3-exp02"
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=first, env=env,
+                           capture_output=True, text=True)
+        check("second experimental release accepted", r.returncode == 0, r.stderr[:200])
+        check("  ... exp tag not read as stable",
+              "Newest published stable release: 2.4.2" in r.stdout, r.stdout[:200])
+
         # --- the real tag step -------------------------------------------------
         # An override that changes the channel prefix would bypass the
         # channel/branch cross-check entirely: the assets and prerelease flag
