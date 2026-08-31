@@ -238,10 +238,13 @@ def validate_tag(tag, channel, version):
             "Those builds skip the release in silence — it would be published "
             "and offered to nobody." % (tag, rest))
 
-    # Ignoring build metadata, the tag must name the version that was validated
-    # and compiled.
+    # Compare the undecorated versions. Build metadata is a tag-side decoration
+    # — the collision path adds or replaces it — but `version.inc` may carry its
+    # own (`2.4.2+rebuild1`), and stripping it from only one side would reject
+    # every release of such a version.
     named = rest.split("+", 1)[0]
-    if named != version:
+    compiled = version.split("+", 1)[0]
+    if named != compiled:
         die("tag %r names version %r, but the tree being published is %r.\n"
             "The update check takes the offered version from the tag rather than "
             "from the binary, so users would be offered this build under a "

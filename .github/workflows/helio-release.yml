@@ -81,8 +81,16 @@ jobs:
           # Newest published stable release, for the ordering check. Tags are
           # `helio-v<version>`; `sort -V` is only used to pick a candidate, and
           # version_channel.py does the real semver comparison.
+          #
+          # Build metadata is stripped before filtering, not filtered out with
+          # the tag: `helio-v2.4.2+rebuild1` is a release of 2.4.2, and metadata
+          # carries no precedence. Dropping it would report the *previous*
+          # release as newest, and an experimental `2.4.2-exp01` would then pass
+          # the ordering guard while actually sorting below the real 2.4.2 — so
+          # everyone on 2.4.2 would never be offered it. The same silent shape
+          # the guard exists to catch, arriving through the guard's own input.
           latest_stable=$(git tag --list 'helio-v*' \
-            | sed 's/^helio-v//' \
+            | sed 's/^helio-v//; s/+.*$//' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V \
             | tail -n1 || true)

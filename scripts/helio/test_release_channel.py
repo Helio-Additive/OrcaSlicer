@@ -209,6 +209,17 @@ def main():
         p = run_channel(stable, "2.4.3", "orca-latest-parity-bambu", "2.4.2")
         check("stable supersedes its own prerelease", p.returncode == 0, p.stderr)
 
+        # --- metadata-bearing versions and tags --------------------------------
+        # Found by Codex on #130. Build metadata is a tag-side decoration, but
+        # `version.inc` may carry its own, and stripping it from only one side
+        # would reject every release of such a version.
+        ok = run_check_tag("helio-v2.4.2+rebuild1", "stable", "2.4.2+rebuild1")
+        check("tag check: metadata on both sides", ok.returncode == 0, ok.stderr)
+        ok = run_check_tag("helio-v2.4.2+sha1234", "stable", "2.4.2+rebuild1")
+        check("tag check: collision replaces metadata", ok.returncode == 0, ok.stderr)
+        bad = run_check_tag("helio-v9.9.9+rebuild1", "stable", "2.4.2+rebuild1")
+        check("tag check: metadata does not mask a rename", bad.returncode != 0, bad.stdout)
+
         # --- the published tag itself ------------------------------------------
         # Found by Codex on #130. Validating the version is not enough: the
         # update check derives the offered version from the TAG, never from the
@@ -240,6 +251,41 @@ def main():
 
         bad = run_check_tag("helio-v2.4.2", "experimental", "2.4.3-exp01")
         check("tag check: wrong channel prefix rejected", bad.returncode != 0, bad.stdout)
+
+        # --- the real baseline step --------------------------------------------
+        # The ordering guard is only as good as the baseline it is given. A
+        # stable release whose only tag carries build metadata must still count
+        # as that release; discarding it reports the previous one as newest and
+        # lets an experimental build that sorts BELOW the real release through.
+        # Runs the shipped step body against real tags.
+        chan_step = step_body("check", "Determine release channel")
+        base = os.path.join(tmp, "baseline")
+        os.makedirs(os.path.join(base, "scripts", "helio"), exist_ok=True)
+        os.makedirs(os.path.join(base, "src", "libslic3r"), exist_ok=True)
+        shutil.copy2(SCRIPT, os.path.join(base, "scripts", "helio", "version_channel.py"))
+        shutil.copy2(experimental, os.path.join(base, "src", "libslic3r", "HelioChannel.hpp"))
+        subprocess.run(["git", "init", "-q", base], check=True)
+        subprocess.run(["git", "-C", base, "commit", "-q", "--allow-empty", "-m", "x"],
+                       check=True, env=dict(os.environ, GIT_AUTHOR_NAME="t",
+                                            GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t",
+                                            GIT_COMMITTER_EMAIL="t@e"))
+        for t in ("helio-v2.4.1", "helio-v2.4.2+rebuild1"):
+            subprocess.run(["git", "-C", base, "tag", t], check=True)
+
+        env = dict(os.environ, VERSION="2.4.2-exp01", BRANCH="helio-experimental",
+                   GITHUB_OUTPUT=os.path.join(tmp, "bout"))
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=base, env=env,
+                           capture_output=True, text=True)
+        # 2.4.2-exp01 sorts below the real 2.4.2, so this must be refused.
+        check("baseline: metadata tag counts as its release", r.returncode != 0,
+              "expected refusal, rc=%d out=%s" % (r.returncode, r.stdout[:200]))
+
+        env["VERSION"] = "2.4.3-exp01"
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=base, env=env,
+                           capture_output=True, text=True)
+        check("baseline: above it is accepted", r.returncode == 0, r.stderr[:200])
 
         # --- the real tag step -------------------------------------------------
         # An override that changes the channel prefix would bypass the
