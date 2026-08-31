@@ -27,10 +27,18 @@ on:
 # `action-gh-release` updates an existing tag and `target_commitish` cannot move
 # one. The result is a release whose binaries are not from the commit it names.
 #
-# `cancel-in-progress: false` means the second run queues rather than being
-# dropped, and by the time it reaches `check` the tag exists, so the collision
-# path gives it a distinct one. Two releases then take twice as long, which is
-# the right trade against publishing mismatched assets.
+# `cancel-in-progress: false` means the in-flight run is not killed, and the
+# next one waits; by the time it reaches `check` the tag exists, so the
+# collision path gives it a distinct one. Two releases then take twice as long,
+# which is the right trade against publishing mismatched assets.
+#
+# It is NOT a lossless queue, and must not be read as one. GitHub keeps at most
+# **one** pending run per group: if a third release arrives while one is running
+# and one is already pending, the third replaces the second and the second is
+# cancelled — never reaching `check`, let alone publishing. That is a real gap
+# for three same-channel releases in one build window, which this fork has never
+# had, and closing it properly needs an explicit queue rather than a concurrency
+# key. Recorded here rather than half-solved.
 concurrency:
   group: helio-release-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: false
