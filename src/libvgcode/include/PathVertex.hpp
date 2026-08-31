@@ -8,6 +8,7 @@
 #include "Types.hpp"
 
 #include <cfloat>
+#include <cmath>
 
 namespace libvgcode {
 
@@ -106,6 +107,15 @@ struct PathVertex
     float thermal_index_mean{ -200.0f };
     float thermal_index_min{ -200.0f };
     float thermal_index_max{ -200.0f };
+    float warpage_displacement{ NAN };
+    float warpage_disp_x{ NAN };
+    float warpage_disp_y{ NAN };
+    float warpage_disp_z{ NAN };
+    float warpage_risk{ NAN };
+    float warpage_ti_gradient{ NAN };
+    float warpage_thermal_strain{ NAN };
+    float warpage_hull_shrinkage{ NAN };
+    float warpage_layer_shrinkage{ NAN };
 
     //
     // Return true if the segment is an extrusion move
