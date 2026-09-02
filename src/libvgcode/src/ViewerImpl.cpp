@@ -1970,7 +1970,9 @@ void ViewerImpl::update_color_ranges()
     m_warpage_ranges[7].set_palette(WARPAGE_DARK);
     m_warpage_ranges[4].update(0.0f);
     m_warpage_ranges[4].update(1.0f);
-    if (!std::isnan(m_warpage_wdm_p95)) {
+    const bool has_wdm_p95 = std::isfinite(m_warpage_wdm_p95) && m_warpage_wdm_p95 > 0.0f;
+    const bool has_whs_p95 = std::isfinite(m_warpage_whs_p95) && m_warpage_whs_p95 > 0.0f;
+    if (has_wdm_p95) {
         m_warpage_ranges[0].update(0.0f);
         m_warpage_ranges[0].update(m_warpage_wdm_p95);
         for (size_t i = 1; i <= 3; ++i) {
@@ -1978,7 +1980,7 @@ void ViewerImpl::update_color_ranges()
             m_warpage_ranges[i].update(m_warpage_wdm_p95);
         }
     }
-    if (!std::isnan(m_warpage_whs_p95)) {
+    if (has_whs_p95) {
         m_warpage_ranges[7].update(0.0f);
         m_warpage_ranges[7].update(m_warpage_whs_p95);
     }
@@ -2020,8 +2022,8 @@ void ViewerImpl::update_color_ranges()
                 v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
             for (size_t j = 0; j < warpage_values.size(); ++j)
                 if (!std::isnan(warpage_values[j]) && j != 4 &&
-                    (std::isnan(m_warpage_wdm_p95) || j > 3) &&
-                    (std::isnan(m_warpage_whs_p95) || j != 7))
+                    (!has_wdm_p95 || j > 3) &&
+                    (!has_whs_p95 || j != 7))
                     m_warpage_ranges[j].update(warpage_values[j]);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
