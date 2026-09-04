@@ -3839,6 +3839,7 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
     m_thermal_index_mean = -200.0f;
     m_thermal_index_min = -200.0f;
     m_thermal_index_max = -200.0f;
+    m_warpage_fields.fill(NAN);
     {
         const std::string& raw = line.raw();
         auto pos = raw.find(";helioadditive=");
@@ -3851,6 +3852,20 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
                 m_thermal_index_min = static_cast<float>(std::atof(match[2].str().c_str())) * 100.0f;
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
+            }
+
+            static constexpr std::array<std::string_view, 9> warpage_keys{
+                "wdm=", "wdx=", "wdy=", "wdz=", "wr=", "wtg=", "wts=", "whs=", "wls="
+            };
+            for (size_t i = 0; i < warpage_keys.size(); ++i) {
+                const size_t value_pos = raw.find(warpage_keys[i], pos);
+                if (value_pos == std::string::npos)
+                    continue;
+                const char *value_begin = raw.c_str() + value_pos + warpage_keys[i].size();
+                char *value_end = nullptr;
+                const float value = std::strtof(value_begin, &value_end);
+                if (value_end != value_begin)
+                    m_warpage_fields[i] = value;
             }
         }
     }
@@ -4595,6 +4610,7 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
     m_thermal_index_mean = -200.0f;
     m_thermal_index_min = -200.0f;
     m_thermal_index_max = -200.0f;
+    m_warpage_fields.fill(NAN);
     {
         const std::string& raw = line.raw();
         auto pos = raw.find(";helioadditive=");
@@ -4607,6 +4623,20 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
                 m_thermal_index_min = static_cast<float>(std::atof(match[2].str().c_str())) * 100.0f;
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
+            }
+
+            static constexpr std::array<std::string_view, 9> warpage_keys{
+                "wdm=", "wdx=", "wdy=", "wdz=", "wr=", "wtg=", "wts=", "whs=", "wls="
+            };
+            for (size_t i = 0; i < warpage_keys.size(); ++i) {
+                const size_t value_pos = raw.find(warpage_keys[i], pos);
+                if (value_pos == std::string::npos)
+                    continue;
+                const char *value_begin = raw.c_str() + value_pos + warpage_keys[i].size();
+                char *value_end = nullptr;
+                const float value = std::strtof(value_begin, &value_end);
+                if (value_end != value_begin)
+                    m_warpage_fields[i] = value;
             }
         }
     }
@@ -5761,6 +5791,9 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_thermal_index_mean,
         m_thermal_index_min,
         m_thermal_index_max,
+        m_warpage_fields[0], m_warpage_fields[1], m_warpage_fields[2],
+        m_warpage_fields[3], m_warpage_fields[4], m_warpage_fields[5],
+        m_warpage_fields[6], m_warpage_fields[7], m_warpage_fields[8],
         { 0.0f, 0.0f }, // time
         static_cast<float>(m_layer_id), //layer_duration: set later
         std::max<unsigned int>(1, m_layer_id) - 1,

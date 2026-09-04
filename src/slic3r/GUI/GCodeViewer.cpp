@@ -107,6 +107,24 @@ static std::string get_view_type_string(libvgcode::EViewType view_type)
         return _u8L("Thermal Index (min)");
     else if (view_type == libvgcode::EViewType::ThermalIndexMax)
         return _u8L("Thermal Index (max)");
+    else if (view_type == libvgcode::EViewType::WarpageDisplacement)
+        return _u8L("Displacement");
+    else if (view_type == libvgcode::EViewType::WarpageDispX)
+        return _u8L("Displacement X");
+    else if (view_type == libvgcode::EViewType::WarpageDispY)
+        return _u8L("Displacement Y");
+    else if (view_type == libvgcode::EViewType::WarpageDispZ)
+        return _u8L("Displacement Z");
+    else if (view_type == libvgcode::EViewType::WarpageRisk)
+        return _u8L("Warpage Risk");
+    else if (view_type == libvgcode::EViewType::WarpageTIGradient)
+        return _u8L("TI Gradient");
+    else if (view_type == libvgcode::EViewType::WarpageThermalStrain)
+        return _u8L("Thermal Strain");
+    else if (view_type == libvgcode::EViewType::WarpageHullShrinkage)
+        return _u8L("Hull Shrinkage");
+    else if (view_type == libvgcode::EViewType::WarpageLayerShrinkage)
+        return _u8L("Layer Shrinkage");
     return "";
 }
 
@@ -435,6 +453,60 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                     sprintf(detail_buf, "%s%.1f", _u8L("TI Max: ").c_str(), vertex.thermal_index_max);
                 else
                     sprintf(detail_buf, "%s%s", _u8L("TI Max: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageDisplacement:
+                if (is_extrusion && std::isfinite(vertex.warpage_displacement))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Displacement: ").c_str(), vertex.warpage_displacement);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Displacement: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageDispX:
+                if (is_extrusion && std::isfinite(vertex.warpage_disp_x))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Displacement X: ").c_str(), vertex.warpage_disp_x);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Displacement X: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageDispY:
+                if (is_extrusion && std::isfinite(vertex.warpage_disp_y))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Displacement Y: ").c_str(), vertex.warpage_disp_y);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Displacement Y: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageDispZ:
+                if (is_extrusion && std::isfinite(vertex.warpage_disp_z))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Displacement Z: ").c_str(), vertex.warpage_disp_z);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Displacement Z: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageRisk:
+                if (is_extrusion && std::isfinite(vertex.warpage_risk))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Warpage Risk: ").c_str(), vertex.warpage_risk);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Warpage Risk: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageTIGradient:
+                if (is_extrusion && std::isfinite(vertex.warpage_ti_gradient))
+                    sprintf(detail_buf, "%s%.4f", _u8L("TI Gradient: ").c_str(), vertex.warpage_ti_gradient);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("TI Gradient: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageThermalStrain:
+                if (is_extrusion && std::isfinite(vertex.warpage_thermal_strain))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Thermal Strain: ").c_str(), vertex.warpage_thermal_strain);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Thermal Strain: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageHullShrinkage:
+                if (is_extrusion && std::isfinite(vertex.warpage_hull_shrinkage))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Hull Shrinkage: ").c_str(), vertex.warpage_hull_shrinkage);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Hull Shrinkage: ").c_str(), "null");
+                break;
+            case libvgcode::EViewType::WarpageLayerShrinkage:
+                if (is_extrusion && std::isfinite(vertex.warpage_layer_shrinkage))
+                    sprintf(detail_buf, "%s%.4f", _u8L("Layer Shrinkage: ").c_str(), vertex.warpage_layer_shrinkage);
+                else
+                    sprintf(detail_buf, "%s%s", _u8L("Layer Shrinkage: ").c_str(), "null");
                 break;
             default:
                 detail_buf[0] = '\0';
@@ -1195,6 +1267,17 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMin);
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMax);
     }
+    if (m_has_warpage_data) {
+        view_type_items.push_back(libvgcode::EViewType::WarpageDisplacement);
+        view_type_items.push_back(libvgcode::EViewType::WarpageDispX);
+        view_type_items.push_back(libvgcode::EViewType::WarpageDispY);
+        view_type_items.push_back(libvgcode::EViewType::WarpageDispZ);
+        view_type_items.push_back(libvgcode::EViewType::WarpageRisk);
+        view_type_items.push_back(libvgcode::EViewType::WarpageTIGradient);
+        view_type_items.push_back(libvgcode::EViewType::WarpageThermalStrain);
+        view_type_items.push_back(libvgcode::EViewType::WarpageHullShrinkage);
+        view_type_items.push_back(libvgcode::EViewType::WarpageLayerShrinkage);
+    }
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -1377,13 +1460,15 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
 
     // Helio: detect whether this gcode has any thermal index data
     m_has_thermal_index_data = false;
+    m_has_warpage_data = false;
     {
         const size_t vcount = m_viewer.get_vertices_count();
         for (size_t i = 0; i < vcount; ++i) {
-            if (m_viewer.get_vertex_at(i).thermal_index_mean > -100.0f) {
-                m_has_thermal_index_data = true;
+            const auto &vertex = m_viewer.get_vertex_at(i);
+            m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
+            m_has_warpage_data |= std::isfinite(vertex.warpage_displacement);
+            if (m_has_thermal_index_data && m_has_warpage_data)
                 break;
-            }
         }
     }
     update_by_mode(wxGetApp().get_mode());
@@ -1680,13 +1765,15 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
 
     // Helio: detect whether this gcode has any thermal index data
     m_has_thermal_index_data = false;
+    m_has_warpage_data = false;
     {
         const size_t vcount = m_viewer.get_vertices_count();
         for (size_t i = 0; i < vcount; ++i) {
-            if (m_viewer.get_vertex_at(i).thermal_index_mean > -100.0f) {
-                m_has_thermal_index_data = true;
+            const auto &vertex = m_viewer.get_vertex_at(i);
+            m_has_thermal_index_data |= vertex.thermal_index_mean > -100.0f;
+            m_has_warpage_data |= std::isfinite(vertex.warpage_displacement);
+            if (m_has_thermal_index_data && m_has_warpage_data)
                 break;
-            }
         }
     }
     update_by_mode(wxGetApp().get_mode());
@@ -3892,7 +3979,34 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         { imgui.title(_u8L("Thermal Index (min)")); break; }
     case libvgcode::EViewType::ThermalIndexMax:
         { imgui.title(_u8L("Thermal Index (max)")); break; }
+    case libvgcode::EViewType::WarpageDisplacement:
+        { imgui.title(_u8L("Displacement")); break; }
+    case libvgcode::EViewType::WarpageDispX:
+        { imgui.title(_u8L("Displacement X")); break; }
+    case libvgcode::EViewType::WarpageDispY:
+        { imgui.title(_u8L("Displacement Y")); break; }
+    case libvgcode::EViewType::WarpageDispZ:
+        { imgui.title(_u8L("Displacement Z")); break; }
+    case libvgcode::EViewType::WarpageRisk:
+        { imgui.title(_u8L("Warpage Risk")); break; }
+    case libvgcode::EViewType::WarpageTIGradient:
+        { imgui.title(_u8L("TI Gradient")); break; }
+    case libvgcode::EViewType::WarpageThermalStrain:
+        { imgui.title(_u8L("Thermal Strain")); break; }
+    case libvgcode::EViewType::WarpageHullShrinkage:
+        { imgui.title(_u8L("Hull Shrinkage")); break; }
+    case libvgcode::EViewType::WarpageLayerShrinkage:
+        { imgui.title(_u8L("Layer Shrinkage")); break; }
 
+    case libvgcode::EViewType::WarpageDisplacement: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageDisplacement), 3); break; }
+    case libvgcode::EViewType::WarpageDispX: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageDispX), 3); break; }
+    case libvgcode::EViewType::WarpageDispY: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageDispY), 3); break; }
+    case libvgcode::EViewType::WarpageDispZ: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageDispZ), 3); break; }
+    case libvgcode::EViewType::WarpageRisk: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageRisk), 3); break; }
+    case libvgcode::EViewType::WarpageTIGradient: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageTIGradient), 3); break; }
+    case libvgcode::EViewType::WarpageThermalStrain: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageThermalStrain), 4); break; }
+    case libvgcode::EViewType::WarpageHullShrinkage: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageHullShrinkage), 4); break; }
+    case libvgcode::EViewType::WarpageLayerShrinkage: { append_range(m_viewer.get_color_range(libvgcode::EViewType::WarpageLayerShrinkage), 4); break; }
     case libvgcode::EViewType::Tool:
     {
         // calculate used filaments data

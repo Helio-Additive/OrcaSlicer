@@ -8,6 +8,7 @@
 #include "libslic3r/CustomGCode.hpp"
 
 #include <cstdint>
+#include <cmath>
 #include <array>
 #include <vector>
 #include <mutex>
@@ -212,6 +213,16 @@ class Print;
             float thermal_index_mean{ -200.0f };
             float thermal_index_min{ -200.0f };
             float thermal_index_max{ -200.0f };
+            // Helio warpage fields from the enhanced G-code comment. NaN means unavailable.
+            float warpage_displacement{ NAN };
+            float warpage_disp_x{ NAN };
+            float warpage_disp_y{ NAN };
+            float warpage_disp_z{ NAN };
+            float warpage_risk{ NAN };
+            float warpage_ti_gradient{ NAN };
+            float warpage_thermal_strain{ NAN };
+            float warpage_hull_shrinkage{ NAN };
+            float warpage_layer_shrinkage{ NAN };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
             unsigned int layer_id{ 0 };
@@ -835,6 +846,7 @@ class Print;
         float m_thermal_index_mean{ -200.0f };
         float m_thermal_index_min{ -200.0f };
         float m_thermal_index_max{ -200.0f };
+        std::array<float, 9> m_warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         bool m_is_helio_gcode{false};
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
