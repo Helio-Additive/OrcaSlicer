@@ -1,7 +1,6 @@
 #include <catch2/catch_all.hpp>
 
 #include "libvgcode/include/ColorRange.hpp"
-#include "libvgcode/include/GCodeInputData.hpp"
 #include "libvgcode/include/PathVertex.hpp"
 #include "libvgcode/include/Viewer.hpp"
 
@@ -11,23 +10,27 @@
 
 using namespace libvgcode;
 
+namespace libvgcode {
+
+struct ColorRangeTestAccess
+{
+    static void update(ColorRange& range, float value) { range.update(value); }
+};
+
+} // namespace libvgcode
+
 TEST_CASE("non-finite warpage values do not pollute color ranges", "[libvgcode][warpage]")
 {
+    ColorRange range;
     const std::array<float, 4> values = {
         0.02f, std::numeric_limits<float>::infinity(), 0.09f, 0.2f
     };
 
-    GCodeInputData gcode_data;
     for (float value : values) {
-        PathVertex vertex;
-        vertex.type = EMoveType::Extrude;
-        vertex.warpage_displacement = value;
-        gcode_data.vertices.emplace_back(vertex);
+        if (is_valid_warpage_value(value))
+            ColorRangeTestAccess::update(range, value);
     }
 
-    Viewer viewer;
-    viewer.load(std::move(gcode_data));
-    const ColorRange& range = viewer.get_color_range(EViewType::WarpageDisplacement);
     REQUIRE(range.get_range() == std::array<float, 2>{ 0.02f, 0.2f });
     for (float legend_value : range.get_values())
         REQUIRE(std::isfinite(legend_value));

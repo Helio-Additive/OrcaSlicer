@@ -11,6 +11,8 @@
 
 namespace libvgcode {
 
+struct ColorRangeTestAccess;
+
 static const Palette DEFAULT_RANGES_COLORS{ {
     {  11,  44, 122 }, // bluish
     {  19,  89, 133 },
@@ -100,6 +102,7 @@ private:
     void reset();
 
     friend class ViewerImpl;
+    friend struct ColorRangeTestAccess;
 };
 
 } // namespace libvgcode
