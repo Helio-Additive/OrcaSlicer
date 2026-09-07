@@ -157,7 +157,7 @@ static void update_warpage_availability(const libvgcode::PathVertex& vertex, std
 
     const auto values = warpage_values(vertex);
     for (size_t i = 0; i < values.size(); ++i)
-        availability[i] = availability[i] || !std::isnan(values[i]);
+        availability[i] = availability[i] || libvgcode::is_valid_warpage_value(values[i]);
 }
 
 static bool has_warpage_data(const std::array<bool, 9>& availability, libvgcode::EViewType view_type)
@@ -501,7 +501,7 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
             case libvgcode::EViewType::WarpageHullShrinkage:
             case libvgcode::EViewType::WarpageLayerShrinkage: {
                 const float value = warpage_value(vertex, view_type);
-                if (is_extrusion && !std::isnan(value))
+                if (is_extrusion && libvgcode::is_valid_warpage_value(value))
                     sprintf(detail_buf, "%s: %.4f", get_view_type_string(view_type).c_str(), value);
                 else
                     sprintf(detail_buf, "%s: %s", get_view_type_string(view_type).c_str(), NA_CSTR);

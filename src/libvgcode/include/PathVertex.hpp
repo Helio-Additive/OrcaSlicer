@@ -12,6 +12,10 @@
 
 namespace libvgcode {
 
+// Warpage data originates outside the slicer. Treat NaN and infinities alike as
+// unavailable so malformed solver output cannot corrupt preview ranges or colors.
+inline bool is_valid_warpage_value(float value) { return std::isfinite(value); }
+
 //
 // Struct representating a gcode move (toolpath segment)
 //

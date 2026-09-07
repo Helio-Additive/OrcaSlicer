@@ -1545,47 +1545,47 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     case EViewType::WarpageDisplacement:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
+        return !is_valid_warpage_value(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
     }
     case EViewType::WarpageDispX:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
+        return !is_valid_warpage_value(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
     }
     case EViewType::WarpageDispY:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
+        return !is_valid_warpage_value(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
     }
     case EViewType::WarpageDispZ:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
+        return !is_valid_warpage_value(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
     }
     case EViewType::WarpageRisk:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
+        return !is_valid_warpage_value(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
     }
     case EViewType::WarpageTIGradient:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
+        return !is_valid_warpage_value(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
     }
     case EViewType::WarpageThermalStrain:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
+        return !is_valid_warpage_value(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
     }
     case EViewType::WarpageHullShrinkage:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
+        return !is_valid_warpage_value(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
     }
     case EViewType::WarpageLayerShrinkage:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return std::isnan(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
+        return !is_valid_warpage_value(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
     }
     case EViewType::VolumetricFlowRate:
     {
@@ -2021,7 +2021,7 @@ void ViewerImpl::update_color_ranges()
                 v.warpage_disp_z, v.warpage_risk, v.warpage_ti_gradient, v.warpage_thermal_strain,
                 v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
             for (size_t j = 0; j < warpage_values.size(); ++j)
-                if (!std::isnan(warpage_values[j]) && j != 4 &&
+                if (is_valid_warpage_value(warpage_values[j]) && j != 4 &&
                     (!has_wdm_p95 || j > 3) &&
                     (!has_whs_p95 || j != 7))
                     m_warpage_ranges[j].update(warpage_values[j]);
