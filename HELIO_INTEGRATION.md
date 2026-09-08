@@ -221,7 +221,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 #### `src/slic3r/GUI/Preferences.cpp` (+79)
 - Added `#include "../Utils/HelioDragon.hpp"`
 - **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material and warping-analysis toggles, API URL display
-- **Warping-analysis compatibility**: `enableWarpingAnalysis` is added to `simulationSettings` only when the experiment is enabled. Keep the field omitted on the default disabled path so clients remain compatible with regional GraphQL schemas that predate the experiment
+- **Warping-analysis compatibility**: `enableWarpingAnalysis` is added to `simulationSettings` only when the experiment is enabled. Keep the field omitted on the default disabled path so clients remain compatible with regional GraphQL schemas that predate the experiment. Each service endpoint must add the optional field to its `simulationSettings` input and start warping analysis when it is `true` before enabling the experiment for users on that endpoint; otherwise GraphQL validation will reject the create-simulation request. No service change is required for users who leave the experiment disabled
 - **Toggle listener**: `enable_helio_processing` toggle immediately shows/hides the Helio button in MainFrame via `ShowExpandButton()` + `Layout()` (no restart required)
 - **Region combobox**: both region-write paths call `HelioQuery::invalidate_support_data_for_endpoint_change()` — region selects both the Helio endpoint and which regional PAT key is read, so the previous endpoint's catalogs must be dropped
 
