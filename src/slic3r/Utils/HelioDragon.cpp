@@ -1424,8 +1424,10 @@ std::string HelioQuery::generate_simulation_graphql_query(const std::string& gco
 
     std::vector<std::string> settings_fields;
 
-    settings_fields.push_back(boost::str(boost::format(R"(                    "enableWarpingAnalysis": %1%)") %
-                                         (enableWarpingAnalysis ? "true" : "false")));
+    // Keep the disabled path compatible with regional API schemas that predate
+    // the experimental setting. An omitted field retains the server default.
+    if (enableWarpingAnalysis)
+        settings_fields.emplace_back(R"(                    "enableWarpingAnalysis": true)");
 
     if (temperatureStabilizationHeight != -1) {
         settings_fields.push_back(boost::str(boost::format(R"(                    "temperatureStabilizationHeight": %1%)") % temperatureStabilizationHeight));
