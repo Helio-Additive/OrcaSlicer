@@ -392,7 +392,8 @@ public:
                                                          float              temperatureStabilizationHeight = -1,
                                                          float              airTemperatureAboveBuildPlate  = -1,
                                                          float              stabilizedAirTemperature       = -1,
-                                                         const std::string& job_name                       = "");
+                                                         const std::string& job_name                       = "",
+                                                         bool               enableWarpingAnalysis          = false);
 
     static std::string generate_optimization_graphql_query(const std::string& gcode_id,
                                                            const std::string& printPriority,
