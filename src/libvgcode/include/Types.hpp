@@ -102,6 +102,15 @@ enum class EViewType : uint8_t
     ThermalIndexMean,
     ThermalIndexMin,
     ThermalIndexMax,
+    WarpageDisplacement,
+    WarpageDispX,
+    WarpageDispY,
+    WarpageDispZ,
+    WarpageRisk,
+    WarpageTIGradient,
+    WarpageThermalStrain,
+    WarpageHullShrinkage,
+    WarpageLayerShrinkage,
     Tool,
     COUNT
 };
