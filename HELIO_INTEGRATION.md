@@ -220,7 +220,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 #### `src/slic3r/GUI/Preferences.cpp` (+79)
 - Added `#include "../Utils/HelioDragon.hpp"`
-- **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material toggle, API URL display
+- **New "Helio" tab** appended to preferences: enable toggle, PAT input (password field), multi-material and warping-analysis toggles, API URL display
 - **Toggle listener**: `enable_helio_processing` toggle immediately shows/hides the Helio button in MainFrame via `ShowExpandButton()` + `Layout()` (no restart required)
 - **Region combobox**: both region-write paths call `HelioQuery::invalidate_support_data_for_endpoint_change()` — region selects both the Helio endpoint and which regional PAT key is read, so the previous endpoint's catalogs must be dropped
 
@@ -280,7 +280,7 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 ### LOW RISK
 
 #### `src/libslic3r/AppConfig.cpp` (+25)
-- **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing` (defaults to `false`), `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_first_time_tutorial`
+- **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing` (defaults to `false`), `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_warping_analysis_enabled`, `helio_first_time_tutorial`
 
 #### `src/libslic3r/PrintBase.hpp` (+1)
 - Added `bool is_helio { false }` to `SlicingStatus` struct
