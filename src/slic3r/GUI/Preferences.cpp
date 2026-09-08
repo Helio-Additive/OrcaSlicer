@@ -2044,6 +2044,10 @@ void PreferencesDialog::create_items()
         _L("When enabled, Helio uses per-slot material mapping for multi-material plates"), "helio_multimaterial_enabled");
     g_sizer->Add(item_multimaterial);
 
+    auto item_warping_analysis = create_item_checkbox(_L("Experimental: Enable warping analysis"),
+        _L("When enabled, Helio performs warping analysis during simulations"), "helio_warping_analysis_enabled");
+    g_sizer->Add(item_warping_analysis);
+
     g_sizer->AddSpacer(FromDIP(10));
     sizer_page->Add(g_sizer, 0, wxEXPAND);
 
