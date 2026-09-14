@@ -55,6 +55,8 @@ static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& 
         std::string_view       field     = fields.substr(0, delimiter);
         if (!field.empty() && field.front() == '(')
             field.remove_prefix(1);
+        if (!field.empty() && field.back() == ')')
+            field.remove_suffix(1);
         const size_t           separator = field.find('=');
         if (separator != std::string_view::npos) {
             const auto key = std::find(keys.begin(), keys.end(), field.substr(0, separator));
@@ -2936,9 +2938,14 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
 /* std::cout << line.raw() << std::endl; */
 
     const std::string& raw = line.raw();
-    if (m_pending_helio_move_begin && boost::starts_with(raw, ";helioadditive=")) {
+    std::string_view   standalone_comment(raw);
+    const size_t       comment_begin = standalone_comment.find_first_not_of(" \t");
+    if (comment_begin != std::string_view::npos)
+        standalone_comment.remove_prefix(comment_begin);
+    const bool is_standalone_helio_comment = boost::starts_with(standalone_comment, ";helioadditive=");
+    if (m_pending_helio_move_begin && is_standalone_helio_comment) {
         std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
-        if (parse_warpage_fields(std::string_view(raw).substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
+        if (parse_warpage_fields(standalone_comment.substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
             for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
                 auto& move = m_result.moves[i];
                 move.warpage_displacement    = warpage_fields[0];
