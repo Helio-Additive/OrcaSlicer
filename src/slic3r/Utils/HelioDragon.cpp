@@ -1405,7 +1405,8 @@ std::string HelioQuery::generate_simulation_graphql_query(const std::string& gco
                                                           float              temperatureStabilizationHeight,
                                                           float              airTemperatureAboveBuildPlate,
                                                           float              stabilizedAirTemperature,
-                                                          const std::string& job_name)
+                                                          const std::string& job_name,
+                                                          bool               enableWarpingAnalysis)
 {
     CNumericLocalesSetter locales_setter;
     // Use a caller-supplied stable name when provided so create-retries reuse the same name
@@ -1422,6 +1423,11 @@ std::string HelioQuery::generate_simulation_graphql_query(const std::string& gco
     )";
 
     std::vector<std::string> settings_fields;
+
+    // Keep the disabled path compatible with regional API schemas that predate
+    // the experimental setting. An omitted field retains the server default.
+    if (enableWarpingAnalysis)
+        settings_fields.emplace_back(R"(                    "enableWarpingAnalysis": true)");
 
     if (temperatureStabilizationHeight != -1) {
         settings_fields.push_back(boost::str(boost::format(R"(                    "temperatureStabilizationHeight": %1%)") % temperatureStabilizationHeight));
@@ -1607,8 +1613,9 @@ HelioQuery::CreateSimulationResult HelioQuery::create_simulation(const std::stri
     const float object_proximity_airtemp_kelvin = chamber_temp == -1 ? -1 : chamber_temp + 273.15;
     const float layer_threshold_meters          = layer_threshold / 1000;
 
+    const bool enable_warping_analysis = GUI::wxGetApp().app_config->get_bool("helio_warping_analysis_enabled");
     std::string query_body = generate_simulation_graphql_query(gcode_id, layer_threshold_meters, initial_room_temp_kelvin,
-                                                               object_proximity_airtemp_kelvin, job_name);
+                                                               object_proximity_airtemp_kelvin, job_name, enable_warping_analysis);
 
     HelioQuery::CreateSimulationResult res;
     auto http = Http::post(helio_api_url);
