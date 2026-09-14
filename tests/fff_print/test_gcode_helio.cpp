@@ -50,7 +50,9 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
         ";helioadditive=wdm=0.1,wdx=-0.2,wdy=0.3,wdz=-0.4,wr=0.5,wtg=-0.6,wts=0.7,whs=0.8,wls=0.9\n"
         "G1 X20 E1 ;helioadditive=ti.max=0.9,ti.min=0.8,ti.mean=0.85\n"
         "; unrelated comment\n"
-        ";helioadditive=wdm=1.0\n");
+        ";helioadditive=wdm=1.0\n"
+        "G1 X30 E1\n"
+        ";helioadditive=wdm=2.0\n");
 
     const auto& annotated = extrusion_at(result, 10.0f);
     CHECK_THAT(annotated.thermal_index_max, WithinAbs(75.0f, 0.001f));
@@ -63,4 +65,7 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
     const auto& separated = extrusion_at(result, 20.0f);
     CHECK_THAT(separated.thermal_index_mean, WithinAbs(85.0f, 0.001f));
     CHECK(std::isnan(separated.warpage_displacement));
+
+    const auto& unannotated = extrusion_at(result, 30.0f);
+    CHECK(std::isnan(unannotated.warpage_displacement));
 }

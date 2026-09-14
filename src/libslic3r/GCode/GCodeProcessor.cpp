@@ -2956,6 +2956,7 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     const std::string_view cmd = line.cmd();
     const bool is_move = boost::iequals(cmd, "G0") || boost::iequals(cmd, "G1") ||
                          boost::iequals(cmd, "G2") || boost::iequals(cmd, "G3");
+    const bool has_helio_comment = raw.find(";helioadditive=") != std::string::npos;
     const size_t move_begin = m_result.moves.size();
     if (m_flavor == gcfKlipper)
     {
@@ -2975,7 +2976,7 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     if (cmd.length() > 1) {
         // process command lines
         m_command_processor.process_comand(cmd, line);
-        if (is_move && m_result.moves.size() > move_begin)
+        if (is_move && has_helio_comment && m_result.moves.size() > move_begin)
             m_pending_helio_move_begin = move_begin;
     }
     else {
