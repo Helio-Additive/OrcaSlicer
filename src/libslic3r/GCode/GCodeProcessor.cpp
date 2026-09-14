@@ -45,13 +45,16 @@ static const float DEFAULT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_RETRACT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_TRAVEL_ACCELERATION = 1250.0f;
 
-static void parse_warpage_fields(std::string_view fields, std::array<float, 9>& values)
+static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& values)
 {
     static constexpr std::array<std::string_view, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
+    bool parsed = false;
 
     while (!fields.empty()) {
         const size_t           delimiter = fields.find(',');
-        const std::string_view field     = fields.substr(0, delimiter);
+        std::string_view       field     = fields.substr(0, delimiter);
+        if (!field.empty() && field.front() == '(')
+            field.remove_prefix(1);
         const size_t           separator = field.find('=');
         if (separator != std::string_view::npos) {
             const auto key = std::find(keys.begin(), keys.end(), field.substr(0, separator));
@@ -59,14 +62,17 @@ static void parse_warpage_fields(std::string_view fields, std::array<float, 9>& 
                 const std::string_view number = field.substr(separator + 1);
                 float                  value;
                 const auto [end, error] = fast_float::from_chars(number.data(), number.data() + number.size(), value);
-                if (error == std::errc() && end == number.data() + number.size())
+                if (error == std::errc() && end == number.data() + number.size()) {
                     values[std::distance(keys.begin(), key)] = value;
+                    parsed = true;
+                }
             }
         }
         if (delimiter == std::string_view::npos)
             break;
         fields.remove_prefix(delimiter + 1);
     }
+    return parsed;
 }
 
 static const size_t MIN_EXTRUDERS_COUNT = 5;
@@ -2932,18 +2938,19 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     const std::string& raw = line.raw();
     if (m_pending_helio_move_begin && boost::starts_with(raw, ";helioadditive=")) {
         std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
-        parse_warpage_fields(std::string_view(raw).substr(sizeof(";helioadditive=") - 1), warpage_fields);
-        for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
-            auto& move = m_result.moves[i];
-            move.warpage_displacement    = warpage_fields[0];
-            move.warpage_disp_x          = warpage_fields[1];
-            move.warpage_disp_y          = warpage_fields[2];
-            move.warpage_disp_z          = warpage_fields[3];
-            move.warpage_risk            = warpage_fields[4];
-            move.warpage_ti_gradient     = warpage_fields[5];
-            move.warpage_thermal_strain  = warpage_fields[6];
-            move.warpage_hull_shrinkage  = warpage_fields[7];
-            move.warpage_layer_shrinkage = warpage_fields[8];
+        if (parse_warpage_fields(std::string_view(raw).substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
+            for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
+                auto& move = m_result.moves[i];
+                move.warpage_displacement    = warpage_fields[0];
+                move.warpage_disp_x          = warpage_fields[1];
+                move.warpage_disp_y          = warpage_fields[2];
+                move.warpage_disp_z          = warpage_fields[3];
+                move.warpage_risk            = warpage_fields[4];
+                move.warpage_ti_gradient     = warpage_fields[5];
+                move.warpage_thermal_strain  = warpage_fields[6];
+                move.warpage_hull_shrinkage  = warpage_fields[7];
+                move.warpage_layer_shrinkage = warpage_fields[8];
+            }
         }
     }
     m_pending_helio_move_begin.reset();

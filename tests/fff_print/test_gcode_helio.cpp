@@ -46,8 +46,8 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
 {
     const auto result = process_gcode(
         "M83\n"
-        "G1 X10 E1 ;helioadditive=ti.max=0.75,ti.min=-0.25,ti.mean=0.5\n"
-        ";helioadditive=wdm=0.1,wdx=-0.2,wdy=0.3,wdz=-0.4,wr=0.5,wtg=-0.6,wts=0.7,whs=0.8,wls=0.9\n"
+        "G1 X10 E1 ;helioadditive=(ti.max=0.80,ti.min=0.20,ti.mean=0.40,element.index=10)\n"
+        ";helioadditive=(wdm=0.0231,wdx=-0.0012,wdy=0.0046,wdz=0.0227,wr=0.422,wtg=-12.3457,wts=0.009449,whs=0.0187,wls=0.009449,element.index=42)\n"
         "G1 X20 E1 ;helioadditive=ti.max=0.9,ti.min=0.8,ti.mean=0.85\n"
         "; unrelated comment\n"
         ";helioadditive=wdm=1.0\n"
@@ -55,12 +55,12 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
         ";helioadditive=wdm=2.0\n");
 
     const auto& annotated = extrusion_at(result, 10.0f);
-    CHECK_THAT(annotated.thermal_index_max, WithinAbs(75.0f, 0.001f));
-    CHECK_THAT(annotated.thermal_index_min, WithinAbs(-25.0f, 0.001f));
-    CHECK_THAT(annotated.thermal_index_mean, WithinAbs(50.0f, 0.001f));
-    CHECK_THAT(annotated.warpage_displacement, WithinAbs(0.1f, 0.001f));
-    CHECK_THAT(annotated.warpage_disp_x, WithinAbs(-0.2f, 0.001f));
-    CHECK_THAT(annotated.warpage_layer_shrinkage, WithinAbs(0.9f, 0.001f));
+    CHECK_THAT(annotated.thermal_index_max, WithinAbs(80.0f, 0.001f));
+    CHECK_THAT(annotated.thermal_index_min, WithinAbs(20.0f, 0.001f));
+    CHECK_THAT(annotated.thermal_index_mean, WithinAbs(40.0f, 0.001f));
+    CHECK_THAT(annotated.warpage_displacement, WithinAbs(0.0231f, 0.000001f));
+    CHECK_THAT(annotated.warpage_disp_x, WithinAbs(-0.0012f, 0.000001f));
+    CHECK_THAT(annotated.warpage_layer_shrinkage, WithinAbs(0.009449f, 0.000001f));
 
     const auto& separated = extrusion_at(result, 20.0f);
     CHECK_THAT(separated.thermal_index_mean, WithinAbs(85.0f, 0.001f));
