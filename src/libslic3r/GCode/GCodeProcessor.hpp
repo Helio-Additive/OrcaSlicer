@@ -851,6 +851,7 @@ class Print;
         float m_thermal_index_max{ -200.0f };
         std::array<float, 9> m_warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         bool m_is_helio_gcode{false};
+        std::optional<size_t> m_pending_helio_move_begin;
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
         std::vector<unsigned char> m_last_filament_id;

@@ -2553,6 +2553,7 @@ void GCodeProcessor::reset()
     m_fan_speed = 0.0f;
     m_z_offset = 0.0f;
     m_is_helio_gcode = false;
+    m_pending_helio_move_begin.reset();
 
     m_extrusion_role = erNone;
 
@@ -2928,12 +2929,34 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
 {
 /* std::cout << line.raw() << std::endl; */
 
+    const std::string& raw = line.raw();
+    if (m_pending_helio_move_begin && boost::starts_with(raw, ";helioadditive=")) {
+        std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
+        parse_warpage_fields(std::string_view(raw).substr(sizeof(";helioadditive=") - 1), warpage_fields);
+        for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
+            auto& move = m_result.moves[i];
+            move.warpage_displacement    = warpage_fields[0];
+            move.warpage_disp_x          = warpage_fields[1];
+            move.warpage_disp_y          = warpage_fields[2];
+            move.warpage_disp_z          = warpage_fields[3];
+            move.warpage_risk            = warpage_fields[4];
+            move.warpage_ti_gradient     = warpage_fields[5];
+            move.warpage_thermal_strain  = warpage_fields[6];
+            move.warpage_hull_shrinkage  = warpage_fields[7];
+            move.warpage_layer_shrinkage = warpage_fields[8];
+        }
+    }
+    m_pending_helio_move_begin.reset();
+
     ++m_line_id;
 
     // update start position
     m_start_position = m_end_position;
 
     const std::string_view cmd = line.cmd();
+    const bool is_move = boost::iequals(cmd, "G0") || boost::iequals(cmd, "G1") ||
+                         boost::iequals(cmd, "G2") || boost::iequals(cmd, "G3");
+    const size_t move_begin = m_result.moves.size();
     if (m_flavor == gcfKlipper)
     {
         if (boost::iequals(cmd, "SET_VELOCITY_LIMIT"))
@@ -2952,6 +2975,8 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     if (cmd.length() > 1) {
         // process command lines
         m_command_processor.process_comand(cmd, line);
+        if (is_move && m_result.moves.size() > move_begin)
+            m_pending_helio_move_begin = move_begin;
     }
     else {
         const std::string &comment = line.raw();
