@@ -1960,14 +1960,12 @@ void ViewerImpl::update_color_ranges()
         { 30, 180, 60 }, { 140, 190, 40 }, { 220, 180, 30 }, { 230, 100, 20 }, { 200, 20, 20 }
     } };
     static const Palette WARPAGE_DIVERGING{ { { 0, 60, 200 }, { 30, 180, 60 }, { 200, 20, 20 } } };
-    static const Palette WARPAGE_DARK{ { { 25, 30, 50 }, { 30, 160, 60 }, { 220, 180, 30 }, { 200, 20, 20 } } };
     for (ColorRange& range : m_warpage_ranges)
         range.set_palette(WARPAGE_SEQUENTIAL);
     m_warpage_ranges[1].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[2].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[3].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[5].set_palette(WARPAGE_DIVERGING);
-    m_warpage_ranges[7].set_palette(WARPAGE_DARK);
     m_warpage_ranges[4].update(0.0f);
     m_warpage_ranges[4].update(1.0f);
     const bool has_wdm_p95 = std::isfinite(m_warpage_wdm_p95) && m_warpage_wdm_p95 > 0.0f;

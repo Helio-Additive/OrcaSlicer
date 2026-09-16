@@ -19,13 +19,15 @@ struct ColorRangeTestAccess
 
 } // namespace libvgcode
 
-TEST_CASE("non-finite warpage values do not pollute color ranges", "[libvgcode][warpage]")
+TEST_CASE("warpage validity filtering keeps color ranges finite", "[libvgcode][warpage]")
 {
     ColorRange range;
+    const float infinity = std::numeric_limits<float>::infinity();
     const std::array<float, 4> values = {
-        0.02f, std::numeric_limits<float>::infinity(), 0.09f, 0.2f
+        0.02f, infinity, 0.09f, 0.2f
     };
 
+    REQUIRE_FALSE(is_valid_warpage_value(infinity));
     for (float value : values) {
         if (is_valid_warpage_value(value))
             ColorRangeTestAccess::update(range, value);
