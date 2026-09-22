@@ -9872,13 +9872,20 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             try {
                 boost::filesystem::path original_path(a.tmp_path);
                 std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
-                if (!boost::filesystem::exists(original_path_name)) {
+                bool original_preserved = boost::filesystem::exists(original_path_name);
+                if (!original_preserved) {
                     int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
                     if (renamed != 0)
                         BOOST_LOG_TRIVIAL(error) << "Helio failed to retain original GCode";
+                    else
+                        original_preserved = true;
                 }
-                std::string copied;
-                copy_file(a.printable_path, a.tmp_path, copied);
+                if (original_preserved) {
+                    std::string copied;
+                    copy_file(a.printable_path, a.tmp_path, copied);
+                } else {
+                    BOOST_LOG_TRIVIAL(error) << "Helio skipped installing optimized GCode to avoid losing the original";
+                }
             } catch (...) {
                 BOOST_LOG_TRIVIAL(error) << "Helio failed to install printable optimized GCode";
             }

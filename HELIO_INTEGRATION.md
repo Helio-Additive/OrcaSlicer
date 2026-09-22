@@ -38,7 +38,7 @@ Key data flow:
 - `HelioQuery` (HelioDragon.hpp) — API client, PAT auth, supported printer/material cache
 - `HelioBackgroundProcess` — thread wrapper, polls job status, parses result gcode
 - `HelioPlateResult` — per-plate result storage on `PartPlate`
-- `HelioCompletionEvent` — carries result path + quality metrics to UI thread
+- `HelioCompletionEvent` — carries the thermal preview path, printable path, and quality metrics to the UI thread
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
 - Warpage metrics — parsed from the same `;helioadditive=` comments (keys `wdm`, `wdx`,
   `wdy`, `wdz`, `wr`, `wtg`, `wts`, `whs`, `wls`) and from `WARPAGE_*` header tags
@@ -246,10 +246,13 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - New declared methods: `get_helio_result()`, `set_helio_result()`, `clear_helio_result()`, `has_helio_result()`
 
 #### `src/slic3r/GUI/BackgroundSlicingProcess.hpp` (+25)
-- New class appended: `HelioCompletionEvent` (wxEvent subclass with path, success, quality metrics)
+- New class appended: `HelioCompletionEvent` (wxEvent subclass with thermal preview `path`,
+  annotation-free `printable_path`, success, and quality metrics)
 
 #### `src/libslic3r/GCode/GCodeProcessor.cpp` (+18)
-- **In `process_G1()`**: Thermal index parsing block — extracts `ti.max/min/mean` from `;helioadditive=` comments using regex
+- **In `process_G1()`**: Thermal index and inline warpage parsing blocks extract values from
+  `;helioadditive=` comments. `process_gcode_line()` also backfills the preceding extrusion
+  path from a following standalone Helio comment; omitted fields must not overwrite inline values
 - Sets `m_is_helio_gcode` flag when helio comments found
 
 #### `src/libslic3r/GCode/GCodeProcessor.hpp` (+4)
@@ -296,6 +299,8 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   `warpage_layer_shrinkage` — **12 appended floats in total**. The TI three default to
   `-200.0f` and use a `< -100.0f` sentinel; the warpage nine default to `NAN` and use
   `std::isnan()`. Do not unify these — the TI sentinel is a real value in the palette range
+- Hull shrinkage deliberately uses the same green-to-red sequential palette as the other
+  non-directional warpage magnitudes. Do not restore the former dark palette during an upstream sync
 
 #### `src/libvgcode/include/Types.hpp` (+2)
 - Appended 3 enum values to `EViewType`: `ThermalIndexMean`, `ThermalIndexMin`, `ThermalIndexMax`

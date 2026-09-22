@@ -56,7 +56,9 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
         "G1 X30 E1\n"
         ";helioadditive=wdm=2.0\n"
         "G1 X40 E1 ;helioadditive=(ti.max=0.7,ti.min=0.3,ti.mean=0.5,element.index=40)\n"
-        "  ;helioadditive=(wdm=0.04,wls=0.004)\n");
+        "  ;helioadditive=(wdm=0.04,wls=0.004)\n"
+        "G1 X50 E1 ;helioadditive=(wdx=0.05,wdy=0.06)\n"
+        ";helioadditive=(wr=0.7)\n");
 
     const auto& annotated = extrusion_at(moves, 10.0f);
     CHECK_THAT(annotated.thermal_index_max, WithinAbs(80.0f, 0.001f));
@@ -64,10 +66,21 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
     CHECK_THAT(annotated.thermal_index_mean, WithinAbs(40.0f, 0.001f));
     CHECK_THAT(annotated.warpage_displacement, WithinAbs(0.0231f, 0.000001f));
     CHECK_THAT(annotated.warpage_disp_x, WithinAbs(-0.0012f, 0.000001f));
+    CHECK_THAT(annotated.warpage_disp_y, WithinAbs(0.0046f, 0.000001f));
+    CHECK_THAT(annotated.warpage_disp_z, WithinAbs(0.0227f, 0.000001f));
+    CHECK_THAT(annotated.warpage_risk, WithinAbs(0.422f, 0.000001f));
+    CHECK_THAT(annotated.warpage_ti_gradient, WithinAbs(-12.3457f, 0.000001f));
+    CHECK_THAT(annotated.warpage_thermal_strain, WithinAbs(0.009449f, 0.000001f));
+    CHECK_THAT(annotated.warpage_hull_shrinkage, WithinAbs(0.0187f, 0.000001f));
     CHECK_THAT(annotated.warpage_layer_shrinkage, WithinAbs(0.009449f, 0.000001f));
 
     const auto& separated = extrusion_at(moves, 20.0f);
     CHECK_THAT(separated.thermal_index_mean, WithinAbs(85.0f, 0.001f));
+
+    const auto& partially_backfilled = extrusion_at(moves, 50.0f);
+    CHECK_THAT(partially_backfilled.warpage_disp_x, WithinAbs(0.05f, 0.000001f));
+    CHECK_THAT(partially_backfilled.warpage_disp_y, WithinAbs(0.06f, 0.000001f));
+    CHECK_THAT(partially_backfilled.warpage_risk, WithinAbs(0.7f, 0.000001f));
     CHECK(std::isnan(separated.warpage_displacement));
 
     const auto& unannotated = extrusion_at(moves, 30.0f);

@@ -2948,15 +2948,15 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
         if (parse_warpage_fields(standalone_comment.substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
             for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
                 auto& move = m_result.moves[i];
-                move.warpage_displacement    = warpage_fields[0];
-                move.warpage_disp_x          = warpage_fields[1];
-                move.warpage_disp_y          = warpage_fields[2];
-                move.warpage_disp_z          = warpage_fields[3];
-                move.warpage_risk            = warpage_fields[4];
-                move.warpage_ti_gradient     = warpage_fields[5];
-                move.warpage_thermal_strain  = warpage_fields[6];
-                move.warpage_hull_shrinkage  = warpage_fields[7];
-                move.warpage_layer_shrinkage = warpage_fields[8];
+                if (!std::isnan(warpage_fields[0])) move.warpage_displacement    = warpage_fields[0];
+                if (!std::isnan(warpage_fields[1])) move.warpage_disp_x          = warpage_fields[1];
+                if (!std::isnan(warpage_fields[2])) move.warpage_disp_y          = warpage_fields[2];
+                if (!std::isnan(warpage_fields[3])) move.warpage_disp_z          = warpage_fields[3];
+                if (!std::isnan(warpage_fields[4])) move.warpage_risk            = warpage_fields[4];
+                if (!std::isnan(warpage_fields[5])) move.warpage_ti_gradient     = warpage_fields[5];
+                if (!std::isnan(warpage_fields[6])) move.warpage_thermal_strain  = warpage_fields[6];
+                if (!std::isnan(warpage_fields[7])) move.warpage_hull_shrinkage  = warpage_fields[7];
+                if (!std::isnan(warpage_fields[8])) move.warpage_layer_shrinkage = warpage_fields[8];
             }
         }
     }
