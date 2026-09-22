@@ -203,7 +203,7 @@ public:
         float       progress;
         std::string id;
         std::string name;
-        std::string url;
+        std::string thermal_index_gcode_url;
         std::string error;
         std::string trace_id;
         bool             transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
@@ -217,7 +217,8 @@ public:
         float       progress;
         std::string id;
         std::string name;
-        std::string url;
+        std::string optimized_gcode_url;
+        std::string optimized_gcode_with_thermal_indexes_url;
         std::string error;
         std::string trace_id;
         bool        transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
@@ -677,9 +678,11 @@ public:
     void set_gcode_result(Slic3r::GCodeProcessorResult* gcode_result);
     void create_simulation_step(HelioQuery::CreateGCodeResult create_gcode_res,std::unique_ptr<GUI::NotificationManager>& notification_manager);
     void create_optimization_step(HelioQuery::CreateGCodeResult create_gcode_res, std::unique_ptr<GUI::NotificationManager>& notification_manager);
-    void save_downloaded_gcode_and_load_preview(std::string                                file_download_url,
-                                                std::string                                helio_gcode_path,
-                                                std::string                                tmp_path,
+    void save_downloaded_gcodes_and_load_preview(std::string                                preview_download_url,
+                                                 std::string                                preview_gcode_path,
+                                                 std::string                                printable_download_url,
+                                                 std::string                                printable_gcode_path,
+                                                 std::string                                tmp_path,
                                                 std::unique_ptr<GUI::NotificationManager>& notification_manager,
                                                 HelioQuery::RatingData                    rating_data);
 
@@ -711,7 +714,16 @@ public:
         return (parent / new_filename).string();
     }
 
-    void load_helio_file_to_viwer(std::string file_path, std::string tmp_path, HelioQuery::RatingData rating_data);
+    std::string create_path_for_thermal_gcode(std::string printable_gcode_path)
+    {
+        boost::filesystem::path p(printable_gcode_path);
+        if (!p.has_filename())
+            throw std::runtime_error("Invalid path: No filename present.");
+        return (p.parent_path() / ("thermal_" + p.filename().string())).string();
+    }
+
+    void load_helio_file_to_viewer(std::string preview_path, std::string printable_path, std::string tmp_path,
+                                   HelioQuery::RatingData rating_data);
 };
 } // namespace Slic3r
 #endif

@@ -9865,20 +9865,24 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
     if (a.is_successful) {
         this->reset_gcode_toolpaths();
 
-        // Keep original gcode by renaming
-        try {
-            boost::filesystem::path original_path(a.tmp_path);
-            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
-            int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
-            if (renamed != 0) {
-                BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
+        // Simulation keeps the original sliced G-code as the printable artifact. Optimization
+        // replaces it with Helio's annotation-free optimized G-code while retaining the original.
+        // The thermal-index variant in a.path is parsed for preview only and is never exported.
+        if (a.action == 1) {
+            try {
+                boost::filesystem::path original_path(a.tmp_path);
+                std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
+                if (!boost::filesystem::exists(original_path_name)) {
+                    int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
+                    if (renamed != 0)
+                        BOOST_LOG_TRIVIAL(error) << "Helio failed to retain original GCode";
+                }
+                std::string copied;
+                copy_file(a.printable_path, a.tmp_path, copied);
+            } catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "Helio failed to install printable optimized GCode";
             }
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
         }
-
-        std::string copied;
-        copy_file(a.path, a.tmp_path, copied);
 
         float time_origin_value = 0;
         float time_optimized_value = 0;
