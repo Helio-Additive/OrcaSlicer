@@ -441,6 +441,12 @@ public:
 struct HelioPlateResult {
     int action{-1};  // -1=none, 0=simulation, 1=optimization
 
+    // The preview file contains Helio annotations and must stay paired with the
+    // GCodeProcessorResult used by the viewer. The printable file is used for
+    // export and printer upload.
+    std::string preview_gcode_path;
+    std::string printable_gcode_path;
+
     // Simulation data
     HelioQuery::SimulationResult simulation_result;
     int original_print_time_seconds{0};
@@ -455,6 +461,8 @@ struct HelioPlateResult {
 
     void clear() {
         action = -1;
+        preview_gcode_path.clear();
+        printable_gcode_path.clear();
         simulation_result = HelioQuery::SimulationResult();
         original_print_time_seconds = 0;
         roles_times.clear();

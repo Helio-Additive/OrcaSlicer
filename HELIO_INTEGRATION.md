@@ -42,6 +42,8 @@ Key data flow:
 - Thermal Index — parsed from `;helioadditive=` gcode comments in `GCodeProcessor`
 - Warpage metrics — parsed from the same `;helioadditive=` comments (keys `wdm`, `wdx`,
   `wdy`, `wdz`, `wr`, `wtg`, `wts`, `whs`, `wls`) and from `WARPAGE_*` header tags
+- The preview result keeps `preview_gcode_path` as its filename because its line offsets belong
+  to the annotated file. Export and printer upload resolve `printable_gcode_path` instead
 
 ## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
 

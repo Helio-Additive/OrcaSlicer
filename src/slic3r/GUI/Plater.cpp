@@ -9898,7 +9898,10 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             time_origin_value = plate->get_slice_result()->print_statistics.modes[0].time;
         }
 
-        helio_background_process.m_gcode_result->filename = a.tmp_path;
+        // lines_ends and move line IDs were produced from the annotated preview
+        // file. Keep that file attached to the preview result so the sequential
+        // G-code window reads the same bytes whose offsets it is displaying.
+        helio_background_process.m_gcode_result->filename = a.path;
 
         GCodeProcessorResult *res1 = partplate_list.get_curr_plate()->get_slice_result();
         *res1 = *helio_background_process.m_gcode_result;
@@ -9939,6 +9942,15 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
 
             HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
             dlg.ShowModal();
+        }
+
+        if (plate) {
+            HelioPlateResult helio_result = plate->has_helio_result() ? *plate->get_helio_result() : HelioPlateResult();
+            helio_result.action = a.action;
+            helio_result.preview_gcode_path = a.path;
+            helio_result.printable_gcode_path = a.tmp_path;
+            helio_result.is_valid = true;
+            plate->set_helio_result(helio_result);
         }
     } else {
         notification_manager->push_helio_error_notification(a.error_message);
