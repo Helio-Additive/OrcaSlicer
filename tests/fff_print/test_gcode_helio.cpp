@@ -76,12 +76,12 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
 
     const auto& separated = extrusion_at(moves, 20.0f);
     CHECK_THAT(separated.thermal_index_mean, WithinAbs(85.0f, 0.001f));
+    CHECK(std::isnan(separated.warpage_displacement));
 
     const auto& partially_backfilled = extrusion_at(moves, 50.0f);
     CHECK_THAT(partially_backfilled.warpage_disp_x, WithinAbs(0.05f, 0.000001f));
     CHECK_THAT(partially_backfilled.warpage_disp_y, WithinAbs(0.06f, 0.000001f));
     CHECK_THAT(partially_backfilled.warpage_risk, WithinAbs(0.7f, 0.000001f));
-    CHECK(std::isnan(separated.warpage_displacement));
 
     const auto& unannotated = extrusion_at(moves, 30.0f);
     CHECK(std::isnan(unannotated.warpage_displacement));
