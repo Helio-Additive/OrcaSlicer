@@ -9865,31 +9865,9 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
     if (a.is_successful) {
         this->reset_gcode_toolpaths();
 
-        // Simulation keeps the original sliced G-code as the printable artifact. Optimization
-        // replaces it with Helio's annotation-free optimized G-code while retaining the original.
-        // The thermal-index variant in a.path is parsed for preview only and is never exported.
-        if (a.action == 1) {
-            try {
-                boost::filesystem::path original_path(a.tmp_path);
-                std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
-                bool original_preserved = boost::filesystem::exists(original_path_name);
-                if (!original_preserved) {
-                    int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
-                    if (renamed != 0)
-                        BOOST_LOG_TRIVIAL(error) << "Helio failed to retain original GCode";
-                    else
-                        original_preserved = true;
-                }
-                if (original_preserved) {
-                    std::string copied;
-                    copy_file(a.printable_path, a.tmp_path, copied);
-                } else {
-                    BOOST_LOG_TRIVIAL(error) << "Helio skipped installing optimized GCode to avoid losing the original";
-                }
-            } catch (...) {
-                BOOST_LOG_TRIVIAL(error) << "Helio failed to install printable optimized GCode";
-            }
-        }
+        // Keep all Helio artifacts separate: the original sliced G-code remains at
+        // a.tmp_path, the annotation-free file at a.printable_path is exported or
+        // uploaded, and the thermal-index file at a.path is used only for preview.
 
         float time_origin_value = 0;
         float time_optimized_value = 0;
@@ -9948,7 +9926,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             HelioPlateResult helio_result = plate->has_helio_result() ? *plate->get_helio_result() : HelioPlateResult();
             helio_result.action = a.action;
             helio_result.preview_gcode_path = a.path;
-            helio_result.printable_gcode_path = a.tmp_path;
+            helio_result.printable_gcode_path = a.printable_path;
             helio_result.is_valid = true;
             plate->set_helio_result(helio_result);
         }

@@ -44,6 +44,9 @@ Key data flow:
   `wdy`, `wdz`, `wr`, `wtg`, `wts`, `whs`, `wls`) and from `WARPAGE_*` header tags
 - The preview result keeps `preview_gcode_path` as its filename because its line offsets belong
   to the annotated file. Export and printer upload resolve `printable_gcode_path` instead
+- Optimization artifacts remain separate: the original OrcaSlicer G-code is retained unchanged,
+  the annotation-free optimized G-code is the export/upload source, and the annotated optimized
+  G-code is used only by the preview
 
 ## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
 
