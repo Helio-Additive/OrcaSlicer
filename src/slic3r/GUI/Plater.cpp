@@ -8228,8 +8228,11 @@ bool Plater::priv::restart_background_process(unsigned int state)
             helio_background_process.reset();
             helio_processing_disabled = false;
         }
-        // Helio: clear previous helio result on reslice so View Summary disappears
-        {
+        // Keep the Helio artifact selection for an export-only run. Clearing it here
+        // makes get_gcode_filename() fall back to the annotated preview result, so an
+        // optimization export can write the wrong G-code. A real restart still makes
+        // the artifacts stale and must discard them before slicing again.
+        if ((state & (UPDATE_BACKGROUND_PROCESS_FORCE_RESTART | UPDATE_BACKGROUND_PROCESS_RESTART)) != 0) {
             PartPlate* plate = background_process.get_current_plate();
             if (plate) plate->clear_helio_result();
         }
