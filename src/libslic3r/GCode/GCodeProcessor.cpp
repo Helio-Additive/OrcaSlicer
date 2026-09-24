@@ -20,6 +20,7 @@
 
 #include <float.h>
 #include <assert.h>
+#include <cmath>
 #include <regex>
 #include <charconv>
 #include <string>
@@ -64,7 +65,7 @@ static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& 
                 const std::string_view number = field.substr(separator + 1);
                 float                  value;
                 const auto [end, error] = fast_float::from_chars(number.data(), number.data() + number.size(), value);
-                if (error == std::errc() && end == number.data() + number.size()) {
+                if (error == std::errc() && end == number.data() + number.size() && std::isfinite(value)) {
                     values[std::distance(keys.begin(), key)] = value;
                     parsed = true;
                 }

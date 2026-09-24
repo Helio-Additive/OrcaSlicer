@@ -58,7 +58,9 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
         "G1 X40 E1 ;helioadditive=(ti.max=0.7,ti.min=0.3,ti.mean=0.5,element.index=40)\n"
         "  ;helioadditive=(wdm=0.04,wls=0.004)\n"
         "G1 X50 E1 ;helioadditive=(wdx=0.05,wdy=0.06)\n"
-        ";helioadditive=(wr=0.7)\n");
+        ";helioadditive=(wr=0.7)\n"
+        "G1 X60 E1 ;helioadditive=(wdm=inf,wdx=0.08,wdy=-inf)\n"
+        ";helioadditive=(wdx=nan,wr=inf)\n");
 
     const auto& annotated = extrusion_at(moves, 10.0f);
     CHECK_THAT(annotated.thermal_index_max, WithinAbs(80.0f, 0.001f));
@@ -82,6 +84,12 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
     CHECK_THAT(partially_backfilled.warpage_disp_x, WithinAbs(0.05f, 0.000001f));
     CHECK_THAT(partially_backfilled.warpage_disp_y, WithinAbs(0.06f, 0.000001f));
     CHECK_THAT(partially_backfilled.warpage_risk, WithinAbs(0.7f, 0.000001f));
+
+    const auto& non_finite = extrusion_at(moves, 60.0f);
+    CHECK(std::isnan(non_finite.warpage_displacement));
+    CHECK_THAT(non_finite.warpage_disp_x, WithinAbs(0.08f, 0.000001f));
+    CHECK(std::isnan(non_finite.warpage_disp_y));
+    CHECK(std::isnan(non_finite.warpage_risk));
 
     const auto& unannotated = extrusion_at(moves, 30.0f);
     CHECK(std::isnan(unannotated.warpage_displacement));
