@@ -9903,35 +9903,32 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
         this->update();
         q->force_update_all_plate_thumbnails();
 
-        // Show rating dialog for optimization
         if (a.action == 1) {
-            PartPlate* plate1 = wxGetApp().plater()->get_partplate_list().get_curr_plate();
-            if (plate1 && plate1->get_slice_result()) {
-                time_optimized_value = plate1->get_slice_result()->print_statistics.modes[0].time;
-            }
+            PartPlate* optimized_plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+            if (optimized_plate && optimized_plate->get_slice_result())
+                time_optimized_value = optimized_plate->get_slice_result()->print_statistics.modes[0].time;
+        }
 
-            if (plate) {
-                HelioPlateResult helio_result;
-                helio_result.action = 1;
+        if (plate) {
+            const HelioPlateResult* pending_result = plate->get_helio_result();
+            HelioPlateResult helio_result = a.action == 0 && pending_result ? *pending_result : HelioPlateResult();
+            helio_result.action = a.action;
+            helio_result.printable_gcode_path = a.printable_path;
+            helio_result.is_valid = true;
+
+            if (a.action == 1) {
                 helio_result.original_print_time_seconds = time_origin_value;
                 helio_result.optimized_print_time_seconds = time_optimized_value;
                 helio_result.quality_mean_improvement = a.quality_mean_improvement;
                 helio_result.quality_std_improvement = a.quality_std_improvement;
-                helio_result.is_valid = true;
-                plate->set_helio_result(helio_result);
             }
-
-            HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
-            dlg.ShowModal();
+            plate->set_helio_result(helio_result);
         }
 
-        if (plate) {
-            HelioPlateResult helio_result = plate->has_helio_result() ? *plate->get_helio_result() : HelioPlateResult();
-            helio_result.action = a.action;
-            helio_result.preview_gcode_path = a.path;
-            helio_result.printable_gcode_path = a.printable_path;
-            helio_result.is_valid = true;
-            plate->set_helio_result(helio_result);
+        // Show rating dialog for optimization only after publishing the complete result.
+        if (a.action == 1) {
+            HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
+            dlg.ShowModal();
         }
     } else {
         notification_manager->push_helio_error_notification(a.error_message);
@@ -11602,6 +11599,7 @@ void Plater::priv::on_helio_process()
         {
             if (partplate_list.get_curr_plate()->empty()) return;
             GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
+            const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
             int action = dlg.get_action();
             helio_background_process.set_action(action);
@@ -11613,9 +11611,11 @@ void Plater::priv::on_helio_process()
 
                 helio_background_process.set_simulation_input_data(data);
                 if (multimaterial_enabled) {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material, g_result, preview, [this]() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material,
+                                                  g_result, input_gcode_path, preview, [this]() {});
                 } else {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, input_gcode_path, preview,
+                                                  [this]() {});
                 }
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio simulation process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
@@ -11627,9 +11627,11 @@ void Plater::priv::on_helio_process()
 
                 helio_background_process.set_optimization_input_data(data);
                 if (multimaterial_enabled) {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material, g_result, preview, [this]() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material,
+                                                  g_result, input_gcode_path, preview, [this]() {});
                 } else {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, [this]() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, input_gcode_path, preview,
+                                                  [this]() {});
                 }
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio optimization process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
@@ -11710,9 +11712,10 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
         std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection(extruder_id).value_or("");
 
         auto g_result = background_process.get_current_gcode_result();
+        const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
         helio_background_process.init(helio_api_key, helio_api_url, helio_printer_id, helio_filament_id,
-                                      g_result, preview, [this]() {});
+                                      g_result, input_gcode_path, preview, [this]() {});
 
         helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state,
                                                     notification_manager);

@@ -2196,7 +2196,7 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
                 evt             = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
                 wxQueueEvent(GUI::wxGetApp().plater(), evt);
 
-                upload_file_res = HelioQuery::upload_file_to_presigned_url(m_gcode_result->filename, create_presigned_url_res.url);
+                upload_file_res = HelioQuery::upload_file_to_presigned_url(m_input_gcode_path, create_presigned_url_res.url);
                 if (upload_file_res.success) {
                     upload_succeeded = true;
                     break;
@@ -2385,7 +2385,7 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                             int original_time_seconds = static_cast<int>(m_gcode_result->print_statistics.modes[0].time);
                             auto roles_times = m_gcode_result->print_statistics.modes[0].roles_times;
                             std::string url = check_simulation_progress_res.thermal_index_gcode_url;
-                            std::string filename = m_gcode_result->filename;
+                            std::string filename = m_input_gcode_path;
                             HelioQuery::SimulationResult sim_result = check_simulation_progress_res.simulationResult;
 
                             // Store simulation result to current plate for later access (e.g., "View Summary" button)
@@ -2397,7 +2397,6 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                                     helio_result.simulation_result = sim_result;
                                     helio_result.original_print_time_seconds = original_time_seconds;
                                     helio_result.roles_times = roles_times;
-                                    helio_result.is_valid = true;
                                     plate->set_helio_result(helio_result);
                                 }
                             });
@@ -2593,7 +2592,7 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
                         if (check_optimzaion_progress_res.is_finished) {
                             // notification_manager->push_notification((boost::format("Helio: Optimzaion finished.")).str());
                             std::string optimized_gcode_path = HelioBackgroundProcess::create_path_for_optimization_gcode(
-                                m_gcode_result->filename);
+                                m_input_gcode_path);
                             std::string thermal_gcode_path = HelioBackgroundProcess::create_path_for_thermal_gcode(optimized_gcode_path);
 
                             HelioQuery::RatingData rating_data;
@@ -2603,7 +2602,7 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
 
                             HelioBackgroundProcess::save_downloaded_gcodes_and_load_preview(
                                 check_optimzaion_progress_res.optimized_gcode_with_thermal_indexes_url, thermal_gcode_path,
-                                check_optimzaion_progress_res.optimized_gcode_url, optimized_gcode_path, m_gcode_result->filename,
+                                check_optimzaion_progress_res.optimized_gcode_url, optimized_gcode_path, m_input_gcode_path,
                                 notification_manager, rating_data);
                             break;
                         }

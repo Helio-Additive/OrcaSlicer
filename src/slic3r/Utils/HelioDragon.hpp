@@ -441,10 +441,8 @@ public:
 struct HelioPlateResult {
     int action{-1};  // -1=none, 0=simulation, 1=optimization
 
-    // The preview file contains Helio annotations and must stay paired with the
-    // GCodeProcessorResult used by the viewer. The printable file is used for
-    // export and printer upload.
-    std::string preview_gcode_path;
+    // The annotated preview path is owned by GCodeProcessorResult::filename;
+    // this separate path is the annotation-free file for export and upload.
     std::string printable_gcode_path;
 
     // Simulation data
@@ -461,7 +459,6 @@ struct HelioPlateResult {
 
     void clear() {
         action = -1;
-        preview_gcode_path.clear();
         printable_gcode_path.clear();
         simulation_result = HelioQuery::SimulationResult();
         original_print_time_seconds = 0;
@@ -540,6 +537,7 @@ public:
     HelioQuery::OptimizationInput       optimization_input_data;
 
     Slic3r::GCodeProcessorResult* m_gcode_result{nullptr};
+    std::string                   m_input_gcode_path;
     Slic3r::GCodeProcessor        m_gcode_processor;
     Slic3r::GUI::Preview*         m_preview;
     std::function<void()>         m_update_function;
@@ -629,6 +627,7 @@ public:
               std::string                   printer_id,
               std::string                   filament_id,
               Slic3r::GCodeProcessorResult* gcode_result,
+              std::string                   input_gcode_path,
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
@@ -644,6 +643,7 @@ public:
         this->is_multi_color    = false;
         this->is_multi_material = false;
         m_gcode_result    = gcode_result;
+        m_input_gcode_path = std::move(input_gcode_path);
         m_preview         = preview;
         m_update_function = function;
     }
@@ -656,6 +656,7 @@ public:
               bool                          is_multi_color,
               bool                          is_multi_material,
               Slic3r::GCodeProcessorResult* gcode_result,
+              std::string                   input_gcode_path,
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
@@ -671,6 +672,7 @@ public:
         this->is_multi_color   = is_multi_color;
         this->is_multi_material = is_multi_material;
         m_gcode_result         = gcode_result;
+        m_input_gcode_path     = std::move(input_gcode_path);
         m_preview              = preview;
         m_update_function      = function;
     }
@@ -680,6 +682,7 @@ public:
         m_state = STATE_INITIAL;
         m_gcode_processor.reset();
         m_gcode_result = nullptr;
+        m_input_gcode_path.clear();
     }
 
     void set_helio_api_key(std::string api_key);
