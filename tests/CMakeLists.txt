@@ -53,9 +53,9 @@ function(orcaslicer_discover_tests TARGET)
 endfunction()
 
 add_subdirectory(libnest2d)
+add_subdirectory(libvgcode)
 add_subdirectory(libslic3r)
 add_subdirectory(slic3rutils)
 add_subdirectory(fff_print)
 add_subdirectory(sla_print)
-
 

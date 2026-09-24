@@ -2526,6 +2526,8 @@ void PartPlate::set_print(PrintBase* print, GCodeResult* result, int index)
 std::string PartPlate::get_gcode_filename()
 {
 	if (is_slice_result_valid() && get_slice_result()) {
+		if (m_helio_result && m_helio_result->is_valid && !m_helio_result->printable_gcode_path.empty())
+			return m_helio_result->printable_gcode_path;
 		return m_gcode_result->filename;
 	}
 	return "";
@@ -2535,9 +2537,10 @@ bool PartPlate::is_valid_gcode_file()
 {
 	if (get_gcode_filename().empty())
 		return false;
-	boost::filesystem::path gcode_file(m_gcode_result->filename);
+	const std::string printable_filename = get_gcode_filename();
+	boost::filesystem::path gcode_file(printable_filename);
 	if (!boost::filesystem::exists(gcode_file)) {
-		BOOST_LOG_TRIVIAL(info) << "invalid gcode file, file is missing, file = " << m_gcode_result->filename;
+		BOOST_LOG_TRIVIAL(info) << "invalid gcode file, file is missing, file = " << printable_filename;
 		return false;
 	}
 	return true;
@@ -6211,7 +6214,7 @@ int PartPlateList::store_to_3mf_structure(PlateDataPtrs& plate_data_list, bool w
 					//	plate_data_item->pattern_file = "valid_pattern";
 					if (m_plate_list[i]->cali_bboxes_data.is_valid())
 						plate_data_item->pattern_bbox_file = "valid_pattern_bbox";
-					plate_data_item->gcode_file       = m_plate_list[i]->m_gcode_result->filename;
+					plate_data_item->gcode_file       = m_plate_list[i]->get_gcode_filename();
 					plate_data_item->is_sliced_valid  = true;
 					plate_data_item->gcode_prediction = std::to_string(
 						(int) m_plate_list[i]->get_slice_result()->print_statistics.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Normal)].time);
