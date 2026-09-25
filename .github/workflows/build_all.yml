@@ -16,8 +16,9 @@ on:
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
      - 'tests/**'
-     # Helio: upstream omits this here — see the note below. Windows builds run it.
+     # Helio: upstream omits both of these from its filters — see the note below.
      - 'build_release_vs.bat'
+     - 'scripts/run_unit_tests.sh'
 
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -37,6 +38,7 @@ on:
      - 'build_release_vs2022.bat'
      - 'build_release_macos.sh'
      - 'scripts/flatpak/**'
+     - 'scripts/run_unit_tests.sh'
      - 'tests/**'
      # Helio: data-only paths, present in the `push` filter above but historically
      # absent here. Without them a PR touching only profiles or translations never
@@ -57,11 +59,12 @@ on:
      # label-gated. This fork opens no PRs to those branches.
      #
      # `tests/**` and `build_release_vs.bat` restore paths upstream added in
-     # v2.4.2 and the sync dropped; rationale in #134/#135. Two departures a
+     # v2.4.2 and the sync dropped; rationale in #134/#135. Three departures a
      # future sync must not "correct" back to upstream:
-     #   - `build_release_vs.bat` is also in the `push` filter, which upstream
-     #     omits. Merges land here as pushes, so without it a PR touching only
-     #     the Windows build script is never built on the release branch.
+     #   - `build_release_vs.bat` and `scripts/run_unit_tests.sh` are in BOTH
+     #     filters; upstream lists neither, though its own jobs run both. Merges
+     #     land here as pushes, so without them a PR touching only the Windows
+     #     build script or the ctest runner is never built on the release branch.
      #   - `scripts/msix/**` is deliberately NOT restored: nothing here builds
      #     an MSIX until `build_orca.yml`'s dropped MSIX step returns (#134).
      - 'localization/**'
