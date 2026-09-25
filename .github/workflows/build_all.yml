@@ -16,8 +16,7 @@ on:
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
      - 'tests/**'
-     # Helio: not in upstream's `push` filter — see the note in the
-     # `pull_request` filter below. Windows builds run this script.
+     # Helio: upstream omits this here — see the note below. Windows builds run it.
      - 'build_release_vs.bat'
 
   pull_request:
@@ -57,35 +56,14 @@ on:
      # `synchronize` and `reopened` alike — because those bases are not
      # label-gated. This fork opens no PRs to those branches.
      #
-     # `tests/**` and `build_release_vs.bat` above are not Helio additions —
-     # upstream added them to these filters in v2.4.2 and the sync that brought
-     # v2.4.2 in dropped them along with the rest of its changes to this file
-     # (see issue #134). They are restored here rather than invented.
-     #
-     # `tests/**` is #109's bug exactly: a tests-only PR never starts this
-     # workflow, so `ready-to-build` is inert on it. #126 adds two test files,
-     # and #133 records that one of them has never had an assertion evaluated
-     # in CI.
-     #
-     # `build_release_vs.bat` is the script the Windows jobs actually invoke —
-     # `build_orca.yml:293` (`slicer`) and `build_deps.yml:139-143` (`deps`,
-     # `pack`), so it drives both the dependency build and the slicer build.
-     # Only `build_release_vs2022.bat` was listed here, and nothing in this
-     # repository invokes that one, so a change to the real Windows build script
-     # did not trigger a build while a change to a dead one did. The dead entry
-     # is kept because it is upstream's and removing it would be a divergence.
-     #
-     # It is also added to the `push` filter above, which upstream does NOT do.
-     # That one line is a deliberate Helio divergence, on the same reasoning as
-     # #113's additions: upstream omitting the script its own Windows jobs run
-     # looks like an oversight, and a direct push to a release branch touching
-     # only that script would otherwise go unbuilt. Reported by Codex on #135.
-     #
-     # `scripts/msix/**` is upstream's here too and is deliberately NOT restored.
-     # Nothing in this fork builds an MSIX: upstream's "Build MSIX Store package
-     # Win" step in `build_orca.yml` is part of the same dropped delta (#134), so
-     # the path would start builds that cannot validate the files that triggered
-     # them. Restore it together with that step, not before.
+     # `tests/**` and `build_release_vs.bat` restore paths upstream added in
+     # v2.4.2 and the sync dropped; rationale in #134/#135. Two departures a
+     # future sync must not "correct" back to upstream:
+     #   - `build_release_vs.bat` is also in the `push` filter, which upstream
+     #     omits. Merges land here as pushes, so without it a PR touching only
+     #     the Windows build script is never built on the release branch.
+     #   - `scripts/msix/**` is deliberately NOT restored: nothing here builds
+     #     an MSIX until `build_orca.yml`'s dropped MSIX step returns (#134).
      - 'localization/**'
      - 'resources/**'
 
