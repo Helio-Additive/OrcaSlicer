@@ -97,9 +97,16 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
-`pull_request: branches: [main]`. This fork's PRs target `orca-latest-parity-bambu`, so
-**neither has ever run on a PR here**, and `check_profiles_comment.yml` (which reports
+`pull_request: branches: [main]`, each with a `paths:` filter (`resources/profiles/**` and
+`localization/**` respectively). **Neither has ever run on a PR here** — 0 `pull_request`
+runs for either, per the Actions API — and `check_profiles_comment.yml` (which reports
 results via `workflow_run` on "Check profiles") is dead along with them.
+
+That is the status quo, not a guarantee. It holds because Helio PRs almost always target
+`orca-latest-parity-bambu` **and** because the few `main`-based ones (see Git Workflow
+below) happened not to touch those paths — not because a `main` PR is impossible. One
+touching profiles or localization would activate all three, against inherited data that
+does not currently pass the validator.
 
 Do not simply add the parity branch to those filters: as of v2.4.2 the inherited profile
 data does not pass the validator the workflow downloads. `check_profiles.yml` fetches the
