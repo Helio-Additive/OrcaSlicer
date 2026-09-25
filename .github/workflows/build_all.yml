@@ -59,12 +59,14 @@ on:
      # label-gated. This fork opens no PRs to those branches.
      #
      # `tests/**` and `build_release_vs.bat` restore paths upstream added in
-     # v2.4.2 and the sync dropped; rationale in #134/#135. Three departures a
-     # future sync must not "correct" back to upstream:
-     #   - `build_release_vs.bat` and `scripts/run_unit_tests.sh` are in BOTH
-     #     filters; upstream lists neither, though its own jobs run both. Merges
-     #     land here as pushes, so without them a PR touching only the Windows
-     #     build script or the ctest runner is never built on the release branch.
+     # v2.4.2 and the sync dropped; rationale in #134/#135. What a future sync
+     # must NOT "correct" back to upstream:
+     #   - `build_release_vs.bat` in `push` (upstream has it for pull_request
+     #     only, so that entry IS upstream's) and `scripts/run_unit_tests.sh`
+     #     in both (upstream has neither) — though upstream's own jobs run both
+     #     scripts. Merges land here as pushes, so without these a PR touching
+     #     only the Windows build script or the ctest runner is never built on
+     #     the release branch.
      #   - `scripts/msix/**` is deliberately NOT restored: nothing here builds
      #     an MSIX until `build_orca.yml`'s dropped MSIX step returns (#134).
      - 'localization/**'
