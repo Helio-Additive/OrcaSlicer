@@ -16,7 +16,8 @@ on:
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
      - 'tests/**'
-     # Helio: upstream omits both of these from its filters — see the note below.
+     # Helio: upstream's `push` filter omits both — see the note below. (Its
+     # `pull_request` filter does list build_release_vs.bat.)
      - 'build_release_vs.bat'
      - 'scripts/run_unit_tests.sh'
 
