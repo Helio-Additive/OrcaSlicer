@@ -92,8 +92,8 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
   PRs based on `main` / `release/*`, which are not label-gated: a PR to those branches
   touching only a filtered path now builds the full matrix. **This fork does open such
-  PRs** — #128 and #129 (Aug 2026), plus #3, #6, #19, #24 — so this is a real cost, not
-  a theoretical one. An earlier revision of this line claimed the fork opens none.
+  PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
+  earlier revision of this line claimed the fork opens none.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
@@ -112,7 +112,11 @@ matching release, or scoping validation to changed vendors, has to be decided fi
 ## Git Workflow
 - **Base branch**: `orca-latest-parity-bambu` (not `main`)
 - **Push remote**: `helio` (never `origin` — that's upstream OrcaSlicer)
-- **PRs target**: `orca-latest-parity-bambu`
+- **PRs target**: `orca-latest-parity-bambu` — the default for all Helio work. A few have
+  targeted `main` instead (#128, #129 in Aug 2026; #3, #6, #19, #24 older). That is the
+  exception, not a second convention, but it is not hypothetical: those bases are **not**
+  label-gated, which is why a `build_all.yml` `paths:` entry costs a full matrix there.
+  See the Build All section above.
 
 ## Overview
 
