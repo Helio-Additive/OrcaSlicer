@@ -15,7 +15,6 @@ on:
      - 'resources/**'
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
-     - 'scripts/msix/**'
      - 'tests/**'
 
   pull_request:
@@ -36,7 +35,6 @@ on:
      - 'build_release_vs2022.bat'
      - 'build_release_macos.sh'
      - 'scripts/flatpak/**'
-     - 'scripts/msix/**'
      - 'tests/**'
      # Helio: data-only paths, present in the `push` filter above but historically
      # absent here. Without them a PR touching only profiles or translations never
@@ -56,14 +54,26 @@ on:
      # `synchronize` and `reopened` alike — because those bases are not
      # label-gated. This fork opens no PRs to those branches.
      #
-     # `tests/**`, `scripts/msix/**` and `build_release_vs.bat` above are not
-     # Helio additions — upstream added them to these filters in v2.4.2 and the
-     # sync that brought v2.4.2 in dropped them along with the rest of its changes
-     # to this file (see issue #134). They are restored here rather than invented.
-     # `tests/**` is the one with a live consequence and it is #109's bug exactly:
-     # a tests-only PR never starts this workflow, so `ready-to-build` is inert on
-     # it. #126 adds two test files, and #133 records that one of them has never
-     # had an assertion evaluated in CI.
+     # `tests/**` and `build_release_vs.bat` above are not Helio additions —
+     # upstream added them to these filters in v2.4.2 and the sync that brought
+     # v2.4.2 in dropped them along with the rest of its changes to this file
+     # (see issue #134). They are restored here rather than invented.
+     #
+     # `tests/**` is #109's bug exactly: a tests-only PR never starts this
+     # workflow, so `ready-to-build` is inert on it. #126 adds two test files,
+     # and #133 records that one of them has never had an assertion evaluated
+     # in CI.
+     #
+     # `build_release_vs.bat` is the script `build_orca.yml` actually invokes to
+     # build Windows (`.\build_release_vs.bat slicer`). Only the unused
+     # `build_release_vs2022.bat` was listed here, so a change to the real
+     # Windows build script did not trigger a build.
+     #
+     # `scripts/msix/**` is upstream's here too and is deliberately NOT restored.
+     # Nothing in this fork builds an MSIX: upstream's "Build MSIX Store package
+     # Win" step in `build_orca.yml` is part of the same dropped delta (#134), so
+     # the path would start builds that cannot validate the files that triggered
+     # them. Restore it together with that step, not before.
      - 'localization/**'
      - 'resources/**'
 
