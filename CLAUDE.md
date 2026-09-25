@@ -90,8 +90,10 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Adding those paths does **not** make profile syncs build automatically — the label gate
   still skips every job on an unlabelled parity-branch PR. Widening `paths:` only changes
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
-  PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
-  translation-only PR to those branches now builds the full matrix. This fork opens none.
+  PRs based on `main` / `release/*`, which are not label-gated: a PR to those branches
+  touching only a filtered path now builds the full matrix. **This fork does open such
+  PRs** — #128 and #129 (Aug 2026), plus #3, #6, #19, #24 — so this is a real cost, not
+  a theoretical one. An earlier revision of this line claimed the fork opens none.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare

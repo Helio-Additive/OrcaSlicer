@@ -54,10 +54,12 @@ on:
      # unit_tests skip transitively via `needs:` on build_macos_arch and
      # build_linux respectively.
      #
-     # The one real widening is a PR touching only these two paths that targets
-     # `main` / `release/*` — either profiles or translations, on `opened`,
-     # `synchronize` and `reopened` alike — because those bases are not
-     # label-gated. This fork opens no PRs to those branches.
+     # The one real widening is a PR touching only these paths that targets
+     # `main` / `release/*` — on `opened`, `synchronize` and `reopened` alike —
+     # because those bases are not label-gated, so it builds the full matrix
+     # unlabelled. This applies to every path added here, not just the two data
+     # ones. The fork DOES open such PRs (#128, #129 in Aug 2026); an earlier
+     # revision of this note said it did not, which understated the cost.
      #
      # `tests/**` and `build_release_vs.bat` restore paths upstream added in
      # v2.4.2 and the sync dropped; rationale in #134/#135. What a future sync
