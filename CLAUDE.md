@@ -90,14 +90,30 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Adding those paths does **not** make profile syncs build automatically — the label gate
   still skips every job on an unlabelled parity-branch PR. Widening `paths:` only changes
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
-  PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
-  translation-only PR to those branches now builds the full matrix. This fork opens none.
+  PRs based on `main` / `release/*`, which are not label-gated: a PR to those branches
+  touching only a filtered path now builds the full matrix. **This fork does open such
+  PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
+  earlier revision of this line claimed the fork opens none.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
-`pull_request: branches: [main]`. This fork's PRs target `orca-latest-parity-bambu`, so
-**neither has ever run on a PR here**, and `check_profiles_comment.yml` (which reports
+`pull_request: branches: [main]`, each with a `paths:` filter (`resources/profiles/**` and
+`localization/**` respectively). **Neither has ever run on a PR here** — 0 `pull_request`
+runs for either, per the Actions API — and `check_profiles_comment.yml` (which reports
 results via `workflow_run` on "Check profiles") is dead along with them.
+
+That is the status quo, not a guarantee. It holds because Helio PRs almost always target
+`orca-latest-parity-bambu`, and the few `main`-based ones (see Git Workflow below) have
+not touched `resources/profiles/**` or `localization/**` — not because such a PR is
+impossible. One that did would start the checker matching the paths it touched — and the
+two run *different* checks, so only one of them is exposed to the validator problem below:
+
+- `resources/profiles/**` → `check_profiles.yml`, which downloads a validator and runs it
+  over the full profile tree, then feeds `check_profiles_comment.yml` via `workflow_run`.
+  **This is the one that would fail on inherited data** (next paragraph).
+- `localization/**` → `check_locale.yml`, which runs gettext `msgfmt --check-format` over
+  `localization/i18n/**` and nothing else. No profile validator is involved, so the
+  failure mode below does not apply to it.
 
 Do not simply add the parity branch to those filters: as of v2.4.2 the inherited profile
 data does not pass the validator the workflow downloads. `check_profiles.yml` fetches the
@@ -110,7 +126,11 @@ matching release, or scoping validation to changed vendors, has to be decided fi
 ## Git Workflow
 - **Base branch**: `orca-latest-parity-bambu` (not `main`)
 - **Push remote**: `helio` (never `origin` — that's upstream OrcaSlicer)
-- **PRs target**: `orca-latest-parity-bambu`
+- **PRs target**: `orca-latest-parity-bambu` — the default for all Helio work. A few have
+  targeted `main` instead (#128, #129 in Aug 2026; #3, #6, #19, #24 older). That is the
+  exception, not a second convention, but it is not hypothetical: those bases are **not**
+  label-gated, which is why a `build_all.yml` `paths:` entry costs a full matrix there.
+  See the Build All section above.
 
 ## Overview
 

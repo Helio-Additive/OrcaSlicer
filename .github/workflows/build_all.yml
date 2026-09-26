@@ -15,6 +15,11 @@ on:
      - 'resources/**'
      - ".github/workflows/build_*.yml"
      - 'scripts/flatpak/**'
+     - 'tests/**'
+     # Helio: upstream's `push` filter omits both — see the note below. (Its
+     # `pull_request` filter does list build_release_vs.bat.)
+     - 'build_release_vs.bat'
+     - 'scripts/run_unit_tests.sh'
 
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -30,9 +35,12 @@ on:
      - 'version.inc'
      - ".github/workflows/build_*.yml"
      - 'build_linux.sh'
+     - 'build_release_vs.bat'
      - 'build_release_vs2022.bat'
      - 'build_release_macos.sh'
      - 'scripts/flatpak/**'
+     - 'scripts/run_unit_tests.sh'
+     - 'tests/**'
      # Helio: data-only paths, present in the `push` filter above but historically
      # absent here. Without them a PR touching only profiles or translations never
      # triggers this workflow, so applying `ready-to-build` to such a PR is silently
@@ -46,10 +54,24 @@ on:
      # unit_tests skip transitively via `needs:` on build_macos_arch and
      # build_linux respectively.
      #
-     # The one real widening is a PR touching only these two paths that targets
-     # `main` / `release/*` — either profiles or translations, on `opened`,
-     # `synchronize` and `reopened` alike — because those bases are not
-     # label-gated. This fork opens no PRs to those branches.
+     # The one real widening is a PR touching only these paths that targets
+     # `main` / `release/*` — on `opened`, `synchronize` and `reopened` alike —
+     # because those bases are not label-gated, so it builds the full matrix
+     # unlabelled. This applies to every path added here, not just the two data
+     # ones. The fork DOES open such PRs (#128, #129 in Aug 2026); an earlier
+     # revision of this note said it did not, which understated the cost.
+     #
+     # `tests/**` and `build_release_vs.bat` restore paths upstream added in
+     # v2.4.2 and the sync dropped; rationale in #134/#135. What a future sync
+     # must NOT "correct" back to upstream:
+     #   - `build_release_vs.bat` in `push` (upstream has it for pull_request
+     #     only, so that entry IS upstream's) and `scripts/run_unit_tests.sh`
+     #     in both (upstream has neither) — though upstream's own jobs run both
+     #     scripts. Merges land here as pushes, so without these a PR touching
+     #     only the Windows build script or the ctest runner is never built on
+     #     the release branch.
+     #   - `scripts/msix/**` is deliberately NOT restored: nothing here builds
+     #     an MSIX until `build_orca.yml`'s dropped MSIX step returns (#134).
      - 'localization/**'
      - 'resources/**'
 
