@@ -105,10 +105,15 @@ results via `workflow_run` on "Check profiles") is dead along with them.
 That is the status quo, not a guarantee. It holds because Helio PRs almost always target
 `orca-latest-parity-bambu`, and the few `main`-based ones (see Git Workflow below) have
 not touched `resources/profiles/**` or `localization/**` — not because such a PR is
-impossible. One that did would start the checker matching the paths it touched
-(`resources/profiles/**` → `check_profiles.yml`, which then feeds
-`check_profiles_comment.yml` via `workflow_run`; `localization/**` → `check_locale.yml`),
-against inherited data that does not currently pass the validator.
+impossible. One that did would start the checker matching the paths it touched — and the
+two run *different* checks, so only one of them is exposed to the validator problem below:
+
+- `resources/profiles/**` → `check_profiles.yml`, which downloads a validator and runs it
+  over the full profile tree, then feeds `check_profiles_comment.yml` via `workflow_run`.
+  **This is the one that would fail on inherited data** (next paragraph).
+- `localization/**` → `check_locale.yml`, which runs gettext `msgfmt --check-format` over
+  `localization/i18n/**` and nothing else. No profile validator is involved, so the
+  failure mode below does not apply to it.
 
 Do not simply add the parity branch to those filters: as of v2.4.2 the inherited profile
 data does not pass the validator the workflow downloads. `check_profiles.yml` fetches the
