@@ -409,7 +409,8 @@ public:
                                                            double             maxExtruderFlowRate            = -1,
                                                            int                layersToOptimizeStart          = -1,
                                                            int                layersToOptimizeEnd            = -1,
-                                                           const std::string& job_name                       = "");
+                                                           const std::string& job_name                       = "",
+                                                           bool               enableWarpingAnalysis          = false);
     static std::string generateTimestampedString()
     {
         // Get the current UTC time

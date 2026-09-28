@@ -16,7 +16,7 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode)
+std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, bool* is_helio_gcode = nullptr)
 {
     FullPrintConfig config;
     config.gcode_flavor.value = gcfMarlinFirmware;
@@ -30,7 +30,10 @@ std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode)
     GCodeProcessor processor;
     processor.apply_config(config);
     processor.process_file(temp.string());
-    return std::move(processor.extract_result().moves);
+    auto result = processor.extract_result();
+    if (is_helio_gcode != nullptr)
+        *is_helio_gcode = result.is_helio_gcode;
+    return std::move(result.moves);
 }
 
 const GCodeProcessorResult::MoveVertex& extrusion_at(const std::vector<GCodeProcessorResult::MoveVertex>& moves, float x)
@@ -54,7 +57,7 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
         "; unrelated comment\n"
         ";helioadditive=wdm=1.0\n"
         "G1 X30 E1\n"
-        ";helioadditive=wdm=2.0\n"
+        ";helioadditive=whs=0.2110\n"
         "G1 X40 E1 ;helioadditive=(ti.max=0.7,ti.min=0.3,ti.mean=0.5,element.index=40)\n"
         "  ;helioadditive=(wdm=0.04,wls=0.004)\n"
         "G1 X50 E1 ;helioadditive=(wdx=0.05,wdy=0.06)\n"
@@ -91,11 +94,59 @@ TEST_CASE("A following Helio comment adds warpage data to the current path", "[G
     CHECK(std::isnan(non_finite.warpage_disp_y));
     CHECK(std::isnan(non_finite.warpage_risk));
 
-    const auto& unannotated = extrusion_at(moves, 30.0f);
-    CHECK(std::isnan(unannotated.warpage_displacement));
+    const auto& warpage_only = extrusion_at(moves, 30.0f);
+    CHECK_THAT(warpage_only.warpage_hull_shrinkage, WithinAbs(0.2110f, 0.000001f));
+    CHECK(warpage_only.thermal_index_mean < -100.0f);
 
     const auto& indented = extrusion_at(moves, 40.0f);
     CHECK_THAT(indented.thermal_index_mean, WithinAbs(50.0f, 0.001f));
     CHECK_THAT(indented.warpage_displacement, WithinAbs(0.04f, 0.000001f));
     CHECK_THAT(indented.warpage_layer_shrinkage, WithinAbs(0.004f, 0.000001f));
+}
+
+TEST_CASE("Warpage-only metadata identifies Helio G-code", "[GCode][Helio]")
+{
+    bool       is_helio_gcode = false;
+    const auto moves = process_gcode(
+        "M83\n"
+        "G1 X10 E1\n"
+        ";helioadditive=whs=0.2110\n",
+        &is_helio_gcode);
+
+    CHECK(is_helio_gcode);
+    CHECK_THAT(extrusion_at(moves, 10.0f).warpage_hull_shrinkage, WithinAbs(0.2110f, 0.000001f));
+}
+
+TEST_CASE("Standalone warpage metadata covers every arc segment without crossing layers", "[GCode][Helio]")
+{
+    const auto moves = process_gcode(
+        "M83\n"
+        ";LAYER_CHANGE\n"
+        "G1 Z0.4\n"
+        "G1 X1 Y0\n"
+        "G3 X0 Y1 I-1 J0 E1 ;helioadditive=(ti.max=-0.2,ti.min=-0.2,ti.mean=-0.2)\n"
+        ";helioadditive=(whs=0.0644)\n"
+        ";LAYER_CHANGE\n"
+        "G1 Z0.6\n"
+        "G1 X11 Y0\n"
+        "G2 X10 Y-1 I-1 J0 E1 ;helioadditive=(ti.max=-0.18,ti.min=-0.18,ti.mean=-0.18)\n"
+        ";helioadditive=(whs=0.0311)\n"
+        ";LAYER_CHANGE\n"
+        "G1 Z0.8\n"
+        "G1 X21 Y0\n"
+        "G3 X20 Y1 I-1 J0 E1 ;helioadditive=(whs=0.0003)\n");
+
+    const std::array<float, 3> expected_whs = { 0.0644f, 0.0311f, 0.0003f };
+    for (size_t layer_id = 0; layer_id < expected_whs.size(); ++layer_id) {
+        size_t segment_count = 0;
+        for (const auto& move : moves) {
+            if (move.type != EMoveType::Extrude || move.layer_id != layer_id)
+                continue;
+            ++segment_count;
+            CHECK_THAT(move.warpage_hull_shrinkage, WithinAbs(expected_whs[layer_id], 0.000001f));
+        }
+        // Each G2/G3 is discretized, so this also verifies that standalone metadata
+        // is backfilled to every generated subsegment rather than only the endpoint.
+        CHECK(segment_count > 1);
+    }
 }

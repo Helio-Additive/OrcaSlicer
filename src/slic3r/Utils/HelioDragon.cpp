@@ -1469,7 +1469,8 @@ std::string HelioQuery::generate_optimization_graphql_query(const std::string& g
                                                             double             maxExtruderFlowRate,
                                                             int                layersToOptimizeStart,
                                                             int                layersToOptimizeEnd,
-                                                            const std::string& job_name)
+                                                            const std::string& job_name,
+                                                            bool               enableWarpingAnalysis)
 {
     CNumericLocalesSetter locales_setter;
     // Use a caller-supplied stable name when provided so create-retries reuse the same name
@@ -1488,6 +1489,11 @@ std::string HelioQuery::generate_optimization_graphql_query(const std::string& g
 
     // Step 1.SimulationSettingsInput
     std::vector<std::string> simulation_fields;
+    // As with standalone simulations, omit the experimental field while disabled
+    // so optimization remains compatible with regional schemas that predate it.
+    if (enableWarpingAnalysis)
+        simulation_fields.emplace_back(R"("enableWarpingAnalysis": true)");
+
     if (temperatureStabilizationHeight != -1) {
         simulation_fields.push_back(boost::str(boost::format(R"("temperatureStabilizationHeight": %1%)") % temperatureStabilizationHeight));
     }
@@ -1873,6 +1879,7 @@ Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(con
     const float initial_room_temp_kelvin = initial_room_airtemp == -1 ? -1 : initial_room_airtemp + 273.15;
     const float object_proximity_airtemp_kelvin = chamber_temp == -1 ? -1 : chamber_temp + 273.15;
     const float layer_threshold_meters = layer_threshold / 1000;
+    const bool enable_warping_analysis = GUI::wxGetApp().app_config->get_bool("helio_warping_analysis_enabled");
 
     /*field processing*/
     if (!oinput.isDefault()) {
@@ -1885,14 +1892,15 @@ Slic3r::HelioQuery::CreateOptimizationResult HelioQuery::create_optimization(con
         query_body = generate_optimization_graphql_query(gcode_id, print_priority, oinput.optimize_outerwall, oinput.use_old_method,
                                                          layer_threshold_meters, initial_room_temp_kelvin, object_proximity_airtemp_kelvin,
                                                          min_velocity, max_velocity, min_volumetric_speed, max_volumetric_speed,
-                                                         oinput.layers_to_optimize[0], oinput.layers_to_optimize[1], job_name);
+                                                         oinput.layers_to_optimize[0], oinput.layers_to_optimize[1], job_name,
+                                                         enable_warping_analysis);
     }
     else {
         query_body = generate_optimization_graphql_query(gcode_id, print_priority, oinput.optimize_outerwall, oinput.use_old_method,
                                                          layer_threshold_meters, initial_room_temp_kelvin, object_proximity_airtemp_kelvin,
                                                          oinput.min_velocity, oinput.max_velocity, oinput.min_volumetric_speed,
                                                          oinput.max_volumetric_speed, oinput.layers_to_optimize[0],
-                                                         oinput.layers_to_optimize[1], job_name);
+                                                         oinput.layers_to_optimize[1], job_name, enable_warping_analysis);
     }
     
 

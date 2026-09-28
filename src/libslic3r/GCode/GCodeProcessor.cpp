@@ -2947,6 +2947,7 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     if (m_pending_helio_move_begin && is_standalone_helio_comment) {
         std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         if (parse_warpage_fields(standalone_comment.substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
+            m_is_helio_gcode = true;
             for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
                 auto& move = m_result.moves[i];
                 if (!std::isnan(warpage_fields[0])) move.warpage_displacement    = warpage_fields[0];
@@ -2971,7 +2972,6 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     const std::string_view cmd = line.cmd();
     const bool is_move = boost::iequals(cmd, "G0") || boost::iequals(cmd, "G1") ||
                          boost::iequals(cmd, "G2") || boost::iequals(cmd, "G3");
-    const bool has_helio_comment = raw.find(";helioadditive=") != std::string::npos;
     const size_t move_begin = m_result.moves.size();
     if (m_flavor == gcfKlipper)
     {
@@ -2991,7 +2991,9 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     if (cmd.length() > 1) {
         // process command lines
         m_command_processor.process_comand(cmd, line);
-        if (is_move && has_helio_comment && m_result.moves.size() > move_begin)
+        // Helio may emit the warpage record on the line after a move even when
+        // that move has no inline thermal-index annotation.
+        if (is_move && m_result.moves.size() > move_begin)
             m_pending_helio_move_begin = move_begin;
     }
     else {
@@ -3931,7 +3933,8 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
-            parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields);
+            if (parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields))
+                m_is_helio_gcode = true;
         }
     }
 
@@ -4689,7 +4692,8 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
-            parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields);
+            if (parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields))
+                m_is_helio_gcode = true;
         }
     }
 

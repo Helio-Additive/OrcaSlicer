@@ -29,6 +29,28 @@
 namespace libvgcode {
 class Viewer;
 
+static bool same_simulation_value(float lhs, float rhs)
+{
+    return lhs == rhs || (std::isnan(lhs) && std::isnan(rhs));
+}
+
+static bool same_simulation_data(const Slic3r::GCodeProcessorResult::MoveVertex& lhs,
+                                 const Slic3r::GCodeProcessorResult::MoveVertex& rhs)
+{
+    return lhs.thermal_index_mean == rhs.thermal_index_mean &&
+           lhs.thermal_index_min == rhs.thermal_index_min &&
+           lhs.thermal_index_max == rhs.thermal_index_max &&
+           same_simulation_value(lhs.warpage_displacement, rhs.warpage_displacement) &&
+           same_simulation_value(lhs.warpage_disp_x, rhs.warpage_disp_x) &&
+           same_simulation_value(lhs.warpage_disp_y, rhs.warpage_disp_y) &&
+           same_simulation_value(lhs.warpage_disp_z, rhs.warpage_disp_z) &&
+           same_simulation_value(lhs.warpage_risk, rhs.warpage_risk) &&
+           same_simulation_value(lhs.warpage_ti_gradient, rhs.warpage_ti_gradient) &&
+           same_simulation_value(lhs.warpage_thermal_strain, rhs.warpage_thermal_strain) &&
+           same_simulation_value(lhs.warpage_hull_shrinkage, rhs.warpage_hull_shrinkage) &&
+           same_simulation_value(lhs.warpage_layer_shrinkage, rhs.warpage_layer_shrinkage);
+}
+
 Vec3 convert(const Slic3r::Vec3f& v)
 {
     return { v.x(), v.y(), v.z() };
@@ -218,7 +240,10 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
         if (option_type == EOptionType::COUNT || option_type == EOptionType::Travels || option_type == EOptionType::Wipes) {
             if (ret.vertices.empty() || prev.type != curr.type || prev.extrusion_role != curr.extrusion_role
                 // ORCA: Fix issue with flow rate changes being visualized incorrectly
-                || prev.mm3_per_mm != curr.mm3_per_mm) {
+                || prev.mm3_per_mm != curr.mm3_per_mm
+                // Segment colors are interpolated between their two vertices. Split when
+                // simulation metadata changes so both endpoints describe the current move.
+                || !same_simulation_data(prev, curr)) {
                 // to allow libvgcode to properly detect the start/end of a path we need to add a 'phantom' vertex
                 // equal to the current one with the exception of the position, which should match the previous move position,
                 // and the times, which are set to zero
