@@ -145,11 +145,6 @@ static std::array<float, 9> warpage_values(const libvgcode::PathVertex& vertex)
              vertex.warpage_thermal_strain, vertex.warpage_hull_shrinkage, vertex.warpage_layer_shrinkage };
 }
 
-static float warpage_value(const libvgcode::PathVertex& vertex, libvgcode::EViewType view_type)
-{
-    return warpage_values(vertex)[warpage_view_index(view_type)];
-}
-
 static void update_warpage_availability(const libvgcode::PathVertex& vertex, std::array<bool, 9>& availability)
 {
     if (!vertex.is_extrusion())
@@ -500,7 +495,7 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
             case libvgcode::EViewType::WarpageThermalStrain:
             case libvgcode::EViewType::WarpageHullShrinkage:
             case libvgcode::EViewType::WarpageLayerShrinkage: {
-                const float value = warpage_value(vertex, view_type);
+                const float value = libvgcode::get_warpage_value(vertex, view_type);
                 if (is_extrusion && libvgcode::is_valid_warpage_value(value))
                     sprintf(detail_buf, "%s: %.4f", get_view_type_string(view_type).c_str(), value);
                 else

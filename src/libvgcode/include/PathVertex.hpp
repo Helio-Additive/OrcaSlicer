@@ -154,6 +154,24 @@ struct PathVertex
     static const PathVertex DUMMY_PATH_VERTEX;
 };
 
+// Keep warpage view-to-field mapping in one place so rendering and tooltips
+// cannot silently disagree when the enum or PathVertex layout changes.
+inline float get_warpage_value(const PathVertex& vertex, EViewType view_type)
+{
+    switch (view_type) {
+    case EViewType::WarpageDisplacement:  return vertex.warpage_displacement;
+    case EViewType::WarpageDispX:         return vertex.warpage_disp_x;
+    case EViewType::WarpageDispY:         return vertex.warpage_disp_y;
+    case EViewType::WarpageDispZ:         return vertex.warpage_disp_z;
+    case EViewType::WarpageRisk:          return vertex.warpage_risk;
+    case EViewType::WarpageTIGradient:    return vertex.warpage_ti_gradient;
+    case EViewType::WarpageThermalStrain: return vertex.warpage_thermal_strain;
+    case EViewType::WarpageHullShrinkage: return vertex.warpage_hull_shrinkage;
+    case EViewType::WarpageLayerShrinkage:return vertex.warpage_layer_shrinkage;
+    default:                               return NAN;
+    }
+}
+
 } // namespace libvgcode
 
 #endif // VGCODE_PATHVERTEX_HPP

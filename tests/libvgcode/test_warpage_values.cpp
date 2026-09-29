@@ -73,3 +73,33 @@ TEST_CASE("all nine warpage fields reject non-finite values", "[libvgcode][warpa
         }
     }
 }
+
+TEST_CASE("hull shrinkage coloring does not require thermal index data", "[libvgcode][warpage]")
+{
+    PathVertex vertex;
+    vertex.type                    = EMoveType::Extrude;
+    vertex.warpage_hull_shrinkage = 0.2110f;
+
+    // Keep the default unavailable TI sentinels. Warpage views must use only
+    // their corresponding warpage field rather than treating missing TI as
+    // missing warpage metadata.
+    REQUIRE(vertex.thermal_index_mean < -100.0f);
+    REQUIRE(vertex.thermal_index_min < -100.0f);
+    REQUIRE(vertex.thermal_index_max < -100.0f);
+
+    Viewer viewer;
+    viewer.set_view_type(EViewType::WarpageHullShrinkage);
+    REQUIRE(viewer.get_vertex_color(vertex) != DUMMY_COLOR);
+}
+
+TEST_CASE("warpage hull and layer shrinkage use distinct fields", "[libvgcode][warpage]")
+{
+    PathVertex vertex;
+    vertex.warpage_hull_shrinkage  = 0.0311f;
+    vertex.warpage_layer_shrinkage = 0.0003f;
+
+    REQUIRE_THAT(get_warpage_value(vertex, EViewType::WarpageHullShrinkage),
+                 Catch::Matchers::WithinAbs(0.0311f, 0.000001f));
+    REQUIRE_THAT(get_warpage_value(vertex, EViewType::WarpageLayerShrinkage),
+                 Catch::Matchers::WithinAbs(0.0003f, 0.000001f));
+}

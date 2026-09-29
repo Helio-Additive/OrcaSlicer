@@ -1543,49 +1543,19 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     // and every other range view in this function. Without this, a travel and an extrusion whose
     // metric is absent are both grey and cannot be told apart.
     case EViewType::WarpageDisplacement:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_displacement) ? DUMMY_COLOR : m_warpage_ranges[0].get_color_at(v.warpage_displacement);
-    }
     case EViewType::WarpageDispX:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_disp_x) ? DUMMY_COLOR : m_warpage_ranges[1].get_color_at(v.warpage_disp_x);
-    }
     case EViewType::WarpageDispY:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_disp_y) ? DUMMY_COLOR : m_warpage_ranges[2].get_color_at(v.warpage_disp_y);
-    }
     case EViewType::WarpageDispZ:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_disp_z) ? DUMMY_COLOR : m_warpage_ranges[3].get_color_at(v.warpage_disp_z);
-    }
     case EViewType::WarpageRisk:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_risk) ? DUMMY_COLOR : m_warpage_ranges[4].get_color_at(v.warpage_risk);
-    }
     case EViewType::WarpageTIGradient:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_ti_gradient) ? DUMMY_COLOR : m_warpage_ranges[5].get_color_at(v.warpage_ti_gradient);
-    }
     case EViewType::WarpageThermalStrain:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_thermal_strain) ? DUMMY_COLOR : m_warpage_ranges[6].get_color_at(v.warpage_thermal_strain);
-    }
     case EViewType::WarpageHullShrinkage:
-    {
-        if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_hull_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[7].get_color_at(v.warpage_hull_shrinkage);
-    }
     case EViewType::WarpageLayerShrinkage:
     {
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
-        return !is_valid_warpage_value(v.warpage_layer_shrinkage) ? DUMMY_COLOR : m_warpage_ranges[8].get_color_at(v.warpage_layer_shrinkage);
+        const size_t index = static_cast<size_t>(m_settings.view_type) - static_cast<size_t>(EViewType::WarpageDisplacement);
+        const float  value = get_warpage_value(v, m_settings.view_type);
+        return !is_valid_warpage_value(value) ? DUMMY_COLOR : m_warpage_ranges[index].get_color_at(value);
     }
     case EViewType::VolumetricFlowRate:
     {
@@ -1966,10 +1936,13 @@ void ViewerImpl::update_color_ranges()
     m_warpage_ranges[2].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[3].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[5].set_palette(WARPAGE_DIVERGING);
+    // Risk and hull shrinkage are normalized metrics. Keep both on a stable
+    // 0..1 scale so identical values always receive identical colors.
     m_warpage_ranges[4].update(0.0f);
     m_warpage_ranges[4].update(1.0f);
+    m_warpage_ranges[7].update(0.0f);
+    m_warpage_ranges[7].update(1.0f);
     const bool has_wdm_p95 = std::isfinite(m_warpage_wdm_p95) && m_warpage_wdm_p95 > 0.0f;
-    const bool has_whs_p95 = std::isfinite(m_warpage_whs_p95) && m_warpage_whs_p95 > 0.0f;
     if (has_wdm_p95) {
         m_warpage_ranges[0].update(0.0f);
         m_warpage_ranges[0].update(m_warpage_wdm_p95);
@@ -1977,10 +1950,6 @@ void ViewerImpl::update_color_ranges()
             m_warpage_ranges[i].update(-m_warpage_wdm_p95);
             m_warpage_ranges[i].update(m_warpage_wdm_p95);
         }
-    }
-    if (has_whs_p95) {
-        m_warpage_ranges[7].update(0.0f);
-        m_warpage_ranges[7].update(m_warpage_whs_p95);
     }
     // Anchor to fixed [-100, +100] so colors always match the legend
     m_thermal_index_mean_range.update(-100.0f);
@@ -2019,9 +1988,8 @@ void ViewerImpl::update_color_ranges()
                 v.warpage_disp_z, v.warpage_risk, v.warpage_ti_gradient, v.warpage_thermal_strain,
                 v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
             for (size_t j = 0; j < warpage_values.size(); ++j)
-                if (is_valid_warpage_value(warpage_values[j]) && j != 4 &&
-                    (!has_wdm_p95 || j > 3) &&
-                    (!has_whs_p95 || j != 7))
+                if (is_valid_warpage_value(warpage_values[j]) && j != 4 && j != 7 &&
+                    (!has_wdm_p95 || j > 3))
                     m_warpage_ranges[j].update(warpage_values[j]);
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
