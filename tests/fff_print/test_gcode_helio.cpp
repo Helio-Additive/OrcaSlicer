@@ -6,6 +6,7 @@
 #include "test_utils.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <utility>
@@ -30,7 +31,9 @@ std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, b
     GCodeProcessor processor;
     processor.apply_config(config);
     processor.process_file(temp.string());
-    auto result = processor.extract_result();
+    // GCodeProcessorResult holds a std::mutex, so it is neither copyable nor movable;
+    // bind the returned rvalue reference instead of constructing a local copy.
+    auto&& result = processor.extract_result();
     if (is_helio_gcode != nullptr)
         *is_helio_gcode = result.is_helio_gcode;
     return std::move(result.moves);
