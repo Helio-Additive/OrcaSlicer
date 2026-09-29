@@ -11598,6 +11598,12 @@ void Plater::priv::on_helio_process()
         while (dlg.ShowModal() == wxID_OK)
         {
             if (partplate_list.get_curr_plate()->empty()) return;
+            if (!partplate_list.get_curr_plate()->is_slice_result_valid()) {
+                MessageDialog(nullptr, _L("Please slice the current plate before starting Helio simulation or optimization."),
+                              _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE)
+                    .ShowModal();
+                return;
+            }
             GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
             const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
@@ -11695,6 +11701,12 @@ void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
 void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
     if (!(partplate_list.get_curr_plate()->empty())) {
+        if (!partplate_list.get_curr_plate()->is_slice_result_valid()) {
+            MessageDialog(nullptr, _L("Please slice the current plate before starting Helio simulation or optimization."),
+                          _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE)
+                .ShowModal();
+            return;
+        }
         helio_processing_disabled = true;
         std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
         if (helio_api_key.empty()) {
