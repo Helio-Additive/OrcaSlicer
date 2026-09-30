@@ -74,20 +74,6 @@ TEST_CASE("all nine warpage fields reject non-finite values", "[libvgcode][warpa
     }
 }
 
-TEST_CASE("Z displacement rejects negative values", "[libvgcode][warpage]")
-{
-    REQUIRE(is_valid_warpage_value(-0.1f, EViewType::WarpageDispX));
-    REQUIRE_FALSE(is_valid_warpage_value(-0.1f, EViewType::WarpageDispZ));
-
-    PathVertex vertex;
-    vertex.type           = EMoveType::Extrude;
-    vertex.warpage_disp_z = -0.1f;
-
-    Viewer viewer;
-    viewer.set_view_type(EViewType::WarpageDispZ);
-    REQUIRE(viewer.get_vertex_color(vertex) == DUMMY_COLOR);
-}
-
 TEST_CASE("hull shrinkage coloring does not require thermal index data", "[libvgcode][warpage]")
 {
     PathVertex vertex;

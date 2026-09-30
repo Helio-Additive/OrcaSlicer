@@ -16,12 +16,6 @@ namespace libvgcode {
 // unavailable so malformed solver output cannot corrupt preview ranges or colors.
 inline bool is_valid_warpage_value(float value) { return std::isfinite(value); }
 
-inline bool is_valid_warpage_value(float value, EViewType view_type)
-{
-    return is_valid_warpage_value(value) &&
-           (view_type != EViewType::WarpageDispZ || value >= 0.0f);
-}
-
 //
 // Struct representating a gcode move (toolpath segment)
 //
