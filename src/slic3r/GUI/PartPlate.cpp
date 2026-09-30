@@ -3487,6 +3487,25 @@ void PartPlate::set_helio_result(const HelioPlateResult& result)
         m_helio_result = std::make_unique<HelioPlateResult>();
     }
     *m_helio_result = result;
+    m_previous_helio_result.reset();
+    m_helio_result_staged = false;
+}
+
+void PartPlate::stage_helio_result(const HelioPlateResult& result)
+{
+    if (!m_helio_result_staged)
+        m_previous_helio_result = m_helio_result ? std::make_unique<HelioPlateResult>(*m_helio_result) : nullptr;
+    m_helio_result = std::make_unique<HelioPlateResult>(result);
+    m_helio_result_staged = true;
+}
+
+void PartPlate::restore_staged_helio_result()
+{
+    if (!m_helio_result_staged)
+        return;
+
+    m_helio_result = std::move(m_previous_helio_result);
+    m_helio_result_staged = false;
 }
 
 void PartPlate::clear_helio_result()
@@ -3494,6 +3513,8 @@ void PartPlate::clear_helio_result()
     if (m_helio_result) {
         m_helio_result->clear();
     }
+    m_previous_helio_result.reset();
+    m_helio_result_staged = false;
 }
 
 bool PartPlate::has_helio_result() const

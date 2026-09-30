@@ -9931,6 +9931,9 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             dlg.ShowModal();
         }
     } else {
+        PartPlate* plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+        if (plate)
+            plate->restore_staged_helio_result();
         notification_manager->push_helio_error_notification(a.error_message);
     }
 }

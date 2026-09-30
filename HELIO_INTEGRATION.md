@@ -306,6 +306,8 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   `std::isnan()`. Do not unify these — the TI sentinel is a real value in the palette range
 - Hull shrinkage deliberately uses the same green-to-red sequential palette as the other
   non-directional warpage magnitudes. Do not restore the former dark palette during an upstream sync
+- Z displacement is also a non-negative magnitude: keep its sequential palette and `0..WDM_P95`
+  range. Only the signed X/Y displacement components use the diverging `-WDM_P95..+WDM_P95` range
 
 #### `src/libvgcode/include/Types.hpp` (+2)
 - Appended 3 enum values to `EViewType`: `ThermalIndexMean`, `ThermalIndexMin`, `ThermalIndexMax`

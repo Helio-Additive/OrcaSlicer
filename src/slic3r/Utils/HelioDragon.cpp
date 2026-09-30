@@ -2405,7 +2405,9 @@ void HelioBackgroundProcess::create_simulation_step(HelioQuery::CreateGCodeResul
                                     helio_result.simulation_result = sim_result;
                                     helio_result.original_print_time_seconds = original_time_seconds;
                                     helio_result.roles_times = roles_times;
-                                    plate->set_helio_result(helio_result);
+                                    // Keep the last completed result until the downloaded artifacts are ready.
+                                    // The completion handler commits this staging value or restores its predecessor.
+                                    plate->stage_helio_result(helio_result);
                                 }
                             });
 

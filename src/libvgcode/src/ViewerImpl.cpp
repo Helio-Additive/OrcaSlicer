@@ -1934,7 +1934,6 @@ void ViewerImpl::update_color_ranges()
         range.set_palette(WARPAGE_SEQUENTIAL);
     m_warpage_ranges[1].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[2].set_palette(WARPAGE_DIVERGING);
-    m_warpage_ranges[3].set_palette(WARPAGE_DIVERGING);
     m_warpage_ranges[5].set_palette(WARPAGE_DIVERGING);
     // Risk and hull shrinkage are normalized metrics. Keep both on a stable
     // 0..1 scale so identical values always receive identical colors.
@@ -1946,10 +1945,14 @@ void ViewerImpl::update_color_ranges()
     if (has_wdm_p95) {
         m_warpage_ranges[0].update(0.0f);
         m_warpage_ranges[0].update(m_warpage_wdm_p95);
-        for (size_t i = 1; i <= 3; ++i) {
+        for (size_t i = 1; i <= 2; ++i) {
             m_warpage_ranges[i].update(-m_warpage_wdm_p95);
             m_warpage_ranges[i].update(m_warpage_wdm_p95);
         }
+        // Z displacement is emitted as a non-negative magnitude, unlike the
+        // directional X/Y components, so display it on a sequential 0..P95 scale.
+        m_warpage_ranges[3].update(0.0f);
+        m_warpage_ranges[3].update(m_warpage_wdm_p95);
     }
     // Anchor to fixed [-100, +100] so colors always match the legend
     m_thermal_index_mean_range.update(-100.0f);
