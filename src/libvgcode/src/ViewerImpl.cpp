@@ -1941,6 +1941,10 @@ void ViewerImpl::update_color_ranges()
     m_warpage_ranges[4].update(1.0f);
     m_warpage_ranges[7].update(0.0f);
     m_warpage_ranges[7].update(1.0f);
+    // Z displacement is a magnitude. Anchor it at zero even when the G-code
+    // does not provide WDM_P95, and never let malformed negative samples make
+    // the legend look like a signed directional range.
+    m_warpage_ranges[3].update(0.0f);
     const bool has_wdm_p95 = std::isfinite(m_warpage_wdm_p95) && m_warpage_wdm_p95 > 0.0f;
     if (has_wdm_p95) {
         m_warpage_ranges[0].update(0.0f);
@@ -1951,7 +1955,6 @@ void ViewerImpl::update_color_ranges()
         }
         // Z displacement is emitted as a non-negative magnitude, unlike the
         // directional X/Y components, so display it on a sequential 0..P95 scale.
-        m_warpage_ranges[3].update(0.0f);
         m_warpage_ranges[3].update(m_warpage_wdm_p95);
     }
     // Anchor to fixed [-100, +100] so colors always match the legend
@@ -1992,6 +1995,7 @@ void ViewerImpl::update_color_ranges()
                 v.warpage_hull_shrinkage, v.warpage_layer_shrinkage };
             for (size_t j = 0; j < warpage_values.size(); ++j)
                 if (is_valid_warpage_value(warpage_values[j]) && j != 4 && j != 7 &&
+                    (j != 3 || warpage_values[j] >= 0.0f) &&
                     (!has_wdm_p95 || j > 3))
                     m_warpage_ranges[j].update(warpage_values[j]);
         }
