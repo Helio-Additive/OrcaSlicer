@@ -2109,19 +2109,27 @@ void HelioBackgroundProcess::feedback_current_helio_action(float rating, std::st
 // logged a failure on every single call, because the one name it tried to delete is a name
 // nothing writes. errno distinguishes that from a delete that genuinely failed (a file still
 // held open, or a permissions problem), which is worth reporting.
-static void helio_remove_artifact_file(const std::string& path)
+// Returns true when the file is gone -- removed now, or already absent. Returns false when it is
+// still on disk, which means the caller must keep the path for a later retry: a delete can fail
+// with the file intact (held open by another process, or a permissions problem), and dropping the
+// path then would leak the artifact permanently. That is the same leak this change exists to fix,
+// so the ENOENT branch below is the only outcome that may forget a path.
+static bool helio_remove_artifact_file(const std::string& path)
 {
     if (path.empty())
-        return;
+        return true;
 
     errno = 0;
     if (boost::nowide::remove(path.c_str()) == 0) {
         BOOST_LOG_TRIVIAL(debug) << "Helio removed cached G-code file: " << path;
-        return;
+        return true;
     }
 
-    if (errno != ENOENT)
-        BOOST_LOG_TRIVIAL(error) << "Helio failed to delete cached G-code file: " << path << " (errno " << errno << ")";
+    if (errno == ENOENT)
+        return true;
+
+    BOOST_LOG_TRIVIAL(error) << "Helio failed to delete cached G-code file: " << path << " (errno " << errno << ")";
+    return false;
 }
 
 void HelioBackgroundProcess::clear_helio_file_cache()
@@ -2144,8 +2152,14 @@ void HelioBackgroundProcess::clear_helio_file_cache()
             m_artifact_clear_deferred = true;
     }
 
+    std::vector<std::string> still_present;
     for (const std::string& path : paths)
-        helio_remove_artifact_file(path);
+        if (!helio_remove_artifact_file(path))
+            still_present.push_back(path);
+
+    // Re-record anything that survived, so the next clear retries it rather than leaking it.
+    for (const std::string& path : still_present)
+        record_helio_artifact(path);
 
     // Legacy "original_<name>" file. Nothing in this repository writes it, but upload_file() still
     // prefers it when present, so an installation carrying one left by an older build would
@@ -2154,7 +2168,9 @@ void HelioBackgroundProcess::clear_helio_file_cache()
         try {
             fs::path    original_path      = m_gcode_result->filename;
             std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
-            helio_remove_artifact_file(original_path_name);
+            // Return value ignored on purpose: this path is re-derived from m_gcode_result on every
+            // call, so a failure here is retried by the next clear without being recorded.
+            (void) helio_remove_artifact_file(original_path_name);
         } catch (...) {
             BOOST_LOG_TRIVIAL(error) << "Helio failed to delete legacy original_ G-code file";
         }
@@ -2718,8 +2734,8 @@ struct HelioArtifactClaim
     {
         // helio_remove_artifact_file() makes no throwing call, so this destructor cannot throw.
         const std::string deferred = m_proc->end_helio_artifact();
-        if (!deferred.empty())
-            helio_remove_artifact_file(deferred);
+        if (!deferred.empty() && !helio_remove_artifact_file(deferred))
+            m_proc->record_helio_artifact(deferred);   // still there -- let a later clear retry
     }
 
     HelioArtifactClaim(const HelioArtifactClaim&)            = delete;
