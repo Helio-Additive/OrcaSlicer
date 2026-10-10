@@ -2133,7 +2133,15 @@ void HelioBackgroundProcess::clear_helio_file_cache()
     std::vector<std::string> paths;
     {
         std::lock_guard<std::mutex> lock(m_artifact_mutex);
-        paths.swap(m_artifact_paths);
+        // Everything except the path the download thread is still writing or parsing. Deleting
+        // that one here would hand GCodeReader a file that vanishes under it, and its fopen() is
+        // not null-checked. The worker deletes it instead when it releases the claim.
+        for (const std::string& path : m_artifact_paths)
+            if (path != m_artifact_in_flight)
+                paths.push_back(path);
+        m_artifact_paths.clear();
+        if (!m_artifact_in_flight.empty())
+            m_artifact_clear_deferred = true;
     }
 
     for (const std::string& path : paths)
@@ -2692,6 +2700,33 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
         wxQueueEvent(GUI::wxGetApp().plater(), evt);
     }
 }
+// Holds the in-flight claim for the duration of a download-and-parse, and releases it on every
+// exit path including an exception. If a clear_helio_file_cache() arrived while the claim was
+// held, that clear deliberately left this file alone, so the claim owns deleting it -- otherwise
+// the artifact would leak in exactly the case this change exists to fix.
+namespace {
+struct HelioArtifactClaim
+{
+    HelioBackgroundProcess* m_proc;
+
+    HelioArtifactClaim(HelioBackgroundProcess* proc, const std::string& path) : m_proc(proc)
+    {
+        m_proc->begin_helio_artifact(path);
+    }
+
+    ~HelioArtifactClaim()
+    {
+        // helio_remove_artifact_file() makes no throwing call, so this destructor cannot throw.
+        const std::string deferred = m_proc->end_helio_artifact();
+        if (!deferred.empty())
+            helio_remove_artifact_file(deferred);
+    }
+
+    HelioArtifactClaim(const HelioArtifactClaim&)            = delete;
+    HelioArtifactClaim& operator=(const HelioArtifactClaim&) = delete;
+};
+} // namespace
+
 void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string                                file_download_url,
                                                                     std::string                                helio_gcode_path,
                                                                     std::string                                tmp_path,
@@ -2757,6 +2792,9 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
     }
 
     if (response_error.empty() && !was_canceled()) {
+        // Claim the path before it exists, and hold the claim across the parse below.
+        HelioArtifactClaim claim(this, helio_gcode_path);
+
         wxFile file(wxString::FromUTF8(helio_gcode_path), wxFile::write);
         if (file.IsOpened()) {
             file.Write(downloaded_gcode.data(), downloaded_gcode.size());

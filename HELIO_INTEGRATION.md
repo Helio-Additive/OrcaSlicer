@@ -69,6 +69,14 @@ many rounds the user has done. `clear_helio_file_cache()` therefore deletes a re
 rather than re-deriving names, and deletes nothing it did not record: globbing `optimized_*`
 would match a user's own files.
 
+**A download in progress holds a claim** (`begin_helio_artifact()` / `end_helio_artifact()`, taken
+by `HelioArtifactClaim` in `HelioDragon.cpp`), and `clear_helio_file_cache()` skips the claimed
+path. This is not tidiness: `GCodeReader::parse_file_raw_internal()` does **not** null-check its
+`fopen()`, so a file deleted between the download write and the parse reaches `::fread()` as a
+null `FILE*`. A clear arriving while a claim is held is deferred to the worker, which deletes the
+file when it releases — otherwise the artifact would leak in exactly the case this mechanism
+exists to fix.
+
 Fixed in #136. Before that, `clear_helio_file_cache()` deleted only `original_<name>` — a name
 nothing in this repository writes — so every artifact leaked and the function logged a delete
 failure on every call. The `original_` read in `upload_file()` is still live, so the legacy

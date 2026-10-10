@@ -485,11 +485,16 @@ public:
     std::mutex              m_mutex;
     std::condition_variable m_condition;
     boost::thread           m_thread;
-    // Guards m_artifact_paths only. Deliberately not m_mutex: the download thread records paths
-    // while the GUI thread clears them, and m_mutex is already taken by was_canceled()/set_state()
-    // on that same path.
+    // Guards m_artifact_paths, m_artifact_in_flight and m_artifact_clear_deferred. Deliberately
+    // not m_mutex: the download thread records paths while the GUI thread clears them, and
+    // m_mutex is already taken by was_canceled()/set_state() on that same path.
     std::mutex               m_artifact_mutex;
     std::vector<std::string> m_artifact_paths;
+    // The path the download thread is still writing or parsing. clear_helio_file_cache() must not
+    // delete it: GCodeReader::parse_file_raw_internal() does not null-check its fopen(), so a file
+    // removed between the write and the parse reaches ::fread() as a null FILE*.
+    std::string              m_artifact_in_flight;
+    bool                     m_artifact_clear_deferred{false};
     std::string             helio_origin_key;
     std::string             helio_api_key;
     std::string             helio_api_url;
@@ -613,6 +618,31 @@ public:
         std::lock_guard<std::mutex> lock(m_artifact_mutex);
         if (std::find(m_artifact_paths.begin(), m_artifact_paths.end(), path) == m_artifact_paths.end())
             m_artifact_paths.push_back(path);
+    }
+
+    // Claim a path before writing it. Taken by the download thread; the claim is what stops a
+    // concurrent clear_helio_file_cache() from deleting the file while it is still being written
+    // or parsed. Set before the file exists, so there is no moment where the file is present and
+    // unclaimed while the worker still intends to read it.
+    void begin_helio_artifact(const std::string& path)
+    {
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        m_artifact_in_flight      = path;
+        m_artifact_clear_deferred = false;
+    }
+
+    // Release the claim once the file has been read. Returns the path when a clear arrived while
+    // it was held -- that clear skipped this file on purpose, and nothing else will come back for
+    // it, so the caller owns deleting it. Returns empty otherwise.
+    std::string end_helio_artifact()
+    {
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        std::string deferred;
+        if (m_artifact_clear_deferred)
+            deferred = m_artifact_in_flight;
+        m_artifact_in_flight.clear();
+        m_artifact_clear_deferred = false;
+        return deferred;
     }
 
     void helio_threaded_process_start(std::mutex&                                slicing_mutex,
