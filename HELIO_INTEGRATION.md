@@ -77,10 +77,18 @@ null `FILE*`. A clear arriving while a claim is held is deferred to the worker, 
 file when it releases — otherwise the artifact would leak in exactly the case this mechanism
 exists to fix.
 
-Fixed in #136. Before that, `clear_helio_file_cache()` deleted only `original_<name>` — a name
-nothing in this repository writes — so every artifact leaked and the function logged a delete
-failure on every call. The `original_` read in `upload_file()` is still live, so the legacy
-delete is kept for installations carrying one from an older build.
+**`original_<name>` is a live mechanism, not a leftover — do not delete it as dead code.**
+`Plater::priv::on_helio_processing_complete()` renames the current slice aside to
+`original_<name>` before copying the Helio artifact over the original path, and `upload_file()`
+prefers that file when present, so a repeat Helio run starts from the un-processed slice instead
+of a previous result. `clear_helio_file_cache()` removes it because a reslice rewrites the real
+G-code and makes the preserved copy stale.
+
+Fixed in #136. Before that, `clear_helio_file_cache()` deleted **only** `original_<name>`, so the
+preserved original was cleaned up but every downloaded artifact leaked. (The issue originally
+said nothing in the repository writes that name; that was reached by grepping only
+`HelioDragon.cpp` and is wrong — see the paragraph above. The artifact leak it describes is real;
+the dead-delete framing was not.)
 
 ### Support Data Catalog
 Added by #95 (port of BambuStudio #63) — replaces the old thread-unsafe static
