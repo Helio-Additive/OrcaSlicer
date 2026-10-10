@@ -2991,11 +2991,13 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     }
 
     if (cmd.length() > 1) {
+        // A no-op must not reuse an event vertex whose ID points to this line.
+        const size_t moves_count_before = m_result.moves.size();
         // process command lines
         m_command_processor.process_comand(cmd, line);
         // Helio may emit the warpage record on the line after a move even when
         // that move has no inline thermal-index annotation.
-        if (is_move && !m_result.moves.empty() && m_result.moves.back().gcode_id == m_line_id)
+        if (is_move && m_result.moves.size() > moves_count_before && m_result.moves.back().gcode_id == m_line_id)
             m_pending_helio_gcode_id = m_line_id;
     }
     else {

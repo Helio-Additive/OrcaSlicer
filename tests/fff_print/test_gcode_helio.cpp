@@ -18,8 +18,22 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
+class ScopedPrinterTagMode
+{
+public:
+    explicit ScopedPrinterTagMode(bool bbl) : m_previous(std::exchange(GCodeProcessor::s_IsBBLPrinter, bbl)) {}
+    ~ScopedPrinterTagMode() { GCodeProcessor::s_IsBBLPrinter = m_previous; }
+    ScopedPrinterTagMode(const ScopedPrinterTagMode&) = delete;
+    ScopedPrinterTagMode& operator=(const ScopedPrinterTagMode&) = delete;
+private:
+    bool m_previous;
+};
+
 std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, bool* is_helio_gcode = nullptr)
 {
+    // Other tests change this shared tag mode (for example WipeTower2).
+    // These fixtures use BBL tags; restore the caller's mode even on exceptions.
+    const ScopedPrinterTagMode tag_mode(true);
     FullPrintConfig config;
     config.gcode_flavor.value = gcfMarlinFirmware;
 
@@ -205,4 +219,36 @@ TEST_CASE("Standalone warpage metadata survives planner vertex insertions", "[GC
     for (size_t count : layer_extrusions)
         CHECK(count >= 400);
     REQUIRE(internal_extrusions > 0);
+}
+
+TEST_CASE("Helio fixtures isolate and restore the printer tag mode", "[GCode][Helio]")
+{
+    const bool initial_mode = GENERATE(false, true);
+    const ScopedPrinterTagMode caller_mode(initial_mode);
+    const auto moves = process_gcode(
+        "M83\n"
+        "; CHANGE_LAYER\nG1 Z0.2\nG1 X10 E1\n;helioadditive=(whs=0.2)\n"
+        "; CHANGE_LAYER\nG1 Z0.4\nG1 X20 E1\n;helioadditive=(whs=0.4)\n");
+    CHECK(GCodeProcessor::s_IsBBLPrinter == initial_mode);
+    CHECK(extrusion_at(moves, 10.0f).layer_id == 0);
+    CHECK(extrusion_at(moves, 20.0f).layer_id == 1);
+}
+
+TEST_CASE("Standalone warpage metadata after a no-op does not annotate an event", "[GCode][Helio]")
+{
+    const auto tag = GENERATE("; COLOR_CHANGE,T0,#FF0000", "; PAUSE_PRINTING", "; CUSTOM_GCODE");
+    const std::string gcode = std::string("M83\nG1 Z0.2\n") + tag +
+        "\nG1 F1200\n;helioadditive=(whs=0.9)\n"
+        "G1 X10 E1\n;helioadditive=(whs=0.2)\n";
+    const auto moves = process_gcode(gcode.c_str());
+    size_t events = 0;
+    for (const auto& move : moves) {
+        if (move.type == EMoveType::Color_change || move.type == EMoveType::Pause_Print ||
+            move.type == EMoveType::Custom_GCode) {
+            ++events;
+            CHECK(std::isnan(move.warpage_hull_shrinkage));
+        }
+    }
+    REQUIRE(events == 1);
+    CHECK_THAT(extrusion_at(moves, 10.0f).warpage_hull_shrinkage, WithinAbs(0.2f, 0.000001f));
 }
