@@ -2113,7 +2113,7 @@ void HelioBackgroundProcess::feedback_current_helio_action(float rating, std::st
 // still on disk, which means the caller must keep the path for a later retry: a delete can fail
 // with the file intact (held open by another process, or a permissions problem), and dropping the
 // path then would leak the artifact permanently. That is the same leak this change exists to fix,
-// so the ENOENT branch below is the only outcome that may forget a path.
+// so only the "provably gone" errnos below may forget a path.
 static bool helio_remove_artifact_file(const std::string& path)
 {
     if (path.empty())
@@ -2125,7 +2125,12 @@ static bool helio_remove_artifact_file(const std::string& path)
         return true;
     }
 
-    if (errno == ENOENT)
+    // ENOENT: no such file. ENOTDIR: a prefix component is not a directory any more, so the file
+    // provably cannot exist either -- a project directory replaced by a regular file, say.
+    // Both mean "gone", and must be forgotten rather than retried: retaining them would log an
+    // error on every clear for ever and keep a phantom entry per affected path. Every other errno
+    // (EACCES, EBUSY, EROFS, ...) can leave the file intact, so those are retained.
+    if (errno == ENOENT || errno == ENOTDIR)
         return true;
 
     BOOST_LOG_TRIVIAL(error) << "Helio failed to delete cached G-code file: " << path << " (errno " << errno << ")";
