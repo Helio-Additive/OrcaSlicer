@@ -56,6 +56,24 @@ Key data flow:
 | `src/slic3r/Utils/HelioDragon.hpp` | API client declarations: `HelioQuery`, `HelioBackgroundProcess`, `HelioPlateResult`, GraphQL types |
 | `src/slic3r/Utils/HelioDragon.cpp` | Full API implementation: auth, job dispatch, polling, gcode download, supported data cache |
 
+#### Downloaded G-code artifacts must be registered, not re-derived
+
+Helio writes its results beside the sliced G-code, named by prefixing helpers in
+`HelioDragon.hpp` — `simulated_<name>`, `optimized_<name>`. **If you add a prefix, call
+`record_helio_artifact()` with the path you write**, or the file will never be deleted.
+
+The names cannot be reconstructed later. The helpers prefix whatever path they are handed, and
+the optimize path is fed `m_gcode_result->filename`, which after a Helio run *is* an artifact
+path — so a second round produces `optimized_optimized_<name>`, and the depth depends on how
+many rounds the user has done. `clear_helio_file_cache()` therefore deletes a recorded list
+rather than re-deriving names, and deletes nothing it did not record: globbing `optimized_*`
+would match a user's own files.
+
+Fixed in #136. Before that, `clear_helio_file_cache()` deleted only `original_<name>` — a name
+nothing in this repository writes — so every artifact leaked and the function logged a delete
+failure on every call. The `original_` read in `upload_file()` is still live, so the legacy
+delete is kept for installations carrying one from an older build.
+
 ### Support Data Catalog
 Added by #95 (port of BambuStudio #63) — replaces the old thread-unsafe static
 vector/bool cache that produced false "Unsupported Materials" errors.

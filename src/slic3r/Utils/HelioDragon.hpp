@@ -9,6 +9,7 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/nowide/cstdio.hpp>
 
+#include <algorithm>
 #include <condition_variable>
 #include <mutex>
 #include <boost/thread.hpp>
@@ -484,6 +485,11 @@ public:
     std::mutex              m_mutex;
     std::condition_variable m_condition;
     boost::thread           m_thread;
+    // Guards m_artifact_paths only. Deliberately not m_mutex: the download thread records paths
+    // while the GUI thread clears them, and m_mutex is already taken by was_canceled()/set_state()
+    // on that same path.
+    std::mutex               m_artifact_mutex;
+    std::vector<std::string> m_artifact_paths;
     std::string             helio_origin_key;
     std::string             helio_api_key;
     std::string             helio_api_url;
@@ -592,6 +598,22 @@ public:
     void stop_current_helio_action();
     void feedback_current_helio_action(float rating, std::string commend);
     void clear_helio_file_cache();
+
+    // Helio downloads its results to sibling paths of the sliced G-code ("simulated_<name>",
+    // "optimized_<name>"). The names are built at the download site and are not a pure function
+    // of m_gcode_result->filename -- the prefixing helpers prefix whatever they are given, so
+    // re-optimizing an existing result yields "optimized_optimized_<name>". Nothing can therefore
+    // re-derive them later, which is why every file written is recorded here and
+    // clear_helio_file_cache() deletes only what this process actually wrote. A prefix glob would
+    // be the alternative and would risk matching a user's own "optimized_*.gcode".
+    void record_helio_artifact(const std::string& path)
+    {
+        if (path.empty())
+            return;
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        if (std::find(m_artifact_paths.begin(), m_artifact_paths.end(), path) == m_artifact_paths.end())
+            m_artifact_paths.push_back(path);
+    }
 
     void helio_threaded_process_start(std::mutex&                                slicing_mutex,
                                       std::condition_variable&                   slicing_condition,

@@ -1,5 +1,7 @@
 #include "HelioDragon.hpp"
 
+#include <cerrno>
+
 #include <atomic>
 #include <string>
 #include <wx/string.h>
@@ -2097,21 +2099,56 @@ void HelioBackgroundProcess::feedback_current_helio_action(float rating, std::st
     }
 }
 
+// Delete one recorded artifact. boost::nowide::remove() is the only filesystem call here on
+// purpose: it is UTF-8 correct on Windows, whereas handing the same std::string to
+// boost::filesystem would reinterpret it in the active codepage. An existence check through that
+// second path could therefore disagree with the delete on a non-ASCII project directory and leak
+// the file, which is the bug this change exists to fix.
+//
+// "Already gone" is the ordinary outcome and must stay silent -- the previous implementation
+// logged a failure on every single call, because the one name it tried to delete is a name
+// nothing writes. errno distinguishes that from a delete that genuinely failed (a file still
+// held open, or a permissions problem), which is worth reporting.
+static void helio_remove_artifact_file(const std::string& path)
+{
+    if (path.empty())
+        return;
+
+    errno = 0;
+    if (boost::nowide::remove(path.c_str()) == 0) {
+        BOOST_LOG_TRIVIAL(debug) << "Helio removed cached G-code file: " << path;
+        return;
+    }
+
+    if (errno != ENOENT)
+        BOOST_LOG_TRIVIAL(error) << "Helio failed to delete cached G-code file: " << path << " (errno " << errno << ")";
+}
+
 void HelioBackgroundProcess::clear_helio_file_cache()
 {
-    //delete origin file
+    // Delete the result files this process downloaded. They are recorded at the download site
+    // because their names cannot be re-derived afterwards: the prefixing helpers prefix whatever
+    // path they are handed, so an optimize run over an existing result produces
+    // "optimized_optimized_<name>" and the depth depends on how many rounds have happened.
+    std::vector<std::string> paths;
+    {
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        paths.swap(m_artifact_paths);
+    }
+
+    for (const std::string& path : paths)
+        helio_remove_artifact_file(path);
+
+    // Legacy "original_<name>" file. Nothing in this repository writes it, but upload_file() still
+    // prefers it when present, so an installation carrying one left by an older build would
+    // otherwise keep it for ever. Kept as a cleanup of that case, not as the main path.
     if (m_gcode_result) {
         try {
-            fs::path original_path = m_gcode_result->filename;
-            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
-            int deleted = boost::nowide::remove(original_path_name.c_str());
-
-            if (deleted != 0) {
-                BOOST_LOG_TRIVIAL(error) << "Helio Failed to delete file";
-            }
-        }
-        catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Helio Failed to delete file";
+            fs::path    original_path      = m_gcode_result->filename;
+            std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
+            helio_remove_artifact_file(original_path_name);
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << "Helio failed to delete legacy original_ G-code file";
         }
     }
 }
@@ -2724,6 +2761,8 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
         if (file.IsOpened()) {
             file.Write(downloaded_gcode.data(), downloaded_gcode.size());
             file.Close();
+            // Record only after the file exists on disk, so a failed download leaves nothing to delete.
+            record_helio_artifact(helio_gcode_path);
         }
 
         Slic3r::PrintBase::SlicingStatus status = Slic3r::PrintBase::SlicingStatus(100, _u8L("Helio: GCode downloaded successfully"));
