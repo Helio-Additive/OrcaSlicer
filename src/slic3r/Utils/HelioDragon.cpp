@@ -1,5 +1,7 @@
 #include "HelioDragon.hpp"
 
+#include <cerrno>
+
 #include <atomic>
 #include <string>
 #include <wx/string.h>
@@ -2097,21 +2099,92 @@ void HelioBackgroundProcess::feedback_current_helio_action(float rating, std::st
     }
 }
 
+// Delete one recorded artifact. boost::nowide::remove() is the only filesystem call here on
+// purpose: it is UTF-8 correct on Windows, whereas handing the same std::string to
+// boost::filesystem would reinterpret it in the active codepage. An existence check through that
+// second path could therefore disagree with the delete on a non-ASCII project directory and leak
+// the file, which is the bug this change exists to fix.
+//
+// "Already gone" is the ordinary outcome and must stay silent -- the previous implementation
+// logged a failure whenever the one path it tried to delete was absent, which is every call
+// before the first Helio run completes on a plate. errno distinguishes that from a delete that
+// genuinely failed (a file still held open, or a permissions problem), which is worth reporting.
+// Returns true when the file is gone -- removed now, or already absent. Returns false when it is
+// still on disk, which means the caller must keep the path for a later retry: a delete can fail
+// with the file intact (held open by another process, or a permissions problem), and dropping the
+// path then would leak the artifact permanently. That is the same leak this change exists to fix,
+// so only the "provably gone" errnos below may forget a path.
+static bool helio_remove_artifact_file(const std::string& path)
+{
+    if (path.empty())
+        return true;
+
+    errno = 0;
+    if (boost::nowide::remove(path.c_str()) == 0) {
+        BOOST_LOG_TRIVIAL(debug) << "Helio removed cached G-code file: " << path;
+        return true;
+    }
+
+    // ENOENT: no such file. ENOTDIR: a prefix component is not a directory any more, so the file
+    // provably cannot exist either -- a project directory replaced by a regular file, say.
+    // Both mean "gone", and must be forgotten rather than retried: retaining them would log an
+    // error on every clear for ever and keep a phantom entry per affected path. Every other errno
+    // (EACCES, EBUSY, EROFS, ...) can leave the file intact, so those are retained.
+    if (errno == ENOENT || errno == ENOTDIR)
+        return true;
+
+    BOOST_LOG_TRIVIAL(error) << "Helio failed to delete cached G-code file: " << path << " (errno " << errno << ")";
+    return false;
+}
+
 void HelioBackgroundProcess::clear_helio_file_cache()
 {
-    //delete origin file
+    // Delete the result files this process downloaded. They are recorded at the download site
+    // because their names cannot be re-derived afterwards: the prefixing helpers prefix whatever
+    // path they are handed, so an optimize run over an existing result produces
+    // "optimized_optimized_<name>" and the depth depends on how many rounds have happened.
+    {
+        // Deleting *under* the lock rather than after releasing it. Choosing the paths and then
+        // unlinking them outside the lock lets a path be deleted after a new download has already
+        // claimed and rewritten the same name -- reslicing the same plate reuses it -- which hands
+        // GCodeReader a file that vanishes mid-parse, and its fopen() is not null-checked. Holding
+        // the lock makes "decide what to delete" and "delete it" one step with respect to
+        // begin_helio_artifact(). The cost is blocking the download thread across a few local
+        // unlink() calls; the GUI thread never waits on anything slower than that.
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+
+        std::vector<std::string> keep;
+        for (const std::string& path : m_artifact_paths) {
+            if (path == m_artifact_in_flight)
+                continue;                       // the worker is still reading it; it deletes it on release
+            if (path == m_artifact_delivered) {
+                keep.push_back(path);           // the GUI has a queued event that copies from it
+                continue;
+            }
+            if (!helio_remove_artifact_file(path))
+                keep.push_back(path);           // still on disk -- retry on a later clear
+        }
+        m_artifact_paths.swap(keep);
+
+        if (!m_artifact_in_flight.empty())
+            m_artifact_clear_deferred = true;
+    }
+
+    // The preserved pre-Helio G-code. This is NOT dead code and must not be removed as such:
+    // Plater::priv::on_helio_processing_complete() renames the original slice aside to
+    // "original_<name>" before copying the Helio artifact over the original path, and
+    // upload_file() above prefers that file when present so a repeat Helio run starts from the
+    // un-processed slice rather than from a previous result. Clearing the cache drops it because
+    // a reslice rewrites the real G-code and makes the preserved copy stale.
     if (m_gcode_result) {
         try {
-            fs::path original_path = m_gcode_result->filename;
-            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
-            int deleted = boost::nowide::remove(original_path_name.c_str());
-
-            if (deleted != 0) {
-                BOOST_LOG_TRIVIAL(error) << "Helio Failed to delete file";
-            }
-        }
-        catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Helio Failed to delete file";
+            fs::path    original_path      = m_gcode_result->filename;
+            std::string original_path_name = (original_path.parent_path() / ("original_" + original_path.filename().string())).string();
+            // Return value ignored on purpose: this path is re-derived from m_gcode_result on every
+            // call, so a failure here is retried by the next clear without being recorded.
+            (void) helio_remove_artifact_file(original_path_name);
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << "Helio failed to delete legacy original_ G-code file";
         }
     }
 }
@@ -2655,12 +2728,65 @@ void HelioBackgroundProcess::create_optimization_step(HelioQuery::CreateGCodeRes
         wxQueueEvent(GUI::wxGetApp().plater(), evt);
     }
 }
+// Holds the in-flight claim for the duration of a download-and-parse, and releases it on every
+// exit path including an exception. If a clear_helio_file_cache() arrived while the claim was
+// held, that clear deliberately left this file alone, so the claim owns deleting it -- otherwise
+// the artifact would leak in exactly the case this change exists to fix.
+namespace {
+struct HelioArtifactClaim
+{
+    HelioBackgroundProcess* m_proc;
+    bool                    m_delivered = false;
+
+    HelioArtifactClaim(HelioBackgroundProcess* proc, const std::string& path) : m_proc(proc)
+    {
+        m_proc->begin_helio_artifact(path);
+    }
+
+    // Set once the artifact has been handed to the GUI. After that point a completion event
+    // naming this file is queued, and Plater::priv::on_helio_processing_complete() will rename the
+    // current G-code aside and copy from it -- ignoring the copy result. Deleting the file then
+    // leaves *no* G-code at the active path at all, so once delivered the artifact is never
+    // deleted here, whatever the clear flag says. The next clear removes it instead, by which
+    // time the GUI has consumed it.
+    void mark_delivered() { m_delivered = true; }
+
+    ~HelioArtifactClaim()
+    {
+        // helio_remove_artifact_file() and record_helio_artifact() make no throwing call, so this
+        // destructor cannot throw.
+        const std::string deferred = m_proc->end_helio_artifact();
+        if (deferred.empty())
+            return;
+
+        if (m_delivered) {
+            // Releasing the claim is not what protects it -- m_artifact_delivered is, and that
+            // outlives this scope. Just make sure a clear that ran mid-claim did not drop it.
+            m_proc->record_helio_artifact(deferred);
+            return;
+        }
+
+        if (!helio_remove_artifact_file(deferred))
+            m_proc->record_helio_artifact(deferred);   // still there -- let a later clear retry
+    }
+
+    HelioArtifactClaim(const HelioArtifactClaim&)            = delete;
+    HelioArtifactClaim& operator=(const HelioArtifactClaim&) = delete;
+};
+} // namespace
+
 void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string                                file_download_url,
                                                                     std::string                                helio_gcode_path,
                                                                     std::string                                tmp_path,
                                                                     std::unique_ptr<GUI::NotificationManager>& notification_manager,
                                                                     HelioQuery::RatingData                     rating_data)
 {
+    // Claimed before the download starts, not just before the write. A clear that lands while the
+    // request is still in flight would otherwise see no claim, delete the paths it knows about,
+    // and leave no trace -- and the artifact this call goes on to write would then miss the only
+    // cleanup there is. Holding the claim for the whole call means any clear during it is seen.
+    HelioArtifactClaim claim(this, helio_gcode_path);
+
     auto        http            = Http::get(file_download_url);
     unsigned    response_status = 0;
     std::string downloaded_gcode;
@@ -2724,12 +2850,36 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
         if (file.IsOpened()) {
             file.Write(downloaded_gcode.data(), downloaded_gcode.size());
             file.Close();
+            // Record only after the file exists on disk, so a failed download leaves nothing to delete.
+            record_helio_artifact(helio_gcode_path);
+        }
+
+        // A clear during the download means stop or reslice: the plate's Helio result is already
+        // cleared and this one has been abandoned. Do not parse it and do not announce success.
+        // This is the only point at which the result can still be withdrawn -- after
+        // mark_delivered() below, a completion event naming the file is on its way to the GUI and
+        // the file has to outlive it.
+        // on_helio_processing_complete() would rename the current G-code aside and copy this
+        // artifact over it -- replacing what the user is now looking at with a stale result -- and
+        // it ignores the copy_file() result, so a missing source leaves no G-code at that path at
+        // all. The claim deletes the artifact when it is released below.
+        if (helio_clear_requested()) {
+            BOOST_LOG_TRIVIAL(info) << "Helio: discarding downloaded G-code, cache was cleared while it was in flight: "
+                                    << helio_gcode_path;
+            set_state(STATE_CANCELED);
+            return;
         }
 
         Slic3r::PrintBase::SlicingStatus status = Slic3r::PrintBase::SlicingStatus(100, _u8L("Helio: GCode downloaded successfully"));
         status.is_helio = true;
         Slic3r::SlicingStatusEvent*      evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
         wxQueueEvent(GUI::wxGetApp().plater(), evt);
+
+        // Past this point the artifact belongs to the GUI: load_helio_file_to_viwer() parses it and
+        // queues EVT_HELIO_PROCESSING_COMPLETED naming it. A clear arriving from here on -- during
+        // the parse, or after the event is queued but before it is handled -- must not delete it.
+        claim.mark_delivered();
+        mark_helio_artifact_delivered(helio_gcode_path);
         HelioBackgroundProcess::load_helio_file_to_viwer(helio_gcode_path, tmp_path, rating_data);
     } else {
         set_state(STATE_CANCELED);

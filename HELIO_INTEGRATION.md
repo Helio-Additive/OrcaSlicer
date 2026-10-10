@@ -56,6 +56,40 @@ Key data flow:
 | `src/slic3r/Utils/HelioDragon.hpp` | API client declarations: `HelioQuery`, `HelioBackgroundProcess`, `HelioPlateResult`, GraphQL types |
 | `src/slic3r/Utils/HelioDragon.cpp` | Full API implementation: auth, job dispatch, polling, gcode download, supported data cache |
 
+#### Downloaded G-code artifacts must be registered, not re-derived
+
+Helio writes its results beside the sliced G-code, named by prefixing helpers in
+`HelioDragon.hpp` — `simulated_<name>`, `optimized_<name>`. **If you add a prefix, call
+`record_helio_artifact()` with the path you write**, or the file will never be deleted.
+
+The names cannot be reconstructed later. The helpers prefix whatever path they are handed, and
+the optimize path is fed `m_gcode_result->filename`, which after a Helio run *is* an artifact
+path — so a second round produces `optimized_optimized_<name>`, and the depth depends on how
+many rounds the user has done. `clear_helio_file_cache()` therefore deletes a recorded list
+rather than re-deriving names, and deletes nothing it did not record: globbing `optimized_*`
+would match a user's own files.
+
+**A download in progress holds a claim** (`begin_helio_artifact()` / `end_helio_artifact()`, taken
+by `HelioArtifactClaim` in `HelioDragon.cpp`), and `clear_helio_file_cache()` skips the claimed
+path. This is not tidiness: `GCodeReader::parse_file_raw_internal()` does **not** null-check its
+`fopen()`, so a file deleted between the download write and the parse reaches `::fread()` as a
+null `FILE*`. A clear arriving while a claim is held is deferred to the worker, which deletes the
+file when it releases — otherwise the artifact would leak in exactly the case this mechanism
+exists to fix.
+
+**`original_<name>` is a live mechanism, not a leftover — do not delete it as dead code.**
+`Plater::priv::on_helio_processing_complete()` renames the current slice aside to
+`original_<name>` before copying the Helio artifact over the original path, and `upload_file()`
+prefers that file when present, so a repeat Helio run starts from the un-processed slice instead
+of a previous result. `clear_helio_file_cache()` removes it because a reslice rewrites the real
+G-code and makes the preserved copy stale.
+
+Fixed in #136. Before that, `clear_helio_file_cache()` deleted **only** `original_<name>`, so the
+preserved original was cleaned up but every downloaded artifact leaked. (The issue originally
+said nothing in the repository writes that name; that was reached by grepping only
+`HelioDragon.cpp` and is wrong — see the paragraph above. The artifact leak it describes is real;
+the dead-delete framing was not.)
+
 ### Support Data Catalog
 Added by #95 (port of BambuStudio #63) — replaces the old thread-unsafe static
 vector/bool cache that produced false "Unsupported Materials" errors.
