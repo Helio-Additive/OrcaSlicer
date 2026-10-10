@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -124,17 +125,17 @@ TEST_CASE("Standalone warpage metadata covers every arc segment without crossing
 {
     const auto moves = process_gcode(
         "M83\n"
-        ";LAYER_CHANGE\n"
+        "; CHANGE_LAYER\n"
         "G1 Z0.4\n"
         "G1 X1 Y0\n"
         "G3 X0 Y1 I-1 J0 E1 ;helioadditive=(ti.max=-0.2,ti.min=-0.2,ti.mean=-0.2)\n"
         ";helioadditive=(whs=0.0644)\n"
-        ";LAYER_CHANGE\n"
+        "; CHANGE_LAYER\n"
         "G1 Z0.6\n"
         "G1 X11 Y0\n"
         "G2 X10 Y-1 I-1 J0 E1 ;helioadditive=(ti.max=-0.18,ti.min=-0.18,ti.mean=-0.18)\n"
         ";helioadditive=(whs=0.0311)\n"
-        ";LAYER_CHANGE\n"
+        "; CHANGE_LAYER\n"
         "G1 Z0.8\n"
         "G1 X21 Y0\n"
         "G3 X20 Y1 I-1 J0 E1 ;helioadditive=(whs=0.0003)\n");
@@ -152,4 +153,56 @@ TEST_CASE("Standalone warpage metadata covers every arc segment without crossing
         // is backfilled to every generated subsegment rather than only the endpoint.
         CHECK(segment_count > 1);
     }
+}
+
+TEST_CASE("Standalone warpage metadata survives planner vertex insertions", "[GCode][Helio]")
+{
+    std::string gcode = "M83\nG1 Z0.2\n";
+    // Index expectations by the source motion line, including non-motion lines.
+    std::vector<float> expected_by_line(3, NAN);
+    auto append = [&](const std::string& line, float value = NAN) {
+        gcode += line + "\n";
+        expected_by_line.push_back(value);
+    };
+    for (int layer = 0; layer < 3; ++layer) {
+        append("; CHANGE_LAYER");
+        append("G1 Z" + std::to_string(0.2 * (layer + 1)));
+        // Exceed the planner refresh threshold repeatedly. Distinct per-move
+        // values detect overwrites both within a layer and across its boundary.
+        for (int i = 0; i < 400; ++i) {
+            const float value = float(layer * 400 + i + 1) / 2000.0f;
+            append("G1 X" + std::to_string(i % 2 ? 20 : 0) +
+                   " Y" + std::to_string(layer * 10 + i % 3) + " E0.5 F6000", value);
+            append(";helioadditive=(wdm=" + std::to_string(value) +
+                   ",wdx=" + std::to_string(value) + ",wdy=" + std::to_string(value) +
+                   ",wdz=" + std::to_string(value) + ",wr=" + std::to_string(value) +
+                   ",wtg=" + std::to_string(value) + ",wts=" + std::to_string(value) +
+                   ",whs=" + std::to_string(value) + ",wls=" + std::to_string(value) + ")");
+        }
+    }
+    const auto moves = process_gcode(gcode.c_str());
+    size_t internal_extrusions = 0;
+    size_t extrusions = 0;
+    std::array<size_t, 3> layer_extrusions{};
+    for (const auto& move : moves) {
+        if (move.type != EMoveType::Extrude)
+            continue;
+        ++extrusions;
+        REQUIRE(move.layer_id < layer_extrusions.size());
+        ++layer_extrusions[move.layer_id];
+        internal_extrusions += move.internal_only;
+        REQUIRE(move.gcode_id < expected_by_line.size());
+        const float expected = expected_by_line[move.gcode_id];
+        REQUIRE(std::isfinite(expected));
+        for (float value : { move.warpage_displacement, move.warpage_disp_x, move.warpage_disp_y,
+                            move.warpage_disp_z, move.warpage_risk, move.warpage_ti_gradient,
+                            move.warpage_thermal_strain, move.warpage_hull_shrinkage,
+                            move.warpage_layer_shrinkage }) {
+            CHECK_THAT(value, WithinAbs(expected, 0.000001f));
+        }
+    }
+    CHECK(extrusions >= 1200);
+    for (size_t count : layer_extrusions)
+        CHECK(count >= 400);
+    REQUIRE(internal_extrusions > 0);
 }

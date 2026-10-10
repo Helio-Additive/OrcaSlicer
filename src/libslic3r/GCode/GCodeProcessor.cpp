@@ -2562,7 +2562,7 @@ void GCodeProcessor::reset()
     m_fan_speed = 0.0f;
     m_z_offset = 0.0f;
     m_is_helio_gcode = false;
-    m_pending_helio_move_begin.reset();
+    m_pending_helio_gcode_id.reset();
 
     m_extrusion_role = erNone;
 
@@ -2944,12 +2944,15 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     if (comment_begin != std::string_view::npos)
         standalone_comment.remove_prefix(comment_begin);
     const bool is_standalone_helio_comment = boost::starts_with(standalone_comment, ";helioadditive=");
-    if (m_pending_helio_move_begin && is_standalone_helio_comment) {
+    if (m_pending_helio_gcode_id && is_standalone_helio_comment) {
         std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         if (parse_warpage_fields(standalone_comment.substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
             m_is_helio_gcode = true;
-            for (size_t i = *m_pending_helio_move_begin; i < m_result.moves.size(); ++i) {
-                auto& move = m_result.moves[i];
+            // calculate_time() may insert speed vertices while processing a move.
+            // Associate metadata by the stable G-code ID, not a saved vector index.
+            for (auto it = m_result.moves.rbegin(); it != m_result.moves.rend() &&
+                 it->gcode_id == *m_pending_helio_gcode_id; ++it) {
+                auto& move = *it;
                 if (!std::isnan(warpage_fields[0])) move.warpage_displacement    = warpage_fields[0];
                 if (!std::isnan(warpage_fields[1])) move.warpage_disp_x          = warpage_fields[1];
                 if (!std::isnan(warpage_fields[2])) move.warpage_disp_y          = warpage_fields[2];
@@ -2962,7 +2965,7 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
             }
         }
     }
-    m_pending_helio_move_begin.reset();
+    m_pending_helio_gcode_id.reset();
 
     ++m_line_id;
 
@@ -2972,7 +2975,6 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     const std::string_view cmd = line.cmd();
     const bool is_move = boost::iequals(cmd, "G0") || boost::iequals(cmd, "G1") ||
                          boost::iequals(cmd, "G2") || boost::iequals(cmd, "G3");
-    const size_t move_begin = m_result.moves.size();
     if (m_flavor == gcfKlipper)
     {
         if (boost::iequals(cmd, "SET_VELOCITY_LIMIT"))
@@ -2993,8 +2995,8 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
         m_command_processor.process_comand(cmd, line);
         // Helio may emit the warpage record on the line after a move even when
         // that move has no inline thermal-index annotation.
-        if (is_move && m_result.moves.size() > move_begin)
-            m_pending_helio_move_begin = move_begin;
+        if (is_move && !m_result.moves.empty() && m_result.moves.back().gcode_id == m_line_id)
+            m_pending_helio_gcode_id = m_line_id;
     }
     else {
         const std::string &comment = line.raw();
