@@ -495,6 +495,13 @@ public:
     // removed between the write and the parse reaches ::fread() as a null FILE*.
     std::string              m_artifact_in_flight;
     bool                     m_artifact_clear_deferred{false};
+    // The artifact most recently handed to the GUI. A completion event naming it is queued, and
+    // on_helio_processing_complete() renames the active G-code aside and copies from it, ignoring
+    // the copy result -- so deleting it leaves no G-code at the active path at all. Releasing the
+    // worker's claim is not enough protection: a reslice processed before that queued event would
+    // then find it an ordinary recorded path and delete it. It stays protected until a newer
+    // artifact supersedes it, by which time the event has long been handled.
+    std::string              m_artifact_delivered;
     std::string             helio_origin_key;
     std::string             helio_api_key;
     std::string             helio_api_url;
@@ -629,6 +636,15 @@ public:
         std::lock_guard<std::mutex> lock(m_artifact_mutex);
         m_artifact_in_flight      = path;
         m_artifact_clear_deferred = false;
+    }
+
+    // Hand the artifact over to the GUI. Call before queueing the completion event that names it.
+    // Supersedes any previously delivered artifact, which becomes an ordinary recorded path and is
+    // removed by the next clear.
+    void mark_helio_artifact_delivered(const std::string& path)
+    {
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        m_artifact_delivered = path;
     }
 
     // True when a clear_helio_file_cache() arrived while the current claim was held. The download

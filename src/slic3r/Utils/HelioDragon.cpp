@@ -2157,6 +2157,10 @@ void HelioBackgroundProcess::clear_helio_file_cache()
         for (const std::string& path : m_artifact_paths) {
             if (path == m_artifact_in_flight)
                 continue;                       // the worker is still reading it; it deletes it on release
+            if (path == m_artifact_delivered) {
+                keep.push_back(path);           // the GUI has a queued event that copies from it
+                continue;
+            }
             if (!helio_remove_artifact_file(path))
                 keep.push_back(path);           // still on disk -- retry on a later clear
         }
@@ -2756,7 +2760,9 @@ struct HelioArtifactClaim
             return;
 
         if (m_delivered) {
-            m_proc->record_helio_artifact(deferred);   // the GUI still needs it; clear it later
+            // Releasing the claim is not what protects it -- m_artifact_delivered is, and that
+            // outlives this scope. Just make sure a clear that ran mid-claim did not drop it.
+            m_proc->record_helio_artifact(deferred);
             return;
         }
 
@@ -2873,6 +2879,7 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
         // queues EVT_HELIO_PROCESSING_COMPLETED naming it. A clear arriving from here on -- during
         // the parse, or after the event is queued but before it is handled -- must not delete it.
         claim.mark_delivered();
+        mark_helio_artifact_delivered(helio_gcode_path);
         HelioBackgroundProcess::load_helio_file_to_viwer(helio_gcode_path, tmp_path, rating_data);
     } else {
         set_state(STATE_CANCELED);
