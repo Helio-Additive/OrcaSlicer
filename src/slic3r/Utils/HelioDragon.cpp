@@ -2732,17 +2732,35 @@ namespace {
 struct HelioArtifactClaim
 {
     HelioBackgroundProcess* m_proc;
+    bool                    m_delivered = false;
 
     HelioArtifactClaim(HelioBackgroundProcess* proc, const std::string& path) : m_proc(proc)
     {
         m_proc->begin_helio_artifact(path);
     }
 
+    // Set once the artifact has been handed to the GUI. After that point a completion event
+    // naming this file is queued, and Plater::priv::on_helio_processing_complete() will rename the
+    // current G-code aside and copy from it -- ignoring the copy result. Deleting the file then
+    // leaves *no* G-code at the active path at all, so once delivered the artifact is never
+    // deleted here, whatever the clear flag says. The next clear removes it instead, by which
+    // time the GUI has consumed it.
+    void mark_delivered() { m_delivered = true; }
+
     ~HelioArtifactClaim()
     {
-        // helio_remove_artifact_file() makes no throwing call, so this destructor cannot throw.
+        // helio_remove_artifact_file() and record_helio_artifact() make no throwing call, so this
+        // destructor cannot throw.
         const std::string deferred = m_proc->end_helio_artifact();
-        if (!deferred.empty() && !helio_remove_artifact_file(deferred))
+        if (deferred.empty())
+            return;
+
+        if (m_delivered) {
+            m_proc->record_helio_artifact(deferred);   // the GUI still needs it; clear it later
+            return;
+        }
+
+        if (!helio_remove_artifact_file(deferred))
             m_proc->record_helio_artifact(deferred);   // still there -- let a later clear retry
     }
 
@@ -2832,6 +2850,9 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
 
         // A clear during the download means stop or reslice: the plate's Helio result is already
         // cleared and this one has been abandoned. Do not parse it and do not announce success.
+        // This is the only point at which the result can still be withdrawn -- after
+        // mark_delivered() below, a completion event naming the file is on its way to the GUI and
+        // the file has to outlive it.
         // on_helio_processing_complete() would rename the current G-code aside and copy this
         // artifact over it -- replacing what the user is now looking at with a stale result -- and
         // it ignores the copy_file() result, so a missing source leaves no G-code at that path at
@@ -2847,6 +2868,11 @@ void HelioBackgroundProcess::save_downloaded_gcode_and_load_preview(std::string 
         status.is_helio = true;
         Slic3r::SlicingStatusEvent*      evt    = new Slic3r::SlicingStatusEvent(GUI::EVT_SLICING_UPDATE, 0, status);
         wxQueueEvent(GUI::wxGetApp().plater(), evt);
+
+        // Past this point the artifact belongs to the GUI: load_helio_file_to_viwer() parses it and
+        // queues EVT_HELIO_PROCESSING_COMPLETED naming it. A clear arriving from here on -- during
+        // the parse, or after the event is queued but before it is handled -- must not delete it.
+        claim.mark_delivered();
         HelioBackgroundProcess::load_helio_file_to_viwer(helio_gcode_path, tmp_path, rating_data);
     } else {
         set_state(STATE_CANCELED);
