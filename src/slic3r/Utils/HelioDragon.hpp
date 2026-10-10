@@ -631,6 +631,15 @@ public:
         m_artifact_clear_deferred = false;
     }
 
+    // True when a clear_helio_file_cache() arrived while the current claim was held. The download
+    // thread checks this before handing the artifact to the GUI: a clear means the result was
+    // abandoned, so delivering it would overwrite the user's current G-code with a stale one.
+    bool helio_clear_requested()
+    {
+        std::lock_guard<std::mutex> lock(m_artifact_mutex);
+        return m_artifact_clear_deferred;
+    }
+
     // Release the claim once the file has been read. Returns the path when a clear arrived while
     // it was held -- that clear skipped this file on purpose, and nothing else will come back for
     // it, so the caller owns deleting it. Returns empty otherwise.
