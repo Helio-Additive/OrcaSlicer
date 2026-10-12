@@ -134,6 +134,14 @@ the skew against a post-2.4.2 tree with no commit here. Delete the dated inciden
 warning and the ownership reasoning, which are durable. Deleting the lot discards the one
 part that stops this being re-derived a twelfth time.
 
+**How good is the evidence below — read this before quoting any of it.** The step records no
+suite revision, so *nothing here establishes which revision produced which result*; every
+such link is inferred from run times and is not sound (see the re-run note). What survives
+that gap are the claims that do not depend on the revision at all: that the clone is
+unpinned (read from the workflow), that #135 contains no C++ and so cannot have changed
+slicer behaviour, and the ownership facts. Treat the rest as dated observation. Where this
+section states a conclusion, it is about the runs named — not a rule about future ones.
+
 `build_orca.yml:403` runs a pytest suite from a **third party's default branch, cloned
 unpinned on every build**: `git clone --depth 1 https://github.com/OrcaSlicer/orca-test-repo.git`
 (`:410`) — no tag, no SHA, no `--branch`. Over that window it was the sole red check on
@@ -143,12 +151,21 @@ plainly *could* turn it green exist: pinning the clone, a sync that aligns this 
 the suite's expectations, or implementing the features its failing cases exercise. None was
 in those PRs.
 
-**Attribution is measured, not inferred.** Three structurally unrelated diffs produced a
-byte-identical tally: #135 (two files, `build_all.yml` trigger paths + `CLAUDE.md`, **no
-C++ at all**), #126 (26 files of GUI/C++) and #137 (a Helio download-lifecycle change).
-A diff that compiles no code cannot change slicer behaviour, so a failure set it
-reproduces exactly is a property of the external suite. The same commit also went
-`13 failed` → `24 failed` 21 hours apart with no push in between.
+**Attribution rests on one sound argument and several weaker ones. Use the sound one.**
+Three structurally unrelated diffs produced a byte-identical tally: #135 (two files,
+`build_all.yml` trigger paths + `CLAUDE.md`, **no C++ at all**), #126 (26 files of GUI/C++)
+and #137 (a Helio download-lifecycle change).
+
+- **Sound, and independent of the suite revision:** #135 compiles no code, so it cannot
+  have changed slicer behaviour. Whatever made its Linux leg red was not its diff. That
+  argument needs no revision data and is the one to cite.
+- **Weaker:** that the three *identical* tallies show a common cause. It is suggestive, but
+  it assumes the three runs used the same suite revision, which nothing recorded. Same for
+  the same commit going `13 failed` → `24 failed` 21 hours apart with no push between —
+  consistent with the suite moving, and not proof of it.
+
+So "this red is not my diff's" is well supported for a diff that touches no compiled code,
+and is an inference for anything else. Check it per-PR rather than by precedent.
 
 **Root cause is version skew**, the same shape as the `check_profiles.yml` problem below:
 the suite's golden baselines announce they were *"captured with OrcaSlicer-2.5.0-dev @
@@ -158,7 +175,8 @@ tree (`filament_is_mixed`, `filament_mixed_*`, the `mixed-filament-*` family). T
 as one pattern with two instances — *an inherited workflow pulling a floating upstream-`main`
 artifact into a release-pinned fork* — rather than two unrelated bugs.
 
-**The drift is away from green, so "wait for upstream to xfail-mark them" is ruled out:**
+**Over this window the drift was away from green, which is evidence against — not a refutation
+of — "wait for upstream to xfail-mark them":**
 
 | date | result |
 |---|---|
@@ -167,24 +185,36 @@ artifact into a release-pinned fork* — rather than two unrelated bugs.
 | 26 + 30 Sep | 24 failed / 58 passed / 7 xfailed |
 | 10 Oct | 25 failed / 58 passed / 6 xfailed |
 
-Failures roughly doubled in a month while `xfailed` *fell* — cases are arriving faster
-than they are being marked, and some marks were removed.
+Failures roughly doubled in a month while `xfailed` *fell* — cases arrived faster than they
+were marked, and some marks were removed. That is four observations, not a trend that has to
+continue: upstream can xfail-mark the lot in one later commit, and nothing here would predict
+it. **Keep that option live on #133** — the evidence says it had not happened by 10 Oct 2026,
+not that it will not.
 
 **Do not patch `build_orca.yml`.** `grep -c -i helio` on it returns **0** and the manifest
 marks it `owner: upstream`, so pinning the clone there would be the first Helio divergence
 in a clean upstream file — the exact reasoning that produced the closed #116. See Scope /
 Rule 15 above.
 
-**A re-run only means something once you know whether the suite moved.** The step clones a
-default branch with no ref, so two attempts may or may not fetch the same revision —
-establish which before reading anything into the result. If `orca-test-repo` took no commit
-between the two runs, the revision is identical and a changed outcome *is* real flake
-evidence. If it did move, the two runs executed different suites and the comparison says
-nothing. Check the clone step's log, or compare that repository's history against the two
-run timestamps; don't assume either way. For the failures recorded here the shape argues
-against flake independently — ~150s, 93 test bodies executed, no checkout/install/runner
-failure — so a re-run was not worth spending, but that is a conclusion about these runs and
-not a standing rule.
+**A re-run means something only if both runs provably used the same suite — and today
+nothing records that.** The step clones a default branch with no ref and logs no SHA, so two
+attempts may or may not have fetched the same revision, and **there is currently no sound way
+to find out after the fact.** Commit timestamps do not answer it: they are authoring dates,
+not the moment a commit became the default-branch tip, and they cannot reveal a force-push.
+So an interval that *looks* commit-free does not establish that two runs ran identical code,
+and a changed outcome across it cannot be called real flake on that basis.
+
+What that means in practice:
+
+- **Before** comparing two runs, make the revision recordable — have the step print
+  `git -C "$test_repo_dir" rev-parse HEAD`. That is a one-line change to upstream-owned
+  `build_orca.yml`, so it is **not ours** under Rule 15; it is noted on #133 as one more
+  thing the relocate-into-a-Helio-workflow option would buy.
+- **Until then**, treat any revision claim as an inference and say so, rather than
+  presenting it as measured.
+- For the failures recorded here the shape argues against flake **independently of the
+  revision** — ~150s, 93 test bodies executed, no checkout/install/runner failure — so a
+  re-run was not worth spending. That is a conclusion about these runs, not a standing rule.
 
 **Two facts that decide the options, both already established** — don't re-derive them,
 but do re-check them, since both describe the external repository as of **12 Oct 2026**
