@@ -173,6 +173,7 @@ class Print;
         float initial_layer_time;
         bool is_helio_gcode{false};
         float warpage_wdm_p95{ NAN };
+        // Retained for future use; hull shrinkage currently uses a fixed 0..1 color scale.
         float warpage_whs_p95{ NAN };
 
         struct SettingsIds

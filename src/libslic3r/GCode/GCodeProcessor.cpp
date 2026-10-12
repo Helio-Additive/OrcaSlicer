@@ -3239,10 +3239,12 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
     // Helio thermal index and warpage fields are handled while processing moves so
     // they are available before the corresponding vertex is stored.
 
-    auto parse_warpage_percentile = [this, comment](const std::string_view prefix, float& value) {
+    auto parse_warpage_percentile = [comment](const std::string_view prefix, float& value) {
         if (!boost::starts_with(comment, prefix))
             return false;
-        parse_number(comment.substr(prefix.size()), value);
+        float parsed = NAN;
+        if (parse_number(comment.substr(prefix.size()), parsed) && std::isfinite(parsed))
+            value = parsed;
         return true;
     };
     if (parse_warpage_percentile(" WARPAGE_WDM_P95=", m_result.warpage_wdm_p95) ||

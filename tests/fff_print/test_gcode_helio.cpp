@@ -29,7 +29,8 @@ private:
     bool m_previous;
 };
 
-std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, bool* is_helio_gcode = nullptr)
+std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, bool* is_helio_gcode = nullptr,
+              std::array<float, 2>* percentiles = nullptr)
 {
     // Other tests change this shared tag mode (for example WipeTower2).
     // These fixtures use BBL tags; restore the caller's mode even on exceptions.
@@ -51,6 +52,8 @@ std::vector<GCodeProcessorResult::MoveVertex> process_gcode(const char* gcode, b
     auto&& result = processor.extract_result();
     if (is_helio_gcode != nullptr)
         *is_helio_gcode = result.is_helio_gcode;
+    if (percentiles != nullptr)
+        *percentiles = { result.warpage_wdm_p95, result.warpage_whs_p95 };
     return std::move(result.moves);
 }
 
@@ -251,4 +254,32 @@ TEST_CASE("Standalone warpage metadata after a no-op does not annotate an event"
     }
     REQUIRE(events == 1);
     CHECK_THAT(extrusion_at(moves, 10.0f).warpage_hull_shrinkage, WithinAbs(0.2f, 0.000001f));
+}
+
+TEST_CASE("Warpage percentiles accept complete finite numbers", "[GCode][Helio]")
+{
+    std::array<float, 2> percentiles;
+    process_gcode("; WARPAGE_WDM_P95=5e-1\n; WARPAGE_WHS_P95=0.25\n", nullptr, &percentiles);
+    CHECK_THAT(percentiles[0], WithinAbs(0.5f, 0.000001f));
+    CHECK_THAT(percentiles[1], WithinAbs(0.25f, 0.000001f));
+    process_gcode("; WARPAGE_WDM_P95=0\n; WARPAGE_WHS_P95=0\n", nullptr, &percentiles);
+    CHECK(percentiles[0] == 0.0f);
+    CHECK(percentiles[1] == 0.0f);
+}
+
+TEST_CASE("Invalid warpage percentiles preserve the previous value", "[GCode][Helio]")
+{
+    const size_t field = GENERATE(size_t(0), size_t(1));
+    const auto invalid = GENERATE("", "abc", "0.5xyz", "nan", "inf", "-inf", "1e999");
+    const bool has_previous = GENERATE(false, true);
+    const std::string tag = field == 0 ? "; WARPAGE_WDM_P95=" : "; WARPAGE_WHS_P95=";
+    const std::string gcode = (has_previous ? tag + "0.25\n" : "") + tag + invalid + "\n";
+    CAPTURE(field, invalid, has_previous);
+    std::array<float, 2> percentiles;
+    process_gcode(gcode.c_str(), nullptr, &percentiles);
+    if (has_previous)
+        CHECK_THAT(percentiles[field], WithinAbs(0.25f, 0.000001f));
+    else
+        CHECK(std::isnan(percentiles[field]));
+    CHECK(std::isnan(percentiles[1 - field]));
 }
