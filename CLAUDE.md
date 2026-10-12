@@ -80,6 +80,20 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
   outcome today, but the gate on those two is inherited, not stated — dropping or
   re-pointing a `needs:` would let them run unlabelled.
+- **`unit_tests`' `needs: build_linux` has a second consequence, and it currently costs
+  the fork its entire Catch2 signal.** The job is `needs: build_linux` +
+  `if: ${{ !cancelled() && success() }}`, and `success()` is false if any needed job
+  failed — so a red `build_linux` skips `unit_tests`. `build_linux` goes red at
+  *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
+  everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
+  *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
+  unexpired, and `unit_tests` declines to run it anyway. So while the external suite is
+  red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
+  `ctest` instructions further down this file describe a local-only signal. Observed
+  casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
+  a silent warpage-metadata cross-attribution bug, compiled on all five platforms and
+  have never had an assertion run in CI. The gate is inherited upstream code, so per
+  Rule 15 it is recorded here, not patched; #133 carries the options.
 - **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
   the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
   never starts the workflow at all and the `ready-to-build` label does nothing — the
@@ -92,6 +106,62 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
   PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
   translation-only PR to those branches now builds the full matrix. This fork opens none.
+
+### External slicer regression tests — permanently red, not ours (#133)
+`build_orca.yml:403` runs a pytest suite from a **third party's default branch, cloned
+unpinned on every build**: `git clone --depth 1 https://github.com/OrcaSlicer/orca-test-repo.git`
+(`:410`) — no tag, no SHA, no `--branch`. It is the sole red check on every PR that has
+built since 14 Sep 2026, and it cannot go green from anything in this repository.
+
+**Attribution is measured, not inferred.** Three structurally unrelated diffs produced a
+byte-identical tally: #135 (two files, `build_all.yml` trigger paths + `CLAUDE.md`, **no
+C++ at all**), #126 (26 files of GUI/C++) and #137 (a Helio download-lifecycle change).
+A diff that compiles no code cannot change slicer behaviour, so a failure set it
+reproduces exactly is a property of the external suite. The same commit also went
+`13 failed` → `24 failed` 21 hours apart with no push in between.
+
+**Root cause is version skew**, the same shape as the `check_profiles.yml` problem below:
+the suite's golden baselines announce they were *"captured with OrcaSlicer-2.5.0-dev @
+37e1582c4c"* while this fork is pinned to **v2.4.2**, so it validates a 2.4.2 build
+against 2.5.0-dev expectations. Many failures name features that do not exist in this
+tree (`filament_is_mixed`, `filament_mixed_*`, the `mixed-filament-*` family). Treat this
+as one pattern with two instances — *an inherited workflow pulling a floating upstream-`main`
+artifact into a release-pinned fork* — rather than two unrelated bugs.
+
+**The drift is away from green, so "wait for upstream to xfail-mark them" is ruled out:**
+
+| date | result |
+|---|---|
+| 8 Sep | ✅ passed |
+| 14 Sep | 13 failed / 61 passed / 10 xfailed |
+| 26 + 30 Sep | 24 failed / 58 passed / 7 xfailed |
+| 10 Oct | 25 failed / 58 passed / 6 xfailed |
+
+Failures roughly doubled in a month while `xfailed` *fell* — cases are arriving faster
+than they are being marked, and some marks were removed.
+
+**Do not patch `build_orca.yml`.** `grep -c -i helio` on it returns **0** and the manifest
+marks it `owner: upstream`, so pinning the clone there would be the first Helio divergence
+in a clean upstream file — the exact reasoning that produced the closed #116. See Scope /
+Rule 15 above.
+
+**Do not spend a re-run to call it flake.** The step re-clones a moving target, so a
+re-run samples a *different suite* and cannot distinguish flake from real. It is also not
+flake-shaped: ~150s, 93 test bodies executed, no checkout/install/runner failure.
+
+**Two facts that decide the options, both already established** — don't re-derive them:
+`orca-test-repo` has **no tags** (`git tag | wc -l` → 0), so any pin is a raw SHA
+re-picked by hand each sync; and the only v2.4.2-contemporary revision, `0dfd8df` (5 May,
+the revision the last green run actually used), has **0 case files against 69 on `main`**,
+so pinning trades 24 false failures for nearly all of the suite's current coverage.
+
+#133 carries the full option list and the evidence. Picking one is a CI-ownership
+decision and has been open since 14 Sep; the automated sweep records data points there
+rather than choosing. **A reviewer should not read a red `build_linux` as "this PR does
+not build"** — the compile and the artifact upload both succeed before the failing step,
+so the build status has to be read from the job log, not the check mark. That ambiguity
+is itself the risk: every reviewer here is now trained to ignore a red `build_linux`,
+which is the state in which a genuine regression gets waved through.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
@@ -157,6 +227,11 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 - `tests/libnest2d/` - 2D nesting algorithm tests
 - `tests/slic3rutils/` - Utility function tests
 - `tests/sandboxes/` - Experimental/sandbox test code
+
+**Run these locally — CI currently does not.** While the external regression suite is red
+(see *External slicer regression tests* above), `unit_tests` skips on every PR, so a local
+`ctest` run is the only place these assertions are evaluated. If you add or change a test,
+say in the PR that you ran it; the green check mark does not cover it.
 
 Run all tests after building:
 ```bash
