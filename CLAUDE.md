@@ -216,14 +216,20 @@ What that means in practice:
   revision** — ~150s, 93 test bodies executed, no checkout/install/runner failure — so a
   re-run was not worth spending. That is a conclusion about these runs, not a standing rule.
 
-**Two facts that decide the options, both already established** — don't re-derive them,
-but do re-check them, since both describe the external repository as of **12 Oct 2026**
-and it is still moving: `orca-test-repo` had **no tags** (`git tag | wc -l` → 0), so any
-pin is a raw SHA re-picked by hand each sync; and the only v2.4.2-contemporary revision,
-`0dfd8df` (5 May, the revision the last green run actually used), had **0 case files
-against 69 on `main`**, so pinning traded ~24 false failures for nearly all of the suite's
-current coverage. A tag appearing upstream, or the case files landing on that revision,
-would change the answer.
+**Two things worth knowing before choosing an option — one checked, one inferred.** Both
+describe the external repository as of **12 Oct 2026**, which is still moving, so re-check
+rather than re-derive.
+
+- **Checked:** `orca-test-repo` had **no tags** (`git tag | wc -l` → 0). So any pin is a raw
+  SHA, re-picked by hand each sync.
+- **Inferred, and load-bearing if the pin option is chosen:** `0dfd8df` (5 May) is the
+  newest revision at or before upstream's v2.4.2 tag, and had **0 case files against 69 on
+  `main`** — so pinning there would trade the false failures for nearly all of the suite's
+  current coverage. It has also been described as the revision the last green run used, but
+  **that part is an inference from clock times, not a reading** — per the evidence note
+  above, no run records its suite SHA. **If the pin option is taken, re-establish which
+  revision that green run actually used from something stronger than timestamps before
+  relying on it.**
 
 #133 carries the full option list and the evidence. Picking one is a CI-ownership
 decision and has been open since 14 Sep; the automated sweep records data points there
