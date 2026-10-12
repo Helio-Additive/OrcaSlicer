@@ -124,14 +124,24 @@ standing fact.** It describes builds of this fork while pinned to **v2.4.2**, be
 14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
 any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
 against the job log before concluding a red `build_linux` is this issue; do not treat a
-red Linux leg as pre-diagnosed. In particular an upstream sync past v2.4.2 may close the
-version skew below and make this section obsolete, in which case delete it rather than
-leave it to mislead. If you confirm it still applies, note the date on #133.
+red Linux leg as pre-diagnosed. If you confirm it still applies, note the date on #133.
+
+**When it stops applying, re-scope this section — do not delete it.** An upstream sync past
+v2.4.2 may close the version skew below, but it does not fix the **mechanism**: `:410` still
+clones a default branch with no ref, so one later commit in `orca-test-repo` can recreate
+the skew against a post-2.4.2 tree with no commit here. Delete the dated incident details
+(the drift table, the 2.5.0-dev baseline, the `0dfd8df` numbers) and keep the unpinned-clone
+warning and the ownership reasoning, which are durable. Deleting the lot discards the one
+part that stops this being re-derived a twelfth time.
 
 `build_orca.yml:403` runs a pytest suite from a **third party's default branch, cloned
 unpinned on every build**: `git clone --depth 1 https://github.com/OrcaSlicer/orca-test-repo.git`
 (`:410`) — no tag, no SHA, no `--branch`. Over that window it was the sole red check on
-every PR that built, and no change in this repository could turn it green.
+every PR that built, and **none of the changes in #126, #135 or #137 could have turned it
+green** — which is a claim about those three diffs, not about the repository. Changes that
+plainly *could* turn it green exist: pinning the clone, a sync that aligns this tree with
+the suite's expectations, or implementing the features its failing cases exercise. None was
+in those PRs.
 
 **Attribution is measured, not inferred.** Three structurally unrelated diffs produced a
 byte-identical tally: #135 (two files, `build_all.yml` trigger paths + `CLAUDE.md`, **no
@@ -165,9 +175,16 @@ marks it `owner: upstream`, so pinning the clone there would be the first Helio 
 in a clean upstream file — the exact reasoning that produced the closed #116. See Scope /
 Rule 15 above.
 
-**Do not spend a re-run to call it flake.** The step re-clones a moving target, so a
-re-run samples a *different suite* and cannot distinguish flake from real. It is also not
-flake-shaped: ~150s, 93 test bodies executed, no checkout/install/runner failure.
+**A re-run only means something once you know whether the suite moved.** The step clones a
+default branch with no ref, so two attempts may or may not fetch the same revision —
+establish which before reading anything into the result. If `orca-test-repo` took no commit
+between the two runs, the revision is identical and a changed outcome *is* real flake
+evidence. If it did move, the two runs executed different suites and the comparison says
+nothing. Check the clone step's log, or compare that repository's history against the two
+run timestamps; don't assume either way. For the failures recorded here the shape argues
+against flake independently — ~150s, 93 test bodies executed, no checkout/install/runner
+failure — so a re-run was not worth spending, but that is a conclusion about these runs and
+not a standing rule.
 
 **Two facts that decide the options, both already established** — don't re-derive them,
 but do re-check them, since both describe the external repository as of **12 Oct 2026**
