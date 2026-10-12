@@ -259,10 +259,10 @@ TEST_CASE("Standalone warpage metadata after a no-op does not annotate an event"
 TEST_CASE("Warpage percentiles accept complete finite numbers", "[GCode][Helio]")
 {
     std::array<float, 2> percentiles;
-    process_gcode("; WARPAGE_WDM_P95=5e-1\n; WARPAGE_WHS_P95=0.25\n", nullptr, &percentiles);
+    process_gcode("M83\nG1 X1 E1\n; WARPAGE_WDM_P95=5e-1\n; WARPAGE_WHS_P95=0.25\n", nullptr, &percentiles);
     CHECK_THAT(percentiles[0], WithinAbs(0.5f, 0.000001f));
     CHECK_THAT(percentiles[1], WithinAbs(0.25f, 0.000001f));
-    process_gcode("; WARPAGE_WDM_P95=0\n; WARPAGE_WHS_P95=0\n", nullptr, &percentiles);
+    process_gcode("M83\nG1 X1 E1\n; WARPAGE_WDM_P95=0\n; WARPAGE_WHS_P95=0\n", nullptr, &percentiles);
     CHECK(percentiles[0] == 0.0f);
     CHECK(percentiles[1] == 0.0f);
 }
@@ -273,7 +273,8 @@ TEST_CASE("Invalid warpage percentiles preserve the previous value", "[GCode][He
     const auto invalid = GENERATE("", "abc", "0.5xyz", "nan", "inf", "-inf", "1e999");
     const bool has_previous = GENERATE(false, true);
     const std::string tag = field == 0 ? "; WARPAGE_WDM_P95=" : "; WARPAGE_WHS_P95=";
-    const std::string gcode = (has_previous ? tag + "0.25\n" : "") + tag + invalid + "\n";
+    const std::string gcode = std::string("M83\nG1 X1 E1\n") +
+        (has_previous ? tag + "0.25\n" : "") + tag + invalid + "\n";
     CAPTURE(field, invalid, has_previous);
     std::array<float, 2> percentiles;
     process_gcode(gcode.c_str(), nullptr, &percentiles);
