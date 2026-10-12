@@ -91,9 +91,20 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
   `ctest` instructions further down this file describe a local-only signal. Observed
   casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
-  a silent warpage-metadata cross-attribution bug, compiled on all five platforms and
-  have never had an assertion run in CI. The gate is inherited upstream code, so per
-  Rule 15 it is recorded here, not patched; #133 carries the options.
+  a silent warpage-metadata cross-attribution bug, which have never had an assertion run
+  in CI. The gate is inherited upstream code, so per Rule 15 it is recorded here, not
+  patched; #133 carries the options.
+- **The test *targets* are only ever compiled on Linux, so the skip above is the whole
+  story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
+  only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
+  whose `t` sets `BUILD_TESTS=1`. The other legs do not: macOS runs
+  `./build_release_macos.sh … -t 10.15` (`:118`, `:154`) where `getopts ":dpa:snt:xbc:i:1Tuh"`
+  makes **lowercase `-t` the deployment target** and **uppercase `-T` the tests flag**, and
+  Windows runs `build_release_vs.bat slicer` (`:293`). So a test file that fails to compile
+  on Windows or macOS is not caught anywhere, and "it built on every platform" is never
+  evidence about `tests/**`. Said plainly because the opposite was asserted on #126 and in
+  this file before Codex corrected it on #138 — the error ran in the reassuring direction,
+  which is the one that matters.
 - **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
   the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
   never starts the workflow at all and the `ready-to-build` label does nothing — the
@@ -107,11 +118,20 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
   translation-only PR to those branches now builds the full matrix. This fork opens none.
 
-### External slicer regression tests — permanently red, not ours (#133)
+### External slicer regression tests — red since 14 Sep 2026 on a v2.4.2 tree (#133)
+**Everything in this section is an observation of a moving third-party repository, not a
+standing fact.** It describes builds of this fork while pinned to **v2.4.2**, between
+14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
+any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
+against the job log before concluding a red `build_linux` is this issue; do not treat a
+red Linux leg as pre-diagnosed. In particular an upstream sync past v2.4.2 may close the
+version skew below and make this section obsolete, in which case delete it rather than
+leave it to mislead. If you confirm it still applies, note the date on #133.
+
 `build_orca.yml:403` runs a pytest suite from a **third party's default branch, cloned
 unpinned on every build**: `git clone --depth 1 https://github.com/OrcaSlicer/orca-test-repo.git`
-(`:410`) — no tag, no SHA, no `--branch`. It is the sole red check on every PR that has
-built since 14 Sep 2026, and it cannot go green from anything in this repository.
+(`:410`) — no tag, no SHA, no `--branch`. Over that window it was the sole red check on
+every PR that built, and no change in this repository could turn it green.
 
 **Attribution is measured, not inferred.** Three structurally unrelated diffs produced a
 byte-identical tally: #135 (two files, `build_all.yml` trigger paths + `CLAUDE.md`, **no
@@ -149,11 +169,14 @@ Rule 15 above.
 re-run samples a *different suite* and cannot distinguish flake from real. It is also not
 flake-shaped: ~150s, 93 test bodies executed, no checkout/install/runner failure.
 
-**Two facts that decide the options, both already established** — don't re-derive them:
-`orca-test-repo` has **no tags** (`git tag | wc -l` → 0), so any pin is a raw SHA
-re-picked by hand each sync; and the only v2.4.2-contemporary revision, `0dfd8df` (5 May,
-the revision the last green run actually used), has **0 case files against 69 on `main`**,
-so pinning trades 24 false failures for nearly all of the suite's current coverage.
+**Two facts that decide the options, both already established** — don't re-derive them,
+but do re-check them, since both describe the external repository as of **12 Oct 2026**
+and it is still moving: `orca-test-repo` had **no tags** (`git tag | wc -l` → 0), so any
+pin is a raw SHA re-picked by hand each sync; and the only v2.4.2-contemporary revision,
+`0dfd8df` (5 May, the revision the last green run actually used), had **0 case files
+against 69 on `main`**, so pinning traded ~24 false failures for nearly all of the suite's
+current coverage. A tag appearing upstream, or the case files landing on that revision,
+would change the answer.
 
 #133 carries the full option list and the evidence. Picking one is a CI-ownership
 decision and has been open since 14 Sep; the automated sweep records data points there
