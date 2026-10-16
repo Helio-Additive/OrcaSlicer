@@ -1261,9 +1261,8 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMin);
         view_type_items.push_back(libvgcode::EViewType::ThermalIndexMax);
     }
-    for (auto view_type = libvgcode::EViewType::WarpageDisplacement;
-         view_type <= libvgcode::EViewType::WarpageLayerShrinkage;
-         view_type = static_cast<libvgcode::EViewType>(static_cast<size_t>(view_type) + 1))
+    // Helio: expose only the user-facing warping metrics in the preview selector.
+    for (const auto view_type : { libvgcode::EViewType::WarpageRisk, libvgcode::EViewType::WarpageHullShrinkage })
         if (has_warpage_data(m_has_warpage_data, view_type))
             view_type_items.push_back(view_type);
     //if (mode == ConfigOptionMode::comDevelop) {
