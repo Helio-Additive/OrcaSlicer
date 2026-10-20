@@ -167,10 +167,12 @@ and #137 (a Helio download-lifecycle change).
 So "this red is not my diff's" is well supported for a diff that touches no compiled code,
 and is an inference for anything else. Check it per-PR rather than by precedent.
 
-**Root cause is version skew**, the same shape as the `check_profiles.yml` problem below:
-the suite's golden baselines announce they were *"captured with OrcaSlicer-2.5.0-dev @
-37e1582c4c"* while this fork is pinned to **v2.4.2**, so it validates a 2.4.2 build
-against 2.5.0-dev expectations. Many failures name features that do not exist in this
+**Version skew is the leading explanation, not an established cause.** A suite baseline was
+observed announcing *"captured with OrcaSlicer-2.5.0-dev @ 37e1582c4c"* while this fork is
+pinned to **v2.4.2**, which would mean a 2.4.2 build validated against 2.5.0-dev
+expectations. The logs never record which `orca-test-repo` revision a run resolved, so no
+run can be tied to the baseline it actually used — the mechanism is well supported, the
+causal claim is not proven. Many failures name features that do not exist in this
 tree (`filament_is_mixed`, `filament_mixed_*`, the `mixed-filament-*` family). Treat this
 as one pattern with two instances — *an inherited workflow pulling a floating upstream-`main`
 artifact into a release-pinned fork* — rather than two unrelated bugs.
@@ -212,9 +214,14 @@ What that means in practice:
   thing the relocate-into-a-Helio-workflow option would buy.
 - **Until then**, treat any revision claim as an inference and say so, rather than
   presenting it as measured.
-- For the failures recorded here the shape argues against flake **independently of the
-  revision** — ~150s, 93 test bodies executed, no checkout/install/runner failure — so a
-  re-run was not worth spending. That is a conclusion about these runs, not a standing rule.
+- For the failures recorded here the runs completed in ~150s with their test bodies executed
+  and no checkout/install/runner error. Those observations establish that **the suite ran
+  without infrastructure errors** — they do **not** rule out nondeterministic assertions,
+  which look exactly like that. So flakiness was never excluded on these runs, and they do
+  not establish that a re-run was unnecessary: with no recorded revision and no repeated run
+  against a known identical one, the honest position is that it is unknown. (The table
+  above also rules out a single body count for the window: failed + passed + xfailed is
+  84 on 14 Sep and 89 on 26/30 Sep and 10 Oct.)
 
 **Two things worth knowing before choosing an option — one checked, one inferred.** Both
 describe the external repository as of **12 Oct 2026**, which is still moving, so re-check
