@@ -2950,8 +2950,11 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
             m_is_helio_gcode = true;
             // calculate_time() may insert speed vertices while processing a move.
             // Associate metadata by the stable G-code ID, not a saved vector index.
+            // Event vertices borrow the following motion's ID but do not belong to it.
             for (auto it = m_result.moves.rbegin(); it != m_result.moves.rend() &&
-                 it->gcode_id == *m_pending_helio_gcode_id; ++it) {
+                 it->gcode_id == *m_pending_helio_gcode_id &&
+                 it->type != EMoveType::Color_change && it->type != EMoveType::Pause_Print &&
+                 it->type != EMoveType::Custom_GCode; ++it) {
                 auto& move = *it;
                 if (!std::isnan(warpage_fields[0])) move.warpage_displacement    = warpage_fields[0];
                 if (!std::isnan(warpage_fields[1])) move.warpage_disp_x          = warpage_fields[1];

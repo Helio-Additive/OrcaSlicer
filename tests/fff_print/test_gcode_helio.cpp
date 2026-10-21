@@ -256,6 +256,37 @@ TEST_CASE("Standalone warpage metadata after a no-op does not annotate an event"
     CHECK_THAT(extrusion_at(moves, 10.0f).warpage_hull_shrinkage, WithinAbs(0.2f, 0.000001f));
 }
 
+TEST_CASE("Standalone warpage metadata does not annotate events sharing the move ID", "[GCode][Helio]")
+{
+    const auto tag = GENERATE("; COLOR_CHANGE,T0,#FF0000", "; PAUSE_PRINTING", "; CUSTOM_GCODE");
+    const std::string gcode = std::string("M83\nG1 Z0.2\n") + tag +
+        "\nG1 X10 E1\n"
+        ";helioadditive=(wdm=0.2,wdx=0.2,wdy=0.2,wdz=0.2,wr=0.2,wtg=0.2,wts=0.2,whs=0.2,wls=0.2)\n";
+    const auto moves = process_gcode(gcode.c_str());
+    const auto& extrusion = extrusion_at(moves, 10.0f);
+    size_t events = 0;
+    for (const auto& move : moves) {
+        const bool is_event = move.type == EMoveType::Color_change || move.type == EMoveType::Pause_Print ||
+                              move.type == EMoveType::Custom_GCode;
+        if (!is_event && &move != &extrusion)
+            continue;
+        if (is_event) {
+            ++events;
+            REQUIRE(move.gcode_id == extrusion.gcode_id);
+        }
+        for (float value : { move.warpage_displacement, move.warpage_disp_x, move.warpage_disp_y,
+                            move.warpage_disp_z, move.warpage_risk, move.warpage_ti_gradient,
+                            move.warpage_thermal_strain, move.warpage_hull_shrinkage,
+                            move.warpage_layer_shrinkage }) {
+            if (is_event)
+                CHECK(std::isnan(value));
+            else
+                CHECK_THAT(value, WithinAbs(0.2f, 0.000001f));
+        }
+    }
+    REQUIRE(events == 1);
+}
+
 TEST_CASE("Warpage percentiles accept complete finite numbers", "[GCode][Helio]")
 {
     std::array<float, 2> percentiles;
