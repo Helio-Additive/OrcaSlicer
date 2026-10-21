@@ -883,6 +883,44 @@ void HelioStatementDialog::create_pat_page()
         content_sizer->Add(mm_row, 0, wxALIGN_CENTER, 0);
     }
 
+    content_sizer->Add(0, 0, 0, wxTOP, FromDIP(12));
+
+    // Warping-analysis feature toggle
+    {
+        wxBoxSizer* warping_row = new wxBoxSizer(wxHORIZONTAL);
+        auto* warping_checkbox = new ::CheckBox(page_pat_panel);
+
+        warping_checkbox->SetValue(wxGetApp().app_config->get_bool("helio_warping_analysis_enabled"));
+
+        auto* warping_label = new Label(page_pat_panel, Label::Body_13,
+            _L("Experimental: Enable warping analysis"));
+        warping_label->SetForegroundColour(HELIO_MUTED);
+        warping_label->SetToolTip(_L("When enabled, Helio performs warping analysis during simulations."));
+
+        auto save_warping_setting = [warping_checkbox]() {
+            const bool enabled = warping_checkbox->GetValue();
+            wxGetApp().app_config->set_bool("helio_warping_analysis_enabled", enabled);
+            wxGetApp().app_config->save();
+            BOOST_LOG_TRIVIAL(info) << "helio_warping_analysis_enabled set to " << (enabled ? "true" : "false");
+            warping_checkbox->Refresh(false);
+            warping_checkbox->Update();
+        };
+
+        warping_checkbox->Bind(wxEVT_TOGGLEBUTTON, [save_warping_setting](wxCommandEvent& e) {
+            save_warping_setting();
+            e.Skip();
+        });
+
+        warping_label->Bind(wxEVT_LEFT_DOWN, [warping_checkbox, save_warping_setting](wxMouseEvent&) {
+            warping_checkbox->SetValue(!warping_checkbox->GetValue());
+            save_warping_setting();
+        });
+
+        warping_row->Add(warping_checkbox, 0, wxALIGN_CENTER_VERTICAL, 0);
+        warping_row->Add(warping_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
+        content_sizer->Add(warping_row, 0, wxALIGN_CENTER, 0);
+    }
+
     content_sizer->Add(0, 0, 0, wxTOP, FromDIP(24));
     content_sizer->Add(helio_links_sizer, 0, wxALIGN_CENTER, 0);
     content_sizer->Add(0, 0, 0, wxTOP, FromDIP(20));
