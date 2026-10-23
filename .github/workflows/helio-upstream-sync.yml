@@ -1126,7 +1126,7 @@ jobs:
               '### Resolution steps',
               ...checkoutBlock,
               '   git remote add upstream https://github.com/SoftFever/OrcaSlicer.git 2>/dev/null || true',
-              '   git fetch upstream --tags',
+              '   git fetch upstream --tags --force',
               '   ```',
               ...graftStep,
               '3. Resolve conflicts (use HELIO_INTEGRATION.md as reference):',
