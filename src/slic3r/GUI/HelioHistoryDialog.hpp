@@ -69,7 +69,7 @@ private:
     // Actions
     void on_refresh(wxMouseEvent& event);
     void on_close(wxMouseEvent& event);
-    void on_download_gcode(const std::string& gcode_url, const std::string& run_name);
+    void on_download_gcode(const std::string& gcode_url, const std::string& run_name, bool for_preview);
     void on_view_details_opt(const HelioQuery::OptimizationRun& run);
     void on_view_details_sim(const HelioQuery::SimulationRun& run);
     void on_helio_completion(wxEvent& event);
