@@ -111,7 +111,7 @@ static std::string get_view_type_string(libvgcode::EViewType view_type)
     else if (view_type == libvgcode::EViewType::WarpageDispX) return _u8L("Warpage displacement X");
     else if (view_type == libvgcode::EViewType::WarpageDispY) return _u8L("Warpage displacement Y");
     else if (view_type == libvgcode::EViewType::WarpageDispZ) return _u8L("Warpage displacement Z");
-    else if (view_type == libvgcode::EViewType::WarpageRisk) return _u8L("Warpage risk");
+    else if (view_type == libvgcode::EViewType::WarpageRisk) return _u8L("Residual stress");
     else if (view_type == libvgcode::EViewType::WarpageTIGradient) return _u8L("Warpage TI gradient");
     else if (view_type == libvgcode::EViewType::WarpageThermalStrain) return _u8L("Warpage thermal strain");
     else if (view_type == libvgcode::EViewType::WarpageHullShrinkage) return _u8L("Warpage hull shrinkage");
@@ -3966,7 +3966,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     case libvgcode::EViewType::WarpageDispX: { imgui.title(_u8L("Warpage displacement X (mm)")); break; }
     case libvgcode::EViewType::WarpageDispY: { imgui.title(_u8L("Warpage displacement Y (mm)")); break; }
     case libvgcode::EViewType::WarpageDispZ: { imgui.title(_u8L("Warpage displacement Z (mm)")); break; }
-    case libvgcode::EViewType::WarpageRisk: { imgui.title(_u8L("Warpage risk")); break; }
+    case libvgcode::EViewType::WarpageRisk: { imgui.title(_u8L("Residual stress")); break; }
     case libvgcode::EViewType::WarpageTIGradient: { imgui.title(_u8L("Warpage TI gradient")); break; }
     case libvgcode::EViewType::WarpageThermalStrain: { imgui.title(_u8L("Warpage thermal strain")); break; }
     case libvgcode::EViewType::WarpageHullShrinkage: { imgui.title(_u8L("Warpage hull shrinkage")); break; }
