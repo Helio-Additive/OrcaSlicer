@@ -328,11 +328,12 @@ public:
         const std::string& helio_api_url,
         const std::string& helio_api_key,
         const std::string& material_id,
-        std::function<void(GetPrintPriorityOptionsResult)> callback
+        std::function<void(GetPrintPriorityOptionsResult)> callback,
+        bool is_multi_material = false
     );
 
     static std::vector<PrintPriorityOption> get_cached_print_priority_options(
-        const std::string& material_id
+        const std::string& material_id, bool is_multi_material = false
     );
 
     static void clear_print_priority_cache();
@@ -420,7 +421,7 @@ public:
         return "OrcaSlicer " + iso_datetime;
     }
 
-    static std::map<std::string, std::vector<PrintPriorityOption>> global_print_priority_cache;
+    static std::map<std::pair<std::string, bool>, std::vector<PrintPriorityOption>> global_print_priority_cache;
     static std::string last_simulation_trace_id;
     static std::string last_optimization_trace_id;
     static double convert_speed(float mm_per_second);

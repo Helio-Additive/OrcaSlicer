@@ -1430,9 +1430,9 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // Check badges removed - using colored/greyscale icons instead
 }
 
- HelioInputDialog::HelioInputDialog(wxWindow *parent /*= nullptr*/, const std::string& material_id /*= ""*/)
+ HelioInputDialog::HelioInputDialog(wxWindow *parent /*= nullptr*/, const std::string& material_id /*= ""*/, bool is_multi_material /*= false*/)
     : DPIDialog(static_cast<wxWindow *>(wxGetApp().mainframe), wxID_ANY, wxString("Helio Additive"), wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX),
-      m_material_id(material_id)
+      m_material_id(material_id), m_is_multi_material(is_multi_material)
 {
     shared_ptr = std::make_shared<int>(0);
     auto theme = get_theme();
@@ -2872,7 +2872,7 @@ void HelioInputDialog::fetch_print_priority_options()
     }
 
     // Check cache first
-    auto cached_options = HelioQuery::get_cached_print_priority_options(m_material_id);
+    auto cached_options = HelioQuery::get_cached_print_priority_options(m_material_id, m_is_multi_material);
     if (!cached_options.empty()) {
         m_print_priority_options = cached_options;
         update_print_priority_dropdown();
@@ -2929,7 +2929,8 @@ void HelioInputDialog::fetch_print_priority_options()
                     }
                 });
             }
-        }
+        },
+        m_is_multi_material
     );
 }
 
