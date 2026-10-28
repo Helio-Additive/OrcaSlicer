@@ -154,6 +154,28 @@ struct PathVertex
     static const PathVertex DUMMY_PATH_VERTEX;
 };
 
+// Experimental display-only displacement. Require a complete finite vector;
+// scalar indices and displacement magnitudes cannot supply missing directions.
+inline bool has_warpage_displacement(const PathVertex& vertex)
+{
+    return vertex.is_extrusion() && std::isfinite(vertex.warpage_disp_x) &&
+        std::isfinite(vertex.warpage_disp_y) && std::isfinite(vertex.warpage_disp_z);
+}
+
+inline Vec3 get_warpage_preview_position(const PathVertex& vertex, float scale)
+{
+    Vec3 position = vertex.position;
+    if (!std::isfinite(scale) || scale <= 0.0f || !has_warpage_displacement(vertex))
+        return position;
+    const Vec3 displacement{ vertex.warpage_disp_x, vertex.warpage_disp_y, vertex.warpage_disp_z };
+    for (size_t axis = 0; axis < 3; ++axis) {
+        position[axis] += scale * displacement[axis];
+        if (!std::isfinite(position[axis]))
+            return vertex.position;
+    }
+    return position;
+}
+
 // Keep warpage view-to-field mapping in one place so rendering and tooltips
 // cannot silently disagree when the enum or PathVertex layout changes.
 inline float get_warpage_value(const PathVertex& vertex, EViewType view_type)

@@ -866,6 +866,9 @@ void ViewerImpl::shutdown()
 
 void ViewerImpl::reset()
 {
+    m_warpage_preview_scale = 0.0f;
+    m_has_warpage_displacement = false;
+    m_update_warpage_positions = false;
     m_layers.reset();
     m_view_range.reset();
     m_extrusion_roles.reset();
@@ -909,7 +912,7 @@ void ViewerImpl::reset()
 using Vec4 = std::array<float, 4>;
 
 static void extract_pos_and_or_hwa(const std::vector<PathVertex>& vertices, float travels_radius, float wipes_radius, BitSet<>& valid_lines_bitset,
-    std::vector<Vec4>* positions = nullptr, std::vector<Vec4>* heights_widths_angles = nullptr, bool update_bitset = false) {
+    std::vector<Vec4>* positions = nullptr, std::vector<Vec4>* heights_widths_angles = nullptr, bool update_bitset = false, float warpage_scale = 0.0f) {
   static constexpr const Vec3 ZERO = { 0.0f, 0.0f, 0.0f };
     if (positions == nullptr && heights_widths_angles == nullptr)
         return;
@@ -926,12 +929,13 @@ static void extract_pos_and_or_hwa(const std::vector<PathVertex>& vertices, floa
         const PathVertex& v = vertices[i];
         const EMoveType move_type = v.type;
         const bool prev_line_valid = i > 0 && valid_lines_bitset[i - 1];
-        const Vec3 prev_line = prev_line_valid ? v.position - vertices[i - 1].position : ZERO;
+        const Vec3 display_position = get_warpage_preview_position(v, warpage_scale);
+        const Vec3 prev_line = prev_line_valid ? display_position - get_warpage_preview_position(vertices[i - 1], warpage_scale) : ZERO;
         const bool this_line_valid = i + 1 < vertices.size() &&
                                      vertices[i + 1].position != v.position &&
                                      vertices[i + 1].type == move_type &&
                                      move_type != EMoveType::Seam;
-        const Vec3 this_line = this_line_valid ? vertices[i + 1].position - v.position : ZERO;
+        const Vec3 this_line = this_line_valid ? get_warpage_preview_position(vertices[i + 1], warpage_scale) - display_position : ZERO;
 
         if (this_line_valid) {
             // there is a valid path between point i and i+1.
@@ -944,7 +948,7 @@ static void extract_pos_and_or_hwa(const std::vector<PathVertex>& vertices, floa
         
         if (positions != nullptr) {
             // the last component is a dummy float to comply with GL_RGBA32F format
-            Vec4 position = { v.position[0], v.position[1], v.position[2], 0.0f };
+            Vec4 position = { display_position[0], display_position[1], display_position[2], 0.0f };
             if (move_type == EMoveType::Extrude)
                 // push down extrusion vertices by half height to render them at the right z
                 position[2] -= 0.5f * v.height;
@@ -993,6 +997,8 @@ void ViewerImpl::load(GCodeInputData&& gcode_data)
     reset();
 
     m_vertices = std::move(gcode_data.vertices);
+    m_has_warpage_displacement = std::any_of(m_vertices.begin(), m_vertices.end(),
+        [](const PathVertex& vertex) { return libvgcode::has_warpage_displacement(vertex); });
     m_tool_colors = std::move(gcode_data.tools_colors);
     m_color_print_colors = std::move(gcode_data.color_print_colors);
     m_warpage_wdm_p95 = gcode_data.warpage_wdm_p95;
@@ -1290,6 +1296,8 @@ void ViewerImpl::update_colors()
 
 void ViewerImpl::render(const Mat4x4& view_matrix, const Mat4x4& projection_matrix)
 {
+    if (m_update_warpage_positions)
+        update_warpage_positions();
     if (m_settings.update_view_full_range)
         update_view_full_range();
 
@@ -2019,6 +2027,53 @@ void ViewerImpl::update_color_ranges()
     }
 
     m_settings_used_for_ranges = m_settings;
+}
+
+bool ViewerImpl::has_warpage_displacement() const { return m_has_warpage_displacement; }
+float ViewerImpl::get_warpage_preview_scale() const { return m_warpage_preview_scale; }
+
+void ViewerImpl::set_warpage_preview_scale(float scale)
+{
+    if (!std::isfinite(scale))
+        return;
+    scale = m_has_warpage_displacement ? std::clamp(scale, 0.0f, 100.0f) : 0.0f;
+    if (scale != m_warpage_preview_scale) {
+        m_warpage_preview_scale = scale;
+        m_update_warpage_positions = true;
+    }
+}
+
+void ViewerImpl::update_warpage_positions()
+{
+    m_update_warpage_positions = false;
+    if (m_vertices.empty())
+        return;
+    std::vector<Vec4> positions;
+    std::vector<Vec4> heights_widths_angles;
+    extract_pos_and_or_hwa(m_vertices, m_travels_radius, m_wipes_radius, m_valid_lines_bitset,
+        &positions, &heights_widths_angles, false, m_warpage_preview_scale);
+#ifdef ENABLE_OPENGL_ES
+    std::vector<Vec3> positions_rgb;
+    std::vector<Vec3> hwa_rgb;
+    positions_rgb.reserve(positions.size());
+    hwa_rgb.reserve(heights_widths_angles.size());
+    for (const auto& p : positions)
+        positions_rgb.push_back({p[0], p[1], p[2]});
+    for (const auto& hwa : heights_widths_angles)
+        hwa_rgb.push_back({hwa[0], hwa[1], hwa[2]});
+    m_texture_data.set_positions(positions_rgb);
+    m_texture_data.set_heights_widths_angles(hwa_rgb);
+#else
+    if (m_positions_buf_id == 0 || m_heights_widths_angles_buf_id == 0)
+        return;
+    GLint old_buffer = 0;
+    glsafe(glGetIntegerv(GL_TEXTURE_BUFFER_BINDING, &old_buffer));
+    glsafe(glBindBuffer(GL_TEXTURE_BUFFER, m_positions_buf_id));
+    glsafe(glBufferData(GL_TEXTURE_BUFFER, positions.size() * sizeof(Vec4), positions.data(), GL_DYNAMIC_DRAW));
+    glsafe(glBindBuffer(GL_TEXTURE_BUFFER, m_heights_widths_angles_buf_id));
+    glsafe(glBufferData(GL_TEXTURE_BUFFER, heights_widths_angles.size() * sizeof(Vec4), heights_widths_angles.data(), GL_DYNAMIC_DRAW));
+    glsafe(glBindBuffer(GL_TEXTURE_BUFFER, old_buffer));
+#endif
 }
 
 void ViewerImpl::update_heights_widths()

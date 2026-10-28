@@ -103,3 +103,45 @@ TEST_CASE("warpage hull and layer shrinkage use distinct fields", "[libvgcode][w
     REQUIRE_THAT(get_warpage_value(vertex, EViewType::WarpageLayerShrinkage),
                  Catch::Matchers::WithinAbs(0.0003f, 0.000001f));
 }
+
+TEST_CASE("warpage deformation is display-only and reversible", "[libvgcode][warpage]")
+{
+    PathVertex vertex;
+    vertex.type = EMoveType::Extrude;
+    vertex.position = {10.0f, 20.0f, 30.0f};
+    vertex.warpage_disp_x = -0.5f;
+    vertex.warpage_disp_y = 0.25f;
+    vertex.warpage_disp_z = -1.0f;
+
+    REQUIRE(has_warpage_displacement(vertex));
+    REQUIRE(get_warpage_preview_position(vertex, 2.0f) == Vec3{9.0f, 20.5f, 28.0f});
+    REQUIRE(get_warpage_preview_position(vertex, 0.0f) == vertex.position);
+    REQUIRE(vertex.position == Vec3{10.0f, 20.0f, 30.0f});
+    REQUIRE(get_warpage_preview_position(vertex, -1.0f) == vertex.position);
+    REQUIRE(get_warpage_preview_position(vertex, std::numeric_limits<float>::infinity()) == vertex.position);
+
+    vertex.type = EMoveType::Travel;
+    REQUIRE_FALSE(has_warpage_displacement(vertex));
+    REQUIRE(get_warpage_preview_position(vertex, 2.0f) == vertex.position);
+}
+
+TEST_CASE("warpage deformation rejects incomplete or overflowing vectors", "[libvgcode][warpage]")
+{
+    PathVertex vertex;
+    vertex.type = EMoveType::Extrude;
+    vertex.position = {10.0f, 20.0f, 30.0f};
+    vertex.warpage_risk = 1.0f;
+    vertex.warpage_displacement = 0.5f;
+    REQUIRE_FALSE(has_warpage_displacement(vertex));
+    REQUIRE(get_warpage_preview_position(vertex, 10.0f) == vertex.position);
+
+    vertex.warpage_disp_x = 0.1f;
+    vertex.warpage_disp_y = 0.2f;
+    for (float invalid : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        vertex.warpage_disp_z = invalid;
+        REQUIRE_FALSE(has_warpage_displacement(vertex));
+        REQUIRE(get_warpage_preview_position(vertex, 10.0f) == vertex.position);
+    }
+    vertex.warpage_disp_z = std::numeric_limits<float>::max();
+    REQUIRE(get_warpage_preview_position(vertex, 100.0f) == vertex.position);
+}
