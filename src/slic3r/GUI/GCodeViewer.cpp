@@ -4304,13 +4304,25 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     case libvgcode::EViewType::WarpageDispX:
     case libvgcode::EViewType::WarpageDispY:
     case libvgcode::EViewType::WarpageDispZ:
-    case libvgcode::EViewType::WarpageRisk:
     case libvgcode::EViewType::WarpageTIGradient:
     case libvgcode::EViewType::WarpageThermalStrain:
-    case libvgcode::EViewType::WarpageHullShrinkage:
     case libvgcode::EViewType::WarpageLayerShrinkage:
         append_range(m_viewer.get_color_range(curr_view_type), 4);
         break;
+    case libvgcode::EViewType::WarpageRisk:
+    case libvgcode::EViewType::WarpageHullShrinkage: {
+        // These metrics use a fixed 0..1 range. Show every palette stop even
+        // though ColorRange::get_values() returns only the two seeded endpoints.
+        const auto& range = m_viewer.get_color_range(curr_view_type);
+        const auto& palette = range.get_palette();
+        for (int i = static_cast<int>(palette.size()) - 1; i >= 0; --i) {
+            const float value = static_cast<float>(i) / static_cast<float>(palette.size() - 1);
+            char buf[64];
+            ::sprintf(buf, "%.4f", value);
+            append_item(EItemType::Rect, libvgcode::convert(palette[i]), { { buf, 0 } });
+        }
+        break;
+    }
     case libvgcode::EViewType::Tool:
     {
         // shows only extruders actually used
