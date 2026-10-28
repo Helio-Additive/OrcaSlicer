@@ -28,7 +28,7 @@
 
 namespace Slic3r {
 
-std::map<std::string, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::global_print_priority_cache;
+std::map<std::pair<std::string, bool>, std::vector<HelioQuery::PrintPriorityOption>> HelioQuery::global_print_priority_cache;
 
 // Bumped on every PAT change; see HelioQuery::credential_generation().
 static std::atomic<std::uint64_t> g_helio_credential_generation{0};
@@ -499,15 +499,15 @@ void HelioQuery::request_print_priority_options(
     const std::string& helio_api_url,
     const std::string& helio_api_key,
     const std::string& material_id,
-    std::function<void(GetPrintPriorityOptionsResult)> callback
+    std::function<void(GetPrintPriorityOptionsResult)> callback,
+    bool is_multi_material
 )
 {
-    std::string query_body = R"( {
-        "query": "query GetPrintPriorityOptions($materialId: ID!) { printPriorityOptions(materialId: $materialId) { value label isAvailable description } }",
-        "variables": {"materialId": "%1%"}
-    } )";
-
-    query_body = boost::str(boost::format(query_body) % material_id);
+    nlohmann::json request = {
+        {"query", "query GetPrintPriorityOptions($materialId: ID!, $isMultiMaterial: Boolean) { printPriorityOptions(materialId: $materialId, isMultiMaterial: $isMultiMaterial) { value label isAvailable description } }"},
+        {"variables", {{"materialId", material_id}, {"isMultiMaterial", is_multi_material}}}
+    };
+    std::string query_body = request.dump();
 
     auto http = Http::post(helio_api_url);
 
@@ -544,7 +544,7 @@ void HelioQuery::request_print_priority_options(
         .on_header_callback([response_headers](std::string headers) {
             *response_headers += headers;
         })
-        .on_complete([callback, material_id, response_headers, request_generation](std::string body, unsigned status) {
+        .on_complete([callback, material_id, is_multi_material, response_headers, request_generation](std::string body, unsigned status) {
             BOOST_LOG_TRIVIAL(info) << "request_print_priority_options response: " << body;
 
             GetPrintPriorityOptionsResult result;
@@ -603,7 +603,7 @@ void HelioQuery::request_print_priority_options(
                             BOOST_LOG_TRIVIAL(info) << "request_print_priority_options: discarding response from a "
                                                        "superseded Helio credential";
                         } else {
-                            global_print_priority_cache[material_id] = result.options;
+                            global_print_priority_cache[{material_id, is_multi_material}] = result.options;
                         }
                     }
                 } else if (parsed_obj.contains("errors")) {
@@ -635,11 +635,11 @@ void HelioQuery::request_print_priority_options(
 }
 
 std::vector<HelioQuery::PrintPriorityOption> HelioQuery::get_cached_print_priority_options(
-    const std::string& material_id
+    const std::string& material_id, bool is_multi_material
 )
 {
     std::lock_guard<std::mutex> lock(g_helio_priority_cache_mutex);
-    auto it = global_print_priority_cache.find(material_id);
+    auto it = global_print_priority_cache.find({material_id, is_multi_material});
     if (it != global_print_priority_cache.end()) {
         return it->second;
     }
