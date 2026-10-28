@@ -893,9 +893,9 @@ void HelioStatementDialog::create_pat_page()
         warping_checkbox->SetValue(wxGetApp().app_config->get_bool("helio_warping_analysis_enabled"));
 
         auto* warping_label = new Label(page_pat_panel, Label::Body_13,
-            _L("Experimental: Enable warping analysis"));
+            _L("Experimental: Enable Residual stress analysis"));
         warping_label->SetForegroundColour(HELIO_MUTED);
-        warping_label->SetToolTip(_L("When enabled, Helio performs warping analysis during simulations."));
+        warping_label->SetToolTip(_L("When enabled, Helio performs residual stress analysis during simulations."));
 
         auto save_warping_setting = [warping_checkbox]() {
             const bool enabled = warping_checkbox->GetValue();
