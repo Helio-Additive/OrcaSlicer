@@ -530,6 +530,9 @@ void AppConfig::set_defaults()
     if (get("helio_multimaterial_enabled").empty()) {
         set("helio_multimaterial_enabled", "false");
     }
+    if (get("helio_warping_analysis_enabled").empty()) {
+        set("helio_warping_analysis_enabled", "false");
+    }
     if (get("helio_first_time_tutorial").empty()) {
         set("helio_first_time_tutorial", "active");
     }
