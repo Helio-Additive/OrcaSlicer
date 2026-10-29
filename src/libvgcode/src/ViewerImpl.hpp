@@ -169,6 +169,13 @@ public:
 
     float get_travels_radius() const { return m_travels_radius; }
     void set_travels_radius(float radius);
+
+    // Display only; zero disables deformation. Units/directions follow the
+    // supplied Helio displacement vector and require solver validation.
+    bool has_warpage_displacement() const;
+    float get_warpage_preview_scale() const;
+    void set_warpage_preview_scale(float scale);
+
     float get_wipes_radius() const { return m_wipes_radius; }
     void set_wipes_radius(float radius);
 
@@ -300,6 +307,10 @@ private:
     ColorRange m_thermal_index_mean_range;
     ColorRange m_thermal_index_min_range;
     ColorRange m_thermal_index_max_range;
+    float m_warpage_preview_scale{0.0f};
+    bool m_has_warpage_displacement{false};
+    bool m_update_warpage_positions{false};
+    void update_warpage_positions();
     std::array<ColorRange, 9> m_warpage_ranges;
     float m_warpage_wdm_p95{ std::numeric_limits<float>::quiet_NaN() };
     float m_warpage_whs_p95{ std::numeric_limits<float>::quiet_NaN() };
