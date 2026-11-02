@@ -208,7 +208,9 @@ identifier but says nothing about which code they *execute*; and #135 compiling 
 **And the identical-failure-set argument cannot close this gap either.** Matching sets across
 #126 and #140 show a *common* cause — but a Helio hunk already merged on
 `orca-latest-parity-bambu` would be common to every PR too, and would produce exactly the same
-identical sets. The two readings are indistinguishable from PR builds alone.
+identical sets. So there are **three** candidate causes, not two: inherited upstream behaviour,
+a Helio hunk already merged on the release branch, and the PR under test. PR builds alone
+separate none of them.
 
 The measurement that separates them is a run of the suite against the **unmodified release
 branch**, and **it has never been taken.** `build_all.yml`'s scheduled trigger is gated
@@ -218,19 +220,45 @@ last `build_linux` that actually executed on the release branch was **28 Aug 202
 days *before* the CLI suite merged to `orca-test-repo` on 8 Sep. So **all 25 failures have only
 ever been observed in PR builds**, and no baseline exists to compare them against.
 
-Getting one needs no divergence and no permission: **`workflow_dispatch` on
-`orca-latest-parity-bambu`**. Verified against the job conditions rather than assumed — for
+A **`workflow_dispatch` on `orca-latest-parity-bambu`** gets the first separation and needs no
+divergence or permission. Verified against the job conditions rather than assumed — for
 `workflow_dispatch`, `github.event_name != 'schedule'` is true so the fork gate passes, and
 **both label-gate clauses are `pull_request`-scoped** (`github.event_name != 'pull_request'`
-short-circuits them), so `ready-to-build` is irrelevant on a dispatch. `build-deps-only`
-defaults to `false`, so it is a full build. `build_linux` therefore runs, regression step
-included. Note this is a general fact about this workflow and not only useful here: **a manual
-dispatch bypasses the `ready-to-build` gate entirely**, which is the escape hatch when the
-`paths:` filter has excluded a PR (how #109 was built).
+short-circuits them), so `ready-to-build` is irrelevant. `build-deps-only` defaults to `false`,
+so `build_linux` runs with the regression step included. Generally useful beyond this entry:
+**a manual dispatch bypasses the `ready-to-build` gate entirely**, which is the escape hatch
+when the `paths:` filter has excluded a PR (how #109 was built).
 
-Until someone takes that baseline, the honest position on a red `build_linux` is
-**"not attributable"**, not "not ours" — and a compiled-code PR should be excluded only by a
-baseline reproduction or a per-case trace against the Helio hunks it touches.
+**But that dispatch builds the release branch, so it carries the merged Helio hunks too — it
+separates the PR from the other two and cannot tell upstream behaviour from a merged Helio
+regression.** Do not read a reproducing baseline as "not ours".
+
+### Rule 15's own test answers it for the 10 crashes, and costs nothing
+
+The prescribed ownership test — `git diff <upstream baseline> HEAD -- <file>` — settles this
+without building anything. Against **upstream `refs/tags/v2.4.2`** (fetchable: `git fetch
+--depth 1 https://github.com/OrcaSlicer/OrcaSlicer.git refs/tags/v2.4.2:refs/tags/v2.4.2`),
+every entry point the 10 crashes exercise is **byte-identical to upstream**:
+
+| file | role for these crashes | vs upstream v2.4.2 |
+|---|---|---|
+| `src/OrcaSlicer.cpp` | CLI entry: `--scale`, `--rotate-*`, `--datadir`, `--outputdir`, and the handler that should catch instead of abort | **identical** |
+| `src/libslic3r/Config.cpp` / `.hpp` | option deserialization, throws `ConfigurationError` | **identical** |
+| `src/libslic3r/Model.cpp`, `Geometry.cpp` | transform application | **identical** |
+| `src/libslic3r/PrintConfig.hpp` | option definitions | **identical** |
+| `src/libslic3r/PrintConfig.cpp` | option definitions | `+21/−0` — **purely additive**: three new `helio_*` option defs (`helio_printer_id`, `helio_initial_room_air_temp`, `helio_layer_threshold`). No existing option or deserialization path touched |
+
+So the segfaults on long-standing transform options and the unhandled-exception aborts sit in
+code this fork has not modified. **By Rule 15 they are upstream's** — established by the test
+the Scope section prescribes, not assumed from "the suite is newer".
+
+Stated limit, because this is strong rather than airtight: it shows no Helio hunk sits *in*
+those paths, not that none *perturbs* them. The fork does change `GCodeProcessor.cpp`
+(`+70/−1`) and much of the GUI, and a CLI run still links all of it. Excluding that fully
+needs either the upstream-v2.4.2 comparison build or a local reproduction —
+`./build_linux.sh -istrlL` then `orca-slicer --scale 2 --slice 0 <any.3mf>`. Neither is needed
+to justify *not patching* them here; both would be needed to call them upstream's in a bug
+report filed upstream.
 
 ### Attribution: what the 25 actually report (29 Oct run)
 
