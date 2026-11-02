@@ -248,17 +248,30 @@ every entry point the 10 crashes exercise is **byte-identical to upstream**:
 | `src/libslic3r/PrintConfig.hpp` | option definitions | **identical** |
 | `src/libslic3r/PrintConfig.cpp` | option definitions | `+21/−0` — **purely additive**: three new `helio_*` option defs (`helio_printer_id`, `helio_initial_room_air_temp`, `helio_layer_threshold`). No existing option or deserialization path touched |
 
-So the segfaults on long-standing transform options and the unhandled-exception aborts sit in
-code this fork has not modified. **By Rule 15 they are upstream's** — established by the test
-the Scope section prescribes, not assumed from "the suite is newer".
+So the segfaults on long-standing transform options and the unhandled-exception aborts are in
+**implementations this fork has not modified**. That is what the test shows, and it is worth
+having — but it is **half** of the ownership question, not the answer.
 
-Stated limit, because this is strong rather than airtight: it shows no Helio hunk sits *in*
-those paths, not that none *perturbs* them. The fork does change `GCodeProcessor.cpp`
-(`+70/−1`) and much of the GUI, and a CLI run still links all of it. Excluding that fully
-needs either the upstream-v2.4.2 comparison build or a local reproduction —
-`./build_linux.sh -istrlL` then `orca-slicer --scale 2 --slice 0 <any.3mf>`. Neither is needed
-to justify *not patching* them here; both would be needed to call them upstream's in a bug
-report filed upstream.
+**Attribution is unresolved. Do not record these as upstream's on the strength of the table
+above.** Scope covers a defect *sitting inside* a Helio hunk **or caused by one**, and the diff
+only disposes of the first. The fork changes `GCodeProcessor.cpp` (`+70/−1`), `AppConfig.cpp`,
+`PlaceholderParser.cpp` and much of the GUI, and a CLI run links all of it — so unchanged entry
+points do not establish that nothing Helio changed makes them fail. An earlier revision of this
+paragraph asserted *"by Rule 15 they are upstream's"* while stating this same limit two
+sentences later; that was the conclusion outrunning its evidence, and it is the sixth instance
+of this entry doing so in the same direction.
+
+What would actually resolve it, either one:
+
+- a **per-case causal trace** from the crash to the code that produces it, checked against the
+  Helio hunks that code links; or
+- a reproduction on **unmodified upstream v2.4.2** with the same inputs and the same suite
+  revision. Note a reproduction on *the fork* distinguishes nothing — it is consistent with
+  both causes.
+
+Until one of those exists: not patching upstream code remains right under Rule 15, but **that
+is not a licence to exclude a fix to a Helio hunk** if a trace finds one responsible. "We did
+not touch `OrcaSlicer.cpp`" is not an answer to "did our change break it".
 
 ### Attribution: what the 25 actually report (29 Oct run)
 
