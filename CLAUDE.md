@@ -167,15 +167,30 @@ and #137 (a Helio download-lifecycle change).
 So "this red is not my diff's" is well supported for a diff that touches no compiled code,
 and is an inference for anything else. Check it per-PR rather than by precedent.
 
-**Version skew is the leading explanation, not an established cause.** A suite baseline was
-observed announcing *"captured with OrcaSlicer-2.5.0-dev @ 37e1582c4c"* while this fork is
-pinned to **v2.4.2**, which would mean a 2.4.2 build validated against 2.5.0-dev
-expectations. The logs never record which `orca-test-repo` revision a run resolved, so no
-run can be tied to the baseline it actually used — the mechanism is well supported, the
-causal claim is not proven. Many failures name features that do not exist in this
-tree (`filament_is_mixed`, `filament_mixed_*`, the `mixed-filament-*` family). Treat this
-as one pattern with two instances — *an inherited workflow pulling a floating upstream-`main`
-artifact into a release-pinned fork* — rather than two unrelated bugs.
+**Version skew is the established cause, and the skew is maintained by a bot.** This was
+recorded as "the leading explanation, not proven" while the suite was read only through our
+own job logs. It is now measured directly — `orca-test-repo` is public and `git clone` works,
+even though the GitHub *API* is scoped to Helio repos. Two facts settle it:
+
+- **Every failing case postdates our pin, and they arrive from one commit.** All 25 failures
+  live in `test_cases.py` (21) and `test_settings_import.py` (4), both added by `8d475c2`
+  *"CLI Test Suite"* (31 Aug 2026, merged `a4faa36` on 8 Sep); the five `mixed-filament-*`
+  cases came with `f720aad` (11 Sep). Dating each failing case file by its introducing commit
+  (`git log --diff-filter=A`) returns **those two dates and nothing else**. No failure comes
+  from content that predates v2.4.2. That also explains the 8 Sep → 14 Sep flip this section
+  opens on: the suite merged to `main` on 8 Sep.
+- **The baseline is re-pegged to upstream `main` automatically.**
+  `cases/_snapshots/cli_surface_full.json` is refreshed by `github-actions[bot]` under the
+  commit subject *"Refresh `cli_surface_full.json` from OrcaSlicer main"* — 11 times between
+  25 Sep and 26 Oct 2026.
+
+So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2.
+Crucially this dating is **revision-independent**: it asks when a case entered the repository,
+not which revision a given run resolved, so the unrecorded-SHA gap below does not weaken it.
+Many failures name features absent from this tree (`filament_is_mixed`, `filament_mixed_*`,
+the `mixed-filament-*` family), which is the same pattern seen from the other side. Treat it
+as one mechanism — *an inherited workflow pulling a floating upstream-`main` artifact into a
+release-pinned fork* — not two unrelated bugs.
 
 **Over this window the drift was away from green, which is evidence against — not a refutation
 of — "wait for upstream to xfail-mark them":**
@@ -188,10 +203,18 @@ of — "wait for upstream to xfail-mark them":**
 | 10 Oct | 25 failed / 58 passed / 6 xfailed |
 
 Failures roughly doubled in a month while `xfailed` *fell* — cases arrived faster than they
-were marked, and some marks were removed. That is four observations, not a trend that has to
-continue: upstream can xfail-mark the lot in one later commit, and nothing here would predict
-it. **Keep that option live on #133** — the evidence says it had not happened by 10 Oct 2026,
-not that it will not.
+were marked, and some marks were removed.
+
+**That option is now closed, and not on the strength of this table.** The table is four
+observations and never could have settled it. What settles it is the mechanism above: the
+failures are not a backlog of cases awaiting `XFAIL` markers, they are a conformance diff
+against a baseline a bot regenerates from upstream `main`. Marking them would not help — the
+next refresh re-derives them. And **upstream will not pin the clone for us**: checked
+directly, `OrcaSlicer/OrcaSlicer`'s `build_orca.yml` on `main` still runs
+`git clone --depth 1 … orca-test-repo.git` with no ref, identical to `v2.4.2`. Upstream has
+no reason to change it — it builds `main`, so a main-tracking suite is correct *for upstream*.
+The unpinned clone is a defect only for a **release-pinned fork**, which is us. Do not
+re-open "wait for upstream" on #133 without new evidence about upstream's own CI.
 
 **Do not patch `build_orca.yml`.** `grep -c -i helio` on it returns **0** and the manifest
 marks it `owner: upstream`, so pinning the clone there would be the first Helio divergence
@@ -223,20 +246,31 @@ What that means in practice:
   above also rules out a single body count for the window: failed + passed + xfailed is
   84 on 14 Sep and 89 on 26/30 Sep and 10 Oct.)
 
-**Two things worth knowing before choosing an option — one checked, one inferred.** Both
-describe the external repository as of **12 Oct 2026**, which is still moving, so re-check
-rather than re-derive.
+**What to know before choosing an option.** Both points below are measured against the
+external repository as of **2 Nov 2026**, which is still moving, so re-check rather than
+re-derive.
 
-- **Checked:** `orca-test-repo` had **no tags** (`git tag | wc -l` → 0). So any pin is a raw
-  SHA, re-picked by hand each sync.
-- **Inferred, and load-bearing if the pin option is chosen:** `0dfd8df` (5 May) is the
-  newest revision at or before upstream's v2.4.2 tag, and had **0 case files against 69 on
-  `main`** — so pinning there would trade the false failures for nearly all of the suite's
-  current coverage. It has also been described as the revision the last green run used, but
-  **that part is an inference from clock times, not a reading** — per the evidence note
-  above, no run records its suite SHA. **If the pin option is taken, re-establish which
-  revision that green run actually used from something stronger than timestamps before
-  relying on it.**
+- **`orca-test-repo` has no tags.** `git ls-remote --tags` returns nothing — only `main` and
+  four `hanif/*` branches. So a pin can only ever be a raw SHA, re-picked by hand each sync.
+  (Those branch names track the cases we see red: `hanif/load-filaments-count-fixed`,
+  `hanif/ams-drying-ledger`, `hanif/refresh-golden-baseline`.)
+- **`0dfd8df` (5 May 2026) is the one defensible SHA, and it keeps the step working.** It is
+  the last commit before the CLI suite. Its `run_test.py` is a standalone gcode validator
+  — *"Slice every .3mf in `test_projects/` and check output size"* against `baseline.json` —
+  so `python3 run_test.py <binary>`, the exact invocation at `:411`, still runs. At `main` the
+  same filename is only a wrapper that shells out to `pytest .`, so the two are drop-in
+  compatible and a pin does not strand the step.
+
+  **Do not price this as "trading away the suite's coverage", which is how it was recorded
+  here before.** The content a pin gives up is the main-tracking CLI suite, and per the
+  mechanism above that suite *cannot pass on a v2.4.2 tree* — so for this fork it is not
+  coverage, it is 25 guaranteed reds. A pin restores precisely the test content that was ever
+  green here. What a pin genuinely costs is the Rule 12 divergence, and that is the whole of
+  the argument against it.
+
+  Separately, the claim that `0dfd8df` is *the revision the last green run used* remains an
+  inference from clock times — no run records its suite SHA. Nothing above depends on it:
+  the case-dating argument is revision-independent.
 
 #133 carries the full option list and the evidence. Picking one is a CI-ownership
 decision and has been open since 14 Sep; the automated sweep records data points there
