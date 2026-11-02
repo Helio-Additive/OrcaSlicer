@@ -193,8 +193,7 @@ the `mixed-filament-*` family), which is the same pattern seen from the other si
 as one mechanism — *an inherited workflow pulling a floating upstream-`main` artifact into a
 release-pinned fork* — not two unrelated bugs.
 
-**Over this window the drift was away from green, which is evidence against — not a refutation
-of — "wait for upstream to xfail-mark them":**
+**The observed drift over this window, kept for the dates rather than for the argument:**
 
 | date | result |
 |---|---|
