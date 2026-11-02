@@ -167,11 +167,13 @@ and #137 (a Helio download-lifecycle change).
 So "this red is not my diff's" is well supported for a diff that touches no compiled code,
 and is an inference for anything else. Check it per-PR rather than by precedent.
 
-**Version skew is the established cause for the `test_cases.py` failures. It is not
-established for all 25 — see the carve-out below, which matters more than the headline.**
-This was recorded as "the leading explanation, not proven" while the suite was read only
-through our own job logs. It is now measured directly — `orca-test-repo` is public and
-`git clone` works, even though the GitHub *API* is scoped to Helio repos. Two facts:
+**What is established is *provenance*, not *cause*. Keep the two apart — collapsing them is
+the mistake this entry has now made three times.** `orca-test-repo` is public and `git clone`
+works (only the GitHub *API* is scoped to Helio repos), so the suite can be read directly
+rather than inferred from our job logs. What that measures is **when each failing case entered
+the repository** — which is enough to clear any Helio PR's diff, and **not** enough to say why
+any individual case fails. Version skew is established for some, refuted for others, and
+untraced for the rest; the breakdown below is the part to act on. Two measured facts:
 
 - **Every failing case postdates our pin, and they arrive from two commits.** All 25 failures
   live in `test_cases.py` (21) and `test_settings_import.py` (4). `8d475c2` *"CLI Test Suite"*
@@ -187,13 +189,42 @@ through our own job logs. It is now measured directly — `orca-test-repo` is pu
   between 25 Sep and 26 Oct 2026. Twelve commits touch that file in all; the other two are
   the suite's own introduction and a formatting normalisation, both human-authored.
 
-So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2.
-Crucially this dating is **revision-independent**: it asks when a case entered the repository,
-not which revision a given run resolved, so the unrecorded-SHA gap below does not weaken it.
-Many failures name features absent from this tree (`filament_is_mixed`, `filament_mixed_*`,
-the `mixed-filament-*` family), which is the same pattern seen from the other side. Treat it
-as one mechanism — *an inherited workflow pulling a floating upstream-`main` artifact into a
-release-pinned fork* — not two unrelated bugs.
+So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2 —
+*an inherited workflow pulling a floating upstream-`main` artifact into a release-pinned fork*.
+This dating is **revision-independent**: it asks when a case entered the repository, not which
+revision a run resolved, so the unrecorded-SHA gap below does not weaken it. **That is the
+whole of what provenance buys**, and it is genuinely useful: no open PR's diff can have caused
+any of these, because every case postdates the tree they are failing against.
+
+### Attribution: what the 25 actually report (29 Oct run)
+
+**10 of the 25 are our own binary crashing. That is not version skew and must not be filed as
+it.** Read from the job log, `[no_crash] process was killed by signal N`:
+
+| cases | signal | what the log shows |
+|---|---|---|
+| `transform-rotate-x`, `transform-rotate-y`, `transform-rotate-z`, `transform-scale` | **11 (SIGSEGV)** | segfault, `expected exit code 0, got -11` |
+| `datadir-missing-parent-directory`, `outputdir-missing-parent-directory` | **6 (SIGABRT)** | `terminate called after throwing an instance of 'boost::filesystem::filesystem_error'` |
+| `nil-value-for-vector-option`, `nil-value-for-scalar-vector-option`, `nil-value-for-machine-axis-array-option`, `load-filaments-count-exceeds-project` | **6 (SIGABRT)** | `terminate called after throwing an instance of 'Slic3r::ConfigurationError'` |
+
+**`--rotate-x`, `--rotate-y`, `--rotate-z` and `--scale` are long-standing CLI options, not
+2.5.0 additions.** A segfault there cannot be explained by a newer test or a refreshed
+snapshot — it is a defect in the binary this fork ships. The six aborts are unhandled
+exceptions where the case asserts a clean error exit instead. Whether upstream `main` has since
+fixed any of them is **unchecked**; that would make them skew *symptoms*, but it is not known.
+
+The rest, for completeness:
+
+| group | count | reading |
+|---|---|---|
+| `mixed-filament-*` | 5 | **skew, established** — `Invalid option --filament-is-mixed`, absent in this tree |
+| `test_settings_import.py` | 4 | see the carve-out below — 1 skew, 1 test-repo-internal, 2 our binary disagreeing with itself |
+| missing-key / behavioural (`partial-load-filaments-variant-key-zero-filled`, `variant-key-zero-filled-on-full-filament-load`, `vector-override-single-value-multi-filament`, `filament-override-with-support-disabled`, `invalid-boolean-option-value`, `boolean-flag-help-shows-no-argument`) | 6 | **untraced individually.** Some report absent config keys (skew-shaped); `invalid-boolean-option-value` reports our binary accepting an invalid value (`expected exit code 254, got 0`), which is not |
+
+So: **skew established for 6, refuted for 10, open for 9.** Anyone citing this section to
+dismiss a `build_linux` red must say *which* case, and the 10 crashes are not available for
+that argument. This matters for the option choice too — "accept as advisory" is accepting a
+step that is currently reporting four segfaults.
 
 **Carve-out: the 4 `test_settings_import.py` failures are NOT explained by the above, and one
 of them may be a real defect in our binary.** That module reads **no snapshot** — `grep`
@@ -297,9 +328,11 @@ re-derive.
   in front of the decision — do not hand #133 either of the one-sided versions.
 
   Stated as an observation rather than a prediction: the suite **as inspected on 2 Nov 2026**
-  contains 25 cases incompatible with this v2.4.2 tree. It is cloned unpinned, so a later run
-  can report a different count in either direction, and the `test_settings_import.py` carve-out
-  above means not all 25 are known to be incompatibility rather than defect.
+  reports 25 failing cases against this v2.4.2 tree. It is cloned unpinned, so a later run can
+  report a different count in either direction — and per the attribution table above those 25
+  are **not** all incompatibility: 10 are our binary crashing and 9 are untraced. **A pin would
+  silence the four segfaults rather than fix them**, which is an argument against option 1 that
+  neither of the earlier pricings contained.
 
   Two things a pin would rest on that are **not** established: that `0dfd8df` is *the revision
   the last green run used* (an inference from clock times — no run records its suite SHA), and
