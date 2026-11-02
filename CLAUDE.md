@@ -167,15 +167,17 @@ and #137 (a Helio download-lifecycle change).
 So "this red is not my diff's" is well supported for a diff that touches no compiled code,
 and is an inference for anything else. Check it per-PR rather than by precedent.
 
-**Version skew is the established cause, and the skew is maintained by a bot.** This was
-recorded as "the leading explanation, not proven" while the suite was read only through our
-own job logs. It is now measured directly — `orca-test-repo` is public and `git clone` works,
-even though the GitHub *API* is scoped to Helio repos. Two facts settle it:
+**Version skew is the established cause for the `test_cases.py` failures. It is not
+established for all 25 — see the carve-out below, which matters more than the headline.**
+This was recorded as "the leading explanation, not proven" while the suite was read only
+through our own job logs. It is now measured directly — `orca-test-repo` is public and
+`git clone` works, even though the GitHub *API* is scoped to Helio repos. Two facts:
 
-- **Every failing case postdates our pin, and they arrive from one commit.** All 25 failures
-  live in `test_cases.py` (21) and `test_settings_import.py` (4), both added by `8d475c2`
-  *"CLI Test Suite"* (31 Aug 2026, merged `a4faa36` on 8 Sep); the five `mixed-filament-*`
-  cases came with `f720aad` (11 Sep). Dating each failing case file by its introducing commit
+- **Every failing case postdates our pin, and they arrive from two commits.** All 25 failures
+  live in `test_cases.py` (21) and `test_settings_import.py` (4). `8d475c2` *"CLI Test Suite"*
+  (31 Aug 2026, merged `a4faa36` on 8 Sep) introduced **20** of them — 16 in `test_cases.py`
+  and all 4 in `test_settings_import.py`; `f720aad` (11 Sep) introduced the **5**
+  `mixed-filament-*` cases. Dating each failing case file by its introducing commit
   (`git log --diff-filter=A`) returns **those two dates and nothing else**. No failure comes
   from content that predates v2.4.2. That also explains the 8 Sep → 14 Sep flip this section
   opens on: the suite merged to `main` on 8 Sep.
@@ -192,6 +194,29 @@ Many failures name features absent from this tree (`filament_is_mixed`, `filamen
 the `mixed-filament-*` family), which is the same pattern seen from the other side. Treat it
 as one mechanism — *an inherited workflow pulling a floating upstream-`main` artifact into a
 release-pinned fork* — not two unrelated bugs.
+
+**Carve-out: the 4 `test_settings_import.py` failures are NOT explained by the above, and one
+of them may be a real defect in our binary.** That module reads **no snapshot** — `grep`
+for `cli_surface` in it returns nothing. It derives probe expectations *"from the fixture
+preset files themselves"* and checks that the artifacts our binary exports agree with each
+other. So the bot-refresh argument does not reach it, and "the test is newer than v2.4.2"
+does not establish that the behaviour it checks is. Taking them one at a time, from the
+29 Oct log:
+
+| case | what it reports | reading |
+|---|---|---|
+| `multi-filament:4-ordered` | `Invalid option --filament-is-mixed` → setup params error | skew: the flag does not exist in this tree |
+| `test_reference_gcode_only_3mf_is_self_consistent` | `filament_mixed_*` / `filament_dev_ams_drying_*`: `'""'` vs `['']` | compares two **checked-in fixtures** and never invokes our binary — a test-repo-internal inconsistency |
+| `multi-filament:partial-2-of-4` | `filament_cooling_before_tower`: gcode `['10','0','0','0']` vs json `['10']` | **our binary disagreeing with itself**; not a Helio key, not a snapshot artifact |
+| `3mf+uptodate` | same `filament_cooling_before_tower` disagreement | as above |
+
+The last two are the point. A v2.4.2 binary emitting a 4-element vector into the G-code
+config block and a 1-element one through `--export-settings` is an internal inconsistency in
+the build we ship. It may well be fixed in upstream `main` — that would make it a skew
+*symptom* rather than a Helio defect — but **that has not been checked**, and nothing above
+licenses waving it away. This is exactly the hazard this section's point (3) predicts: a
+step known-red for explainable reasons swallowing one that is not yet explained. Do not cite
+the bot-refresh mechanism at a `test_settings_import.py` failure.
 
 **The observed drift over this window, kept for the dates rather than for the argument:**
 
@@ -261,16 +286,25 @@ re-derive.
   same filename is only a wrapper that shells out to `pytest .`, so the two are drop-in
   compatible and a pin does not strand the step.
 
-  **Do not price this as "trading away the suite's coverage", which is how it was recorded
-  here before.** The content a pin gives up is the main-tracking CLI suite, and per the
-  mechanism above that suite *cannot pass on a v2.4.2 tree* — so for this fork it is not
-  coverage, it is 25 guaranteed reds. A pin restores precisely the test content that was ever
-  green here. What a pin genuinely costs is the Rule 12 divergence, and that is the whole of
-  the argument against it.
+  **Price the pin against the whole suite, not just its reds.** This was first recorded as
+  *"trading away nearly all of the suite's coverage"*, which overstated the cost; a correction
+  then called the lost content *"not coverage, just 25 guaranteed reds"*, which understated it
+  by the same move in reverse. Neither is right. On the 29 Oct run the suite reported
+  **25 failed / 58 passed / 4 skipped / 6 xfailed**, so a pin to `0dfd8df` drops the 58
+  passing assertions along with the 25 reds, and those 58 are real coverage of CLI behaviour
+  this fork does share with upstream. The cost of the pin is therefore *both* that loss *and*
+  the Rule 12 divergence; the benefit is a readable Linux check. That is the trade-off to put
+  in front of the decision — do not hand #133 either of the one-sided versions.
 
-  Separately, the claim that `0dfd8df` is *the revision the last green run used* remains an
-  inference from clock times — no run records its suite SHA. Nothing above depends on it:
-  the case-dating argument is revision-independent.
+  Stated as an observation rather than a prediction: the suite **as inspected on 2 Nov 2026**
+  contains 25 cases incompatible with this v2.4.2 tree. It is cloned unpinned, so a later run
+  can report a different count in either direction, and the `test_settings_import.py` carve-out
+  above means not all 25 are known to be incompatibility rather than defect.
+
+  Two things a pin would rest on that are **not** established: that `0dfd8df` is *the revision
+  the last green run used* (an inference from clock times — no run records its suite SHA), and
+  so that pinning restores a state known to have been green here. The case-dating argument
+  above is revision-independent and does not depend on either.
 
 #133 carries the full option list and the evidence. Picking one is a CI-ownership
 decision and has been open since 14 Sep; the automated sweep records data points there
