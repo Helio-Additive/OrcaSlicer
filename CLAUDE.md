@@ -181,8 +181,9 @@ even though the GitHub *API* is scoped to Helio repos. Two facts settle it:
   opens on: the suite merged to `main` on 8 Sep.
 - **The baseline is re-pegged to upstream `main` automatically.**
   `cases/_snapshots/cli_surface_full.json` is refreshed by `github-actions[bot]` under the
-  commit subject *"Refresh `cli_surface_full.json` from OrcaSlicer main"* — 11 times between
-  25 Sep and 26 Oct 2026.
+  commit subject *"Refresh `cli_surface_full.json` from OrcaSlicer main"* — **10 times**
+  between 25 Sep and 26 Oct 2026. Twelve commits touch that file in all; the other two are
+  the suite's own introduction and a formatting normalisation, both human-authored.
 
 So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2.
 Crucially this dating is **revision-independent**: it asks when a case entered the repository,
