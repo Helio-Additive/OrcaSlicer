@@ -167,13 +167,14 @@ and #137 (a Helio download-lifecycle change).
 So "this red is not my diff's" is well supported for a diff that touches no compiled code,
 and is an inference for anything else. Check it per-PR rather than by precedent.
 
-**What is established is *provenance*, not *cause*. Keep the two apart — collapsing them is
-the mistake this entry has now made three times.** `orca-test-repo` is public and `git clone`
-works (only the GitHub *API* is scoped to Helio repos), so the suite can be read directly
-rather than inferred from our job logs. What that measures is **when each failing case entered
-the repository** — which is enough to clear any Helio PR's diff, and **not** enough to say why
-any individual case fails. Version skew is established for some, refuted for others, and
-untraced for the rest; the breakdown below is the part to act on. Two measured facts:
+**What is established is *provenance*, not *cause*, and provenance does NOT clear a PR.**
+`orca-test-repo` is public and `git clone` works (only the GitHub *API* is scoped to Helio
+repos), so the suite can be read directly rather than inferred from our job logs. What that
+measures is **when each failing case entered the repository** — and that is all it measures.
+It does not say why any case fails, and critically it does **not** establish that a PR's diff
+is innocent: a case added after v2.4.2 can perfectly well expose a regression a Helio hunk
+introduced in long-standing code. Version skew is established for some of the 25, refuted for
+others, and untraced for the rest. Two measured facts:
 
 - **Every failing case postdates our pin, and they arrive from two commits.** All 25 failures
   live in `test_cases.py` (21) and `test_settings_import.py` (4). `8d475c2` *"CLI Test Suite"*
@@ -192,9 +193,35 @@ untraced for the rest; the breakdown below is the part to act on. Two measured f
 So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2 —
 *an inherited workflow pulling a floating upstream-`main` artifact into a release-pinned fork*.
 This dating is **revision-independent**: it asks when a case entered the repository, not which
-revision a run resolved, so the unrecorded-SHA gap below does not weaken it. **That is the
-whole of what provenance buys**, and it is genuinely useful: no open PR's diff can have caused
-any of these, because every case postdates the tree they are failing against.
+revision a run resolved, so the unrecorded-SHA gap below does not weaken it.
+
+**What provenance does not buy — and the measurement nobody has taken.** It is tempting to read
+"every case postdates our tree" as "no PR's diff caused these". It does not follow. Dating a
+case establishes neither that it fails on an unchanged baseline nor that Helio hunks cannot
+reach the code it exercises — and the transform crashes make that concrete, since `--scale`
+and `--rotate-*` are long-standing paths a Helio change to shared geometry or G-code code
+could plausibly disturb. Two further non-arguments: `grep -i` for `helio|thermal_index|warpage`
+across the **entire suite** at `main` returns nothing, which means the cases name no Helio
+identifier but says nothing about which code they *execute*; and #135 compiling no C++ clears
+**#135's** diff only, not any other PR's.
+
+**And the identical-failure-set argument cannot close this gap either.** Matching sets across
+#126 and #140 show a *common* cause — but a Helio hunk already merged on
+`orca-latest-parity-bambu` would be common to every PR too, and would produce exactly the same
+identical sets. The two readings are indistinguishable from PR builds alone.
+
+The measurement that separates them is a run of the suite against the **unmodified release
+branch**, and **it has never been taken.** `build_all.yml`'s scheduled trigger is gated
+`github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer'` (`:79`), so
+the daily cron skips on this fork — every scheduled run since has `conclusion: skipped`. The
+last `build_linux` that actually executed on the release branch was **28 Aug 2026**, eleven
+days *before* the CLI suite merged to `orca-test-repo` on 8 Sep. So **all 25 failures have only
+ever been observed in PR builds**, and no baseline exists to compare them against.
+
+Getting one needs no divergence and no permission: `workflow_dispatch` on
+`orca-latest-parity-bambu`. Until someone does, the honest position on a red `build_linux` is
+**"not attributable"**, not "not ours" — and a compiled-code PR should be excluded only by a
+baseline reproduction or a per-case trace against the Helio hunks it touches.
 
 ### Attribution: what the 25 actually report (29 Oct run)
 
@@ -223,7 +250,8 @@ The rest, for completeness:
 
 So: **skew established for 6, refuted for 10, open for 9.** Anyone citing this section to
 dismiss a `build_linux` red must say *which* case, and the 10 crashes are not available for
-that argument. This matters for the option choice too — "accept as advisory" is accepting a
+that argument — nor, absent the baseline run above, is any of it available as a blanket
+clearance for a PR that compiles code. This matters for the option choice too — "accept as advisory" is accepting a
 step that is currently reporting four segfaults.
 
 **Carve-out: the 4 `test_settings_import.py` failures are NOT explained by the above, and one
