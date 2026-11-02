@@ -218,8 +218,17 @@ last `build_linux` that actually executed on the release branch was **28 Aug 202
 days *before* the CLI suite merged to `orca-test-repo` on 8 Sep. So **all 25 failures have only
 ever been observed in PR builds**, and no baseline exists to compare them against.
 
-Getting one needs no divergence and no permission: `workflow_dispatch` on
-`orca-latest-parity-bambu`. Until someone does, the honest position on a red `build_linux` is
+Getting one needs no divergence and no permission: **`workflow_dispatch` on
+`orca-latest-parity-bambu`**. Verified against the job conditions rather than assumed — for
+`workflow_dispatch`, `github.event_name != 'schedule'` is true so the fork gate passes, and
+**both label-gate clauses are `pull_request`-scoped** (`github.event_name != 'pull_request'`
+short-circuits them), so `ready-to-build` is irrelevant on a dispatch. `build-deps-only`
+defaults to `false`, so it is a full build. `build_linux` therefore runs, regression step
+included. Note this is a general fact about this workflow and not only useful here: **a manual
+dispatch bypasses the `ready-to-build` gate entirely**, which is the escape hatch when the
+`paths:` filter has excluded a PR (how #109 was built).
+
+Until someone takes that baseline, the honest position on a red `build_linux` is
 **"not attributable"**, not "not ours" — and a compiled-code PR should be excluded only by a
 baseline reproduction or a per-case trace against the Helio hunks it touches.
 
