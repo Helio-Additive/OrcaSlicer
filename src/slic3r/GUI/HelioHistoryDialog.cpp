@@ -822,8 +822,15 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                     //     conversion can disagree about which file is meant (a narrow
                     //     boost::filesystem::path built from save_path converts through the active
                     //     Windows code page, while the open above used FromUTF8),
-                    //   - and it deletes nothing, so it cannot destroy a file another writer has
-                    //     put at this path since the close.
+                    //   - and it deletes nothing, so a file another writer has put at this path
+                    //     keeps its directory entry and any other links instead of being unlinked.
+                    //
+                    // That last point is a reduction, not a fix, and this comment should not claim
+                    // more than it does: truncation still loses the contents of whatever is at the
+                    // path. The write held a descriptor while this resolves the pathname afresh, so
+                    // the race is open for as long as the download took - not merely between the
+                    // Close() above and here. Closing it needs a temp file plus rename, which
+                    // redesigns this handler; see Helio-Additive/OrcaSlicer#148.
                     //
                     // The cost is a 0-byte file left where the user asked for one. That is not a
                     // hazard the way a partial file is: it cannot be printed by mistake, and the
