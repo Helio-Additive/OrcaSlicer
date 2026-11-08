@@ -818,14 +818,21 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                     // user's link - which this handler never wrote - and leave the incomplete G-code
                     // behind at the target. Truncate through the link instead and keep the link.
                     const boost::filesystem::path fs_path(save_path);
-                    boost::system::error_code     ec;
 
-                    const bool is_link = boost::filesystem::is_symlink(fs_path, ec);
-                    bool       cleaned = false;
+                    boost::system::error_code link_ec;
+                    const bool               is_link = boost::filesystem::is_symlink(fs_path, link_ec);
 
-                    if (is_link) {
-                        boost::filesystem::resize_file(fs_path, 0, ec);
-                        cleaned = !ec;
+                    bool cleaned = false;
+                    if (link_ec) {
+                        // is_symlink() reports failure by returning false, so an errored lookup is
+                        // indistinguishable from "not a link" at the call site. Removing the path on
+                        // one that really is a link is precisely the data-loss case above, so refuse
+                        // to guess: leave the file alone and say it is still there.
+                        cleaned = false;
+                    } else if (is_link) {
+                        boost::system::error_code resize_ec;
+                        boost::filesystem::resize_file(fs_path, 0, resize_ec);
+                        cleaned = !resize_ec;
                     } else {
                         cleaned = wxRemoveFile(wxString::FromUTF8(save_path));
                     }
@@ -845,7 +852,8 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
 
                     BOOST_LOG_TRIVIAL(error) << "Incomplete write saving GCode file to " << save_path
                                              << " (write ok: " << written << ", close ok: " << closed
-                                             << ", symlink: " << is_link << ", cleaned up: " << cleaned << ")";
+                                             << ", symlink: " << is_link << " (lookup error: " << link_ec.message()
+                                             << "), cleaned up: " << cleaned << ")";
                 }
             }
         } catch (const std::exception& e) {
