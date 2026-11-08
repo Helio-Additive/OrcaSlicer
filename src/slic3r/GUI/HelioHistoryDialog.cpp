@@ -828,9 +828,12 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                     // That last point is a reduction, not a fix, and this comment should not claim
                     // more than it does: truncation still loses the contents of whatever is at the
                     // path. The write held a descriptor while this resolves the pathname afresh, so
-                    // the race is open for as long as the download took - not merely between the
-                    // Close() above and here. Closing it needs a temp file plus rename, which
-                    // redesigns this handler; see Helio-Additive/OrcaSlicer#148.
+                    // the race spans the open above through to here: wider than the Close()-to-here
+                    // gap, because the Write() of the whole buffer sits inside it and can block on a
+                    // full or slow disk, but it does not reach back over the HTTP download, which
+                    // perform_sync() had already finished into memory before the open. Closing it
+                    // needs a temp file plus rename, which redesigns this handler; see
+                    // Helio-Additive/OrcaSlicer#148.
                     //
                     // The cost is a 0-byte file left where the user asked for one. That is not a
                     // hazard the way a partial file is: it cannot be printed by mistake, and the
