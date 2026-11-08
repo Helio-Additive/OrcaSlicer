@@ -5,6 +5,7 @@
 #include "libslic3r/Utils.hpp"
 #include "slic3r/Utils/Http.hpp"
 #include <boost/log/trivial.hpp>
+#include <boost/filesystem.hpp>
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "MainFrame.hpp"
@@ -810,23 +811,41 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                     // previews without complaint, then stops partway through the print with no
                     // heating or motion shutdown. Opening with wxFile::write already truncated
                     // whatever was at this path, so there is no prior content left to preserve and
-                    // removing the partial file loses nothing.
-                    const bool removed = wxRemoveFile(wxString::FromUTF8(save_path));
+                    // discarding the incomplete remains loses nothing.
+                    //
+                    // A symbolic link destination needs the other branch: wxFile::write followed the
+                    // link and truncated its *target*, so unlinking save_path would delete the
+                    // user's link - which this handler never wrote - and leave the incomplete G-code
+                    // behind at the target. Truncate through the link instead and keep the link.
+                    const boost::filesystem::path fs_path(save_path);
+                    boost::system::error_code     ec;
 
-                    const wxString detail = removed ?
-                        _L("The incomplete file was removed. Check the available disk space and try again.") :
-                        _L("The incomplete file could NOT be removed - do not print it.");
+                    const bool is_link = boost::filesystem::is_symlink(fs_path, ec);
+                    bool       cleaned = false;
+
+                    if (is_link) {
+                        boost::filesystem::resize_file(fs_path, 0, ec);
+                        cleaned = !ec;
+                    } else {
+                        cleaned = wxRemoveFile(wxString::FromUTF8(save_path));
+                    }
+
+                    const wxString cleanup =
+                        !cleaned ? _L("The incomplete file could NOT be cleaned up - do not print it.") :
+                        is_link  ? _L("The destination is a symbolic link, so its target was emptied and the link left in place.") :
+                                   _L("The incomplete file was removed.");
 
                     wxMessageBox(
-                        wxString::Format(_L("Failed to save the GCode file: only part of it could be written.\n\n%s\n\n%s"),
-                                         detail,
+                        wxString::Format(_L("Failed to save the GCode file: only part of it could be written.\n\n%s\n\n"
+                                            "Check the available disk space and try again.\n\n%s"),
+                                         cleanup,
                                          wxString(save_path)),
                         _L("Download Error"),
                         wxOK | wxICON_ERROR);
 
                     BOOST_LOG_TRIVIAL(error) << "Incomplete write saving GCode file to " << save_path
                                              << " (write ok: " << written << ", close ok: " << closed
-                                             << ", partial file removed: " << removed << ")";
+                                             << ", symlink: " << is_link << ", cleaned up: " << cleaned << ")";
                 }
             }
         } catch (const std::exception& e) {
