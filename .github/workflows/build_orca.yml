@@ -123,6 +123,15 @@ jobs:
             # pwd -P resolves /Applications/Xcode.app -> /Applications/Xcode_<ver>.app
             keep_app="$(basename "$(cd "$xcode_dev/../.." && pwd -P)")"
           fi
+          # The selection is not always an Xcode bundle: with only the Command Line
+          # Tools selected, xcode-select -p is /Library/Developer/CommandLineTools and
+          # the two levels up resolve to "Library". That matches no Xcode_*.app, so the
+          # exclusion would be vacuous and delete every Xcode — the original bug by
+          # another route. Only an Xcode_*.app name is a usable exclusion.
+          case "$keep_app" in
+            Xcode_*.app) ;;
+            *) keep_app="" ;;
+          esac
           if [ -n "$keep_app" ]; then
             echo "Preserving selected Xcode: $keep_app"
             sudo find /Applications -maxdepth 1 -type d -name "Xcode_*.app" ! -name "$keep_app" -exec rm -rf {} +
