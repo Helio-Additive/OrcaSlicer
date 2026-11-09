@@ -240,9 +240,22 @@ jobs:
 
       - name: Dry run — no release published
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        # The tag goes through the environment, not through `${{ }}` inside the
+        # script. Actions substitutes an expression into `run:` as *text* before
+        # bash sees it, and `git check-ref-format` (the validation in the check
+        # job) accepts `"`, `$`, `;` and backticks — verified — so a tag_override
+        # of `v1"` would break quoting and `v1$(...)` would execute, after every
+        # build had already finished. Same convention as `TAG_OVERRIDE` above.
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.tag }}
         run: |
-          echo "### Dry run: assets built and collected, no GitHub Release published" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Would have published tag \`${{ needs.check.outputs.tag }}\`." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          { echo '```'; ls -lh release/; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          {
+            echo "### Dry run: assets built and collected, no GitHub Release published"
+            echo ""
+            printf 'Would have published tag `%s`.\n' "$RELEASE_TAG"
+            echo ""
+            echo '```'
+            ls -lh release/
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
