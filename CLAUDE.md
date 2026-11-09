@@ -63,6 +63,49 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Creates GitHub Release with `Helio`-prefixed assets (DMG, AppImage, installer, portable zip)
 - Tag format: `helio-v{version}` (from `version.inc`)
 - Manual dispatch restricted to `orca-latest-parity-bambu` branch only
+- **A dispatch publishes a REAL release — use `dry_run` to exercise the build instead.**
+  `draft: false`, and `prerelease` is computed from `version.inc`, **not** from
+  `tag_override`, so a throwaway tag still produces a full "latest" release. It also
+  fires `release: [released]`, which `winget_updater.yml` listens for — disabled, but
+  only at the repo level, which is not tracked in git. So "just dispatch it to check"
+  was never a safe instruction, and before the `dry_run` input there was no way to
+  exercise the macOS legs at all without publishing something. `dry_run: true` runs
+  everything including asset collection and its missing-asset checks, skips only the
+  publish, and writes the would-be tag and the collected assets to the job summary.
+- **macOS runner label: `macos-15`, and a retired label fails silently.** GitHub retired
+  `macos-14` on 2026-11-02 and this file still requested it in both macOS jobs, so the
+  next release could not have built its DMG or universal assets (#147). The reason it sat
+  unnoticed for six days is the failure mode, which is worth recognising on sight: a
+  retired label is not an error. The job is dropped **before a runner is assigned** —
+  `runner_name: ""`, zero steps, `completed_at` ~1s after `started_at` — and reports
+  `cancelled`, not `failure`. Everything downstream of it then reports `skipped` via
+  `needs:`, which on this fork looks exactly like the deliberate `ready-to-build` label
+  gate, and a `cancelled` run reads as "someone stopped it". Scheduled `Build all` runs on
+  the release branch all conclude `skipped` anyway, so nothing scheduled would have
+  surfaced it either. **`macos-15` rather than `macos-latest`**: `macos-latest` now tracks
+  macOS 26, while `build_orca.yml` passes `-t 10.15` and the deps cache key
+  (`build_check_cache.yml`) is keyed on **arch only, not on the runner image** — so a cache
+  built on one image is silently consumed on another. Pinning to `macos-15` keeps the SDK
+  close to what that target and that cache were built against. Both `macos-14` and
+  `macos-15` are arm64, so the `x86_64` leg is cross-compiled exactly as it was before.
+  **The label change alone was not enough**, and the second half is the less obvious
+  one: `build_orca.yml`'s `Free disk space` step preserved `Xcode_15.4.app` *by name*,
+  which is correct on `macos-14` and deletes the entire toolchain on `macos-15` (that
+  image has 16.0–16.4 and 26.0–26.3, none of them 15.x, with `Xcode_16.4.app` selected
+  and `/Applications/Xcode.app` a symlink to it). It now preserves whatever
+  `xcode-select -p` resolves to, and skips the deletion rather than guessing if that
+  cannot be resolved. An upstream-owned file, edited because **our** runner change is
+  what broke it — the "caused by a Helio hunk" half of Rule 15, not an upstream bug
+  adopted. Documented in `HELIO_INTEGRATION.md` → CI/CD Workflows (upstream files
+  carrying Helio hunks).
+- **`build_all.yml` carries the same dead label and is deliberately not patched here.**
+  Its `os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}` is upstream's own
+  line, so it is upstream's to move and arrives with the next sync (Rule 15 — "it is
+  breaking our CI" is precisely the reasoning that produced #116). The consequence is real
+  and accepted: this fork has **no macOS PR coverage** until that sync lands, tracked in
+  #147. `vars.SELF_HOSTED` is **not** set on this repo — settled by evidence, not
+  assumption: the dropped jobs on run 42443681491 carry `labels: ["macos-14"]`, which is
+  the expression's fallback branch, so the self-hosted route was never in play.
 
 ### Build Pipeline (reusable workflows)
 - `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`

@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         default: ''
+      dry_run:
+        description: 'Build and collect assets, but publish NO GitHub Release'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: helio-release-${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.number }}
@@ -99,7 +104,16 @@ jobs:
         arch: [arm64, x86_64]
     uses: ./.github/workflows/build_check_cache.yml
     with:
-      os: macos-14
+      # macos-15, not macos-14: GitHub retired the macos-14 image on 2026-11-02
+      # (#147). A retired label does not fail — the job is dropped before a runner
+      # is assigned and reports `cancelled` after ~1s with zero steps, which is why
+      # this went unnoticed for six days. Both macos-14 and macos-15 are arm64, so
+      # the x86_64 leg is cross-compiled here exactly as it was before.
+      # macos-15 rather than macos-latest: macos-latest now tracks macOS 26, and
+      # the `-t 10.15` deployment target build_orca.yml passes, plus the deps cache
+      # built against the macOS 14/15 SDK are closest to what macos-15 provides.
+      # Revisit when the deployment target is raised.
+      os: macos-15
       arch: ${{ matrix.arch }}
     secrets: inherit
 
@@ -107,7 +121,8 @@ jobs:
     needs: [check, build_macos_arch]
     uses: ./.github/workflows/build_orca.yml
     with:
-      os: macos-14
+      # Keep this in step with build_macos_arch above — see the note there.
+      os: macos-15
       arch: universal
       macos-combine-only: true
     secrets: inherit
@@ -195,7 +210,17 @@ jobs:
           echo "Release assets:"
           ls -lh release/
 
+      # A dispatch of this workflow publishes a REAL release: `draft: false`, and
+      # `prerelease` below is computed from version.inc, not from tag_override, so
+      # a throwaway tag still yields a full "latest" release. It also fires
+      # `release: [released]`, which is what winget_updater.yml listens for (see
+      # helio-workflows.yml — it is disabled, but only at the repo level, which is
+      # not tracked in git). So there was no way to exercise the macOS build legs
+      # without publishing something. dry_run is that way: everything above still
+      # runs, including asset collection and its missing-asset checks, and only
+      # the publish is skipped.
       - name: Create GitHub Release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check.outputs.tag }}
@@ -212,3 +237,25 @@ jobs:
               contains(needs.check.outputs.version, 'Beta')
             }}
           generate_release_notes: false
+
+      - name: Dry run — no release published
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        # The tag goes through the environment, not through `${{ }}` inside the
+        # script. Actions substitutes an expression into `run:` as *text* before
+        # bash sees it, and `git check-ref-format` (the validation in the check
+        # job) accepts `"`, `$`, `;` and backticks — verified — so a tag_override
+        # of `v1"` would break quoting and `v1$(...)` would execute, after every
+        # build had already finished. Same convention as `TAG_OVERRIDE` above.
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Dry run: assets built and collected, no GitHub Release published"
+            echo ""
+            printf 'Would have published tag `%s`.\n' "$RELEASE_TAG"
+            echo ""
+            echo '```'
+            ls -lh release/
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -107,7 +107,38 @@ jobs:
         if: runner.os == 'macOS' && !inputs.macos-combine-only && !vars.SELF_HOSTED
         run: |
           df -hI /dev/disk3s1s1
-          sudo find /Applications -maxdepth 1 -type d -name "Xcode_*.app" ! -name "Xcode_15.4.app" -exec rm -rf {} +
+          # Helio: keep whichever Xcode is actually selected, instead of the
+          # hardcoded Xcode_15.4.app this line used to preserve. That name is only
+          # correct on macos-14; helio-release.yml now requests macos-15 (#147,
+          # macos-14 was retired on 2026-11-02) and that image ships no Xcode 15.x
+          # at all — it has 16.0-16.4 and 26.0-26.3, with Xcode_16.4.app selected.
+          # The old filter therefore matched *every* Xcode_*.app including the
+          # selected one, deleting the toolchain and leaving /Applications/Xcode.app
+          # (a symlink to it) dangling, so the build failed at the first clang call.
+          # Resolving the selection keeps this correct on any image, including
+          # macos-14 and whatever upstream migrates build_all.yml to.
+          xcode_dev="$(xcode-select -p 2>/dev/null || true)"
+          keep_app=""
+          if [ -n "$xcode_dev" ] && [ -d "$xcode_dev" ]; then
+            # pwd -P resolves /Applications/Xcode.app -> /Applications/Xcode_<ver>.app
+            keep_app="$(basename "$(cd "$xcode_dev/../.." && pwd -P)")"
+          fi
+          # The selection is not always an Xcode bundle: with only the Command Line
+          # Tools selected, xcode-select -p is /Library/Developer/CommandLineTools and
+          # the two levels up resolve to "Library". That matches no Xcode_*.app, so the
+          # exclusion would be vacuous and delete every Xcode — the original bug by
+          # another route. Only an Xcode_*.app name is a usable exclusion.
+          case "$keep_app" in
+            Xcode_*.app) ;;
+            *) keep_app="" ;;
+          esac
+          if [ -n "$keep_app" ]; then
+            echo "Preserving selected Xcode: $keep_app"
+            sudo find /Applications -maxdepth 1 -type d -name "Xcode_*.app" ! -name "$keep_app" -exec rm -rf {} +
+          else
+            # Fail safe: free less disk rather than delete the active toolchain.
+            echo "::warning::Could not resolve the selected Xcode; skipping Xcode cleanup." >&2
+          fi
           sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/*
           df -hI /dev/disk3s1s1
 
