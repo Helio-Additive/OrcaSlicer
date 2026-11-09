@@ -99,7 +99,16 @@ jobs:
         arch: [arm64, x86_64]
     uses: ./.github/workflows/build_check_cache.yml
     with:
-      os: macos-14
+      # macos-15, not macos-14: GitHub retired the macos-14 image on 2026-11-02
+      # (#147). A retired label does not fail — the job is dropped before a runner
+      # is assigned and reports `cancelled` after ~1s with zero steps, which is why
+      # this went unnoticed for six days. Both macos-14 and macos-15 are arm64, so
+      # the x86_64 leg is cross-compiled here exactly as it was before.
+      # macos-15 rather than macos-latest: macos-latest now tracks macOS 26, and
+      # the `-t 10.15` deployment target build_orca.yml passes, plus the deps cache
+      # built against the macOS 14/15 SDK are closest to what macos-15 provides.
+      # Revisit when the deployment target is raised.
+      os: macos-15
       arch: ${{ matrix.arch }}
     secrets: inherit
 
@@ -107,7 +116,8 @@ jobs:
     needs: [check, build_macos_arch]
     uses: ./.github/workflows/build_orca.yml
     with:
-      os: macos-14
+      # Keep this in step with build_macos_arch above — see the note there.
+      os: macos-15
       arch: universal
       macos-combine-only: true
     secrets: inherit
