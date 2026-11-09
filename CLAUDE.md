@@ -79,6 +79,16 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   built on one image is silently consumed on another. Pinning to `macos-15` keeps the SDK
   close to what that target and that cache were built against. Both `macos-14` and
   `macos-15` are arm64, so the `x86_64` leg is cross-compiled exactly as it was before.
+  **The label change alone was not enough**, and the second half is the less obvious
+  one: `build_orca.yml`'s `Free disk space` step preserved `Xcode_15.4.app` *by name*,
+  which is correct on `macos-14` and deletes the entire toolchain on `macos-15` (that
+  image has 16.0–16.4 and 26.0–26.3, none of them 15.x, with `Xcode_16.4.app` selected
+  and `/Applications/Xcode.app` a symlink to it). It now preserves whatever
+  `xcode-select -p` resolves to, and skips the deletion rather than guessing if that
+  cannot be resolved. An upstream-owned file, edited because **our** runner change is
+  what broke it — the "caused by a Helio hunk" half of Rule 15, not an upstream bug
+  adopted. Documented in `HELIO_INTEGRATION.md` → CI/CD Workflows (upstream files
+  carrying Helio hunks).
 - **`build_all.yml` carries the same dead label and is deliberately not patched here.**
   Its `os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}` is upstream's own
   line, so it is upstream's to move and arrives with the next sync (Rule 15 — "it is
