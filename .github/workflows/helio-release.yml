@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         default: ''
+      dry_run:
+        description: 'Build and collect assets, but publish NO GitHub Release'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: helio-release-${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.number }}
@@ -205,7 +210,17 @@ jobs:
           echo "Release assets:"
           ls -lh release/
 
+      # A dispatch of this workflow publishes a REAL release: `draft: false`, and
+      # `prerelease` below is computed from version.inc, not from tag_override, so
+      # a throwaway tag still yields a full "latest" release. It also fires
+      # `release: [released]`, which is what winget_updater.yml listens for (see
+      # helio-workflows.yml — it is disabled, but only at the repo level, which is
+      # not tracked in git). So there was no way to exercise the macOS build legs
+      # without publishing something. dry_run is that way: everything above still
+      # runs, including asset collection and its missing-asset checks, and only
+      # the publish is skipped.
       - name: Create GitHub Release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check.outputs.tag }}
@@ -222,3 +237,12 @@ jobs:
               contains(needs.check.outputs.version, 'Beta')
             }}
           generate_release_notes: false
+
+      - name: Dry run — no release published
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          echo "### Dry run: assets built and collected, no GitHub Release published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Would have published tag \`${{ needs.check.outputs.tag }}\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; ls -lh release/; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

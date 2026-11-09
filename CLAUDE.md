@@ -63,6 +63,15 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Creates GitHub Release with `Helio`-prefixed assets (DMG, AppImage, installer, portable zip)
 - Tag format: `helio-v{version}` (from `version.inc`)
 - Manual dispatch restricted to `orca-latest-parity-bambu` branch only
+- **A dispatch publishes a REAL release — use `dry_run` to exercise the build instead.**
+  `draft: false`, and `prerelease` is computed from `version.inc`, **not** from
+  `tag_override`, so a throwaway tag still produces a full "latest" release. It also
+  fires `release: [released]`, which `winget_updater.yml` listens for — disabled, but
+  only at the repo level, which is not tracked in git. So "just dispatch it to check"
+  was never a safe instruction, and before the `dry_run` input there was no way to
+  exercise the macOS legs at all without publishing something. `dry_run: true` runs
+  everything including asset collection and its missing-asset checks, skips only the
+  publish, and writes the would-be tag and the collected assets to the job summary.
 - **macOS runner label: `macos-15`, and a retired label fails silently.** GitHub retired
   `macos-14` on 2026-11-02 and this file still requested it in both macOS jobs, so the
   next release could not have built its DMG or universal assets (#147). The reason it sat
