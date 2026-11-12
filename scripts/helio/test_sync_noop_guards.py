@@ -1113,6 +1113,22 @@ def reinsert_boundary():
         # so "01" and "1" test equal and a real insertion reads as a duplicate.
         ("numeric strings `01` beside `1`",        "a\n1\nb\n",       "a\n1\n01\nb\n",           "a\n1\n01\nb\n", "absent"),
         ("numeric strings, genuine duplication",   "a\n1\nb\n",       "a\n1\n1\nb\n",            "a\n1\nb\n",    "unknown"),
+
+        # ---- run arithmetic -----------------------------------------------
+        # A block whose own lines repeat, so the run walk steps through
+        # ambiguous territory: [a,a] duplicated inside `a a a a`.
+        ("internally-repeating block, theirs run 1", "p\na\na\nq\n",   "p\na\na\na\na\nq\n",    "p\na\na\nq\n",   "unknown"),
+        ("internally-repeating block, theirs run 2", "p\na\na\nq\n",   "p\na\na\na\na\nq\n",    "p\na\na\na\na\nq\n", "absent"),
+        # Two appended blocks of DIFFERENT lengths in one diff; each is
+        # measured with its own length, and both must pass.
+        ("two hunks of different lengths, both dups", "A\nb\nX\nY\nc\n", "A\nA\nb\nX\nY\nX\nY\nc\n", "A\nb\nX\nY\nc\n", "unknown"),
+        ("two hunks of different lengths, one real",  "A\nb\nX\nY\nc\n", "A\nA\nb\nX\nY\nX\nY\nc\n", "A\nA\nb\nX\nY\nc\n", "absent"),
+        # Stepping by `len` must not miss or invent a shifted run.
+        ("shifted run of a 2-line block",          "a\nb\nz\n",       "a\nb\na\nb\nz\n",        "a\nb\nz\n",     "unknown"),
+        ("shifted run that upstream already has",  "a\nb\nz\n",       "a\nb\na\nb\nz\n",        "a\nb\na\nb\nz\n", "absent"),
+        # The longest run in theirs is taken from ANYWHERE, which can only make
+        # the test refuse more often. Pinning that it errs toward `absent`.
+        ("theirs holds a longer run elsewhere",    "p\nX\nq\n",       "p\nX\nX\nq\n",            "X\nX\nX\np\nX\nq\n", "absent"),
     ]
     fn = re.search(r"^_reinsert_only\(\) \{.*?^\}", open(CONTENT_SH).read(),
                    re.M | re.S)
