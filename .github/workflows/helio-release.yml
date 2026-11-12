@@ -89,6 +89,16 @@ jobs:
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: windows-latest
+      # Required since upstream v2.5.0: build_deps.yml and build_orca.yml now pass
+      # `--arch ${{ inputs.arch }}` to build_win.bat unconditionally. With no arch
+      # the flag expands to a bare `--arch`, and build_win.bat declares target_arch
+      # as a plain `string` option, so handle_args rejects the next token
+      # (`--deps-dir`) as "looks like another option" and exits 1 before compiling.
+      # x64 is not a new choice: before v2.5.0 no --arch was passed at all and
+      # build_win.bat defaulted to the host, which is x64 on windows-latest. It also
+      # repairs the cache key -- build_check_cache.yml builds `windows-<arch>-<compiler>`,
+      # which was resolving to `windows--msvc`.
+      arch: x64
     secrets: inherit
 
   build_macos_arch:

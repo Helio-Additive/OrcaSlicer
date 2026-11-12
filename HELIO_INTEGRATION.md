@@ -20,6 +20,11 @@
 
 ## Stats
 - **70 files changed**: 36 new, 34 modified, 0 deleted
+- These counts were last recomputed before the v2.5.0 sync and are approximate.
+  v2.5.0 removed one modified file from the set (`GLCanvas3D.hpp`, now
+  byte-identical to upstream) and added one that had never been listed
+  (`.github/workflows/build_orca.yml`). Always confirm with
+  `git diff <baseline> HEAD -- <file>` rather than trusting this list (Rule 15).
 - **+13,363 lines added, -195 lines removed** — measured at the v2.4.0-beta sync.
   The support-data catalog work (#95) adds ~1,000 further lines in the four new
   `HelioSupportData` / `HelioRetryPolicy` files, plus the region-change hook in
@@ -129,6 +134,23 @@ generation so work started under the old credential can never land.
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
+
+#### `.github/workflows/build_orca.yml` (+2/-2) — **added to this map at the v2.5.0 sync**
+Upstream only signs and notarises macOS builds for its own repository:
+`github.repository == 'OrcaSlicer/OrcaSlicer' && (main || release/*)`. That is false
+on this fork, so without a change here Helio could never ship a signed macOS build.
+Helio widens the condition on **two** steps:
+
+- `Sign app and notary` — adds
+  `|| (vars.ENABLE_SIGNING == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.merged == true))`
+- `Create DMG without notary` — must be the **exact negation** of the above, or a
+  signed Helio build also gets an unsigned DMG written over the top of it.
+
+Keep those two conditions in lockstep. `CLAUDE.md` has always referred to
+"macOS signing/notarization gated by `ENABLE_SIGNING`", but the file was absent from
+this map, so the v2.5.0 resolution had to rediscover it from `git diff`. That is the
+drift Rule 15 warns about: **the map is a faster first look, not the qualifier — git
+settles ownership.**
 
 ### CRITICAL RISK
 
@@ -297,20 +319,36 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   when the region actually changed — otherwise catalogs from the previous endpoint
   survive a wizard-driven region switch
 
-#### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
-- Null-guard fix: added `get_notification_manager()` null check in existing condition
-- `_update_imgui_select_plate_toolbar()` takes a `force` flag. `IMToolbar::is_render_finish`
-  is set at the end of every plate-toolbar render and is only cleared by
-  `set_enabled(false)` (i.e. when the preview panel is left), so any refresh
-  requested while the preview is already showing was silently dropped. The Helio
-  completion path never leaves the preview panel — `select_tab_silent()` uses
-  `ChangeSelection` and `set_current_panel(preview, true)` re-enables the toolbar
-  without resetting the flag — so the plate items stayed stuck with whatever
-  textures they had when `on_idle` first built them (none, if that happened before
-  the thumbnails were rendered) and the plate preview rendered black forever.
-  The explicit refresh entry points (`update_plate_thumbnails()`, `on_set_focus()`
-  on the preview canvas) now pass `force = true`; the idle path still uses the
-  cache, so textures are not regenerated every frame.
+#### `src/slic3r/GUI/GLCanvas3D.cpp` (+2/-2)
+- Null-guard fix: added `get_notification_manager()` null check in existing condition.
+  This is now the **only** Helio content in this file.
+- **The `force`-flag plate-toolbar workaround was removed at the v2.5.0 sync, because
+  upstream wrote a real fix for the same bug.** Kept here as the worked example of
+  Rule 15 in the other direction — retiring a Helio patch once upstream supersedes it.
+
+  The bug: `IMToolbar::is_render_finish` is set at the end of every plate-toolbar
+  render and was only cleared by `set_enabled(false)` (i.e. when the preview panel is
+  left), so a refresh requested while the preview was already showing got dropped.
+  The Helio completion path never leaves the preview panel (`select_tab_silent()`
+  uses `ChangeSelection`), so plate items stayed stuck with whatever textures they
+  had when `on_idle` first built them — none, if that happened before the thumbnails
+  were rendered — and the plate preview rendered black forever. Helio's fix added a
+  `force` parameter and passed `force = true` from the explicit refresh entry points.
+
+  Upstream v2.5.0 replaced that with a dirty-flag mechanism:
+  `Plater::{mark,clear,is}_plate_toolbar_image_dirty()`, marked from `PartPlate.cpp`
+  and `Jobs/FillBedJob.cpp` and consumed inside
+  `_update_imgui_select_plate_toolbar()`, which now re-renders the thumbnails itself
+  when the flag is set. It also deleted both of Helio's call sites —
+  `GLCanvas3D::update_plate_thumbnails()` (whose only caller was already commented
+  out) and the plate-toolbar block in `on_set_focus()`. Keeping the `force` flag on
+  top would have been a divergence front-running a fix upstream already shipped, so
+  the sync took upstream's and dropped the parameter.
+
+  Net effect: **`GLCanvas3D.hpp` is now byte-identical to upstream and is no longer a
+  touchpoint at all** (it is kept in the list below only as a pointer to this note).
+  If the black-plate-preview symptom ever returns, the thing to check is whether the
+  Helio completion path marks the toolbar image dirty — not to reinstate `force`.
 
 #### `src/slic3r/GUI/GLToolbar.cpp` (+1)
 - Added `wxDEFINE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
@@ -318,8 +356,11 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 #### `src/slic3r/GUI/GLToolbar.hpp` (+1)
 - Added `wxDECLARE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
 
-#### `src/slic3r/GUI/Selection.cpp` (+4/-1)
-- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks
+#### `src/slic3r/GUI/Selection.cpp` (+3/-1)
+- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks.
+- v2.5.0: upstream added its own `is_closing()` early return for the same
+  use-after-free. The sync took upstream's shape and kept only the extra pointer
+  guard, which still covers `plater()` / `canvas3D()` being null outside shutdown.
 
 #### `src/slic3r/GUI/Widgets/SwitchButton.cpp` (+469)
 - **Appended** entire `CustomToggleButton` class + `ExpandButtonHolder` class (no upstream entanglement)
@@ -348,6 +389,11 @@ Files where Helio code is inserted within upstream functions: `Plater.cpp`, `Mai
 - The large handler block goes after `on_slicing_completed()` — find that function and insert after it
 - If upstream renamed `get_slice_result()`, update Helio calls to match
 - If upstream added parameters to functions Helio calls, add defaults
+- `Plater::~Plater` is Helio's and must stay **below** the complete `Plater::priv`
+  definition — it stops the Helio background thread and resets `p` before
+  `~wxWindow()` runs `DestroyChildren()`. v2.5.0 added an upstream
+  `Plater::~Plater() = default;` high up in the file, and the merge kept both with
+  no conflict. See Rule 16; `= default` there reintroduces a use-after-free
 
 **MainFrame.cpp rules:**
 - `ExpandButtonHolder` creation goes in `create_side_tools()`
@@ -911,6 +957,76 @@ upstream-identical code on the strength of a stale line in a document, which is
 the divergence this rule exists to stop. The map says *where to look and what the
 touchpoint was for*; `git diff` against the synced baseline says whether it is
 still there.
+
+### Rule 16: A clean merge can still duplicate a definition
+
+Every other rule here is about resolving a conflict. This one is about the
+opposite: a merge git reports as **clean** that is nevertheless broken, because
+git compares *text at locations*, not *symbols*.
+
+**The shape.** Neither side has a definition at the merge base. Upstream adds
+one. Helio independently adds one, in a different place in the same file. Both
+additions are insertions into unrelated regions, so there is no textual overlap,
+no conflict, and no marker — and the merged file now defines the same symbol
+twice.
+
+**The worked example (v2.5.0, `Plater.cpp`).** `Plater::~Plater` was undefined at
+`v2.4.2`. Upstream v2.5.0 added `Plater::~Plater() = default;` immediately after
+the `Plater::priv` class body. Helio had added a real destructor ~5,700 lines
+further down. The merge took both, and the build failed with
+`redefinition of '~Plater'`.
+
+Helio's had to win, and that part is not a judgement call — it is load-bearing:
+
+```cpp
+Plater::~Plater()
+{
+    if (p) {                                  // stop the Helio background thread
+        p->helio_background_process.stop();
+        if (p->helio_background_process.m_thread.joinable())
+            p->helio_background_process.m_thread.join();
+    }
+    p.reset();   // BEFORE base ~wxWindow() runs DestroyChildren()
+}
+```
+
+`= default` destroys members in declaration order, which reintroduces exactly the
+use-after-free the comment guards against: `DestroyChildren()` →
+`GLCanvas3D::~GLCanvas3D()` → `Selection::clear()` → `canvas3D()` dereferencing an
+already-destroyed `priv`. Note it must also stay *below* the complete `Plater::priv`
+definition, so "move it up to where upstream put theirs" is not an option. Leave a
+comment at upstream's location saying why nothing lives there, or the next sync
+restores it.
+
+**Why none of the usual post-merge checks catch it.** There is no conflict marker
+to grep for. No Helio identifier went missing, so the `helio|Helio|thermal_index|
+EVT_HELIO` sweep passes. The diff reads as two unrelated additions, which is why
+three Codex passes over it said nothing. **Only a compile finds this** — which is
+the concrete reason the build-verification step is not optional on a sync.
+
+**How to look for it without a compiler.** `scripts/helio/find_merge_doubled_defs.py`:
+
+```bash
+# --ours is the Helio tip as it was BEFORE the merge, not the merge result
+scripts/helio/find_merge_doubled_defs.py --upstream v2.5.0 --ours <pre-merge-tip>
+```
+
+For each file the sync touched it lists every symbol defined more than once in the
+merged tree, then drops any already defined more than once in *either* parent —
+those are ordinary overload sets, and they are the overwhelming majority (on
+v2.5.0, 466 raw duplicates reduced to 1). Exit status is 1 when it finds
+something, so it can gate a sync.
+
+**Validate it before trusting a zero.** Re-run with `--merged` set to a commit you
+know carries the bug and check it reports it; a scan that finds nothing is
+worthless until you have watched it find something. For v2.5.0, `--merged 71930bc`
+returns exactly `Plater::~Plater` and nothing else.
+
+The same shape applies to any one-definition-per-program entity, not just
+destructors: a non-inline free function, a static data member's definition, an
+explicit template specialisation. It cannot happen for a *declaration* in a
+header, which merely re-declares, but it can for a default argument or an
+in-class initialiser, which also may appear only once.
 
 ## Upstream Sync: squash merges & the merge-base graft
 
