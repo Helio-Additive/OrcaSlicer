@@ -1054,7 +1054,7 @@ Three rules keep that true, and all of them are load-bearing:
    | equals the candidate's | held |
    | equals the base's | **missing** |
    | neither, merge is clean and leaves ours alone | held |
-   | neither, merge is clean but only re-inserts a block beside its copy | **unknown** |
+   | neither, merge is clean but only re-inserts a block we already hold | **unknown** |
    | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
 
@@ -1078,8 +1078,14 @@ Three rules keep that true, and all of them are load-bearing:
    graft, and the actual fix for #150) while `holds` still refuses (so no release
    is ever skipped on this evidence). Answering `held` here, as the issue
    originally proposed, would have opened the one direction that drops upstream
-   work silently and permanently. **Adjacency is the test, and it must not be
-   weakened to "every added line appears somewhere in ours".** That weaker form
+   work silently and permanently. **Two tests decide it, and the review of
+   #154 is why there are two.** Both guard the same direction: `base-ok`
+   tolerates `unknown`, so a false `unknown` in a graft base drops upstream work
+   with no conflict to notice.
+
+   **1. Adjacency.** The appended block must equal the block immediately before
+   or after it in the merged file. This must not be weakened to "every added
+   line appears somewhere in ours". That weaker form
    was the first version of this fix and Codex rejected it on #154: upstream
    adding `    validate();` to `second()` when `first()` already contains that
    line produces a clean merge whose added line *is* present elsewhere in our
@@ -1090,10 +1096,32 @@ Three rules keep that true, and all of them are load-bearing:
    separating "the merge duplicated what we hold" from "we never got it", so the
    comparison is against the neighbouring lines, never the whole file.
 
+   **2. Occurrence count against upstream's blob.** Adjacency alone is still not
+   enough, and CodeRabbit produced the case on #154: upstream *deliberately*
+   adds a second adjacent `counter++;` where we hold one. The merge appends it
+   right beside ours, so the positional test is satisfied — yet the new copy is
+   real content we never received. Counting separates the two cleanly, because
+   it asks about upstream's blob rather than only about the merge:
+
+   | ours | theirs | merged | verdict |
+   | --- | --- | --- | --- |
+   | 1 copy | 1 copy | 2 | the merge duplicated it → `unknown` |
+   | 1 copy | 2 copies | 2 | upstream added one → **`missing`** |
+
+   So every appended block must occur in **our** blob at least as many times as
+   it occurs in **upstream's**. That subsumes the coincidental-match case too
+   (one `validate();` in ours, two in theirs), but adjacency is kept as an
+   independent check rather than replaced by it.
+
    Narrow in two further ways: the diff must consist only of **append** commands
    (a removal or a change means the merge genuinely rewrites our content), and
-   **every** appended block must pass adjacency, so one real insertion sitting
-   beside a duplicate still answers `missing`.
+   **every** appended block must pass **both** tests, so one real insertion
+   sitting beside a duplicate still answers `missing`.
+
+   One `awk` detail that is a correctness matter, not style: the line
+   comparisons force string context with `x ""`. A bare `!=` on two numeric
+   strings compares them as **numbers**, so `01` and `1` test equal and a
+   genuinely new line reads as a duplicate of its neighbour (Codex, #154).
 
    Mode is part of the comparison, not just the blob, and it is decided **before**
    the three-way merge rather than inside it. A path whose only change is

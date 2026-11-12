@@ -105,13 +105,12 @@ _blob_to() {
 }
 
 # _reinsert_only <dir>: true when the only thing a CLEAN three-way merge would
-# do to our blob is re-insert a block IMMEDIATELY BESIDE an identical block we
-# already hold.
+# do to our blob is re-insert a block we ALREADY HOLD, beside the copy we hold.
 #
 # This is the false-`missing` case that cost #150 a 472-file conflict set (#152).
 # `git merge-file` places upstream's hunk by its position in the BASE, not by
 # where that content ended up in ours. When Helio has edited next to upstream's
-# insertion anchor, the merge misaligns and inserts the block a SECOND time,
+# insertion anchor the merge misaligns and inserts the block a SECOND time,
 # directly against the copy we already have. The result differs from ours, and
 # reading that difference as "upstream's change is absent" is what broke #150.
 #
@@ -119,29 +118,56 @@ _blob_to() {
 # where merging v2.2.0 -> v2.4.2 onto our blob re-inserts `static_tips`,
 # `static_tips_size` and `static_tips_icon` directly above the identical three.
 #
-# ADJACENCY IS THE WHOLE TEST, and it must not be weakened to "every added line
-# appears somewhere in ours". That weaker form was the first version of this
-# function and it is wrong in the one direction that matters (Codex, #154):
-# upstream adding `    validate();` to `second()` when `first()` already has
-# that line produces a clean merge whose added line IS present elsewhere in
-# ours, while `second()` genuinely never received it. `base-ok` tolerates
-# `unknown`, so such a path can be grafted as a base, and a target that retains
-# the insertion then merges cleanly without re-adding it — upstream work
-# dropped silently, with no conflict to notice. Position is the only thing that
-# separates "the merge duplicated what we hold" from "we never got it", so the
-# comparison is against the neighbouring lines, never the whole file.
+# TWO tests, and the review history of #154 is why there are two. Both guard the
+# same direction: `base-ok` tolerates `unknown`, so a false `unknown` in a graft
+# BASE drops upstream work with no conflict to notice.
 #
-# Deliberately narrow in two further ways: the diff must consist ONLY of append
-# commands (a removal or a change means the merge genuinely rewrites our
-# content), and EVERY appended block must pass adjacency, so one real insertion
-# alongside a duplicate still answers `absent`.
+#   1. ADJACENCY. The appended block must equal the block immediately before or
+#      after it in the merged file. The first version of this function asked
+#      only "does every added line appear somewhere in ours?", and Codex showed
+#      that is wrong: upstream adding `    validate();` to `second()` when
+#      `first()` already carries that line passes whole-file containment while
+#      `second()` genuinely never received it. Position, not presence.
+#
+#   2. OCCURRENCE COUNT against THEIRS. Adjacency alone is still not enough,
+#      and CodeRabbit produced the case: upstream deliberately adds a SECOND
+#      adjacent `counter++;` where we hold one. The merge appends it right
+#      beside ours, so adjacency is satisfied, yet the new copy is real content
+#      we never received. Counting separates the two cleanly, because it asks
+#      about upstream's blob rather than only about the merge:
+#
+#        ours 1 copy, theirs 1 copy, merged 2  -> the merge duplicated  -> unknown
+#        ours 1 copy, theirs 2 copies, merged 2 -> upstream added one   -> absent
+#
+#      So every appended block must occur in OUR blob at least as many times as
+#      it occurs in UPSTREAM's. That subsumes Codex's case too (one `validate();`
+#      in ours, two in theirs), but adjacency is kept as an independent check
+#      rather than replaced by it.
+#
+# Narrow in two further ways: the diff must consist only of append commands (a
+# removal or a change means the merge genuinely rewrites our content), and EVERY
+# appended block must pass both tests, so one real insertion sitting beside a
+# duplicate still answers `absent`.
 _reinsert_only() {
   local dir="$1"
   # Normal diff format: `NaM,P` appends merged lines M..P. `c`/`d` commands mean
   # the merge changes or drops our content, which duplication cannot explain.
   diff "$dir/ours" "$dir/merged" > "$dir/d" 2>/dev/null || true
   [ -s "$dir/d" ] || return 1
-  awk -v dfile="$dir/d" '
+  awk -v dfile="$dir/d" -v ofile="$dir/ours" -v tfile="$dir/theirs" '
+    function runs(A, na, start, len,   c, p, k, ok) {
+      # Contiguous occurrences of merged[start..start+len-1] inside A[1..na].
+      c = 0
+      for (p = 1; p <= na - len + 1; p++) {
+        ok = 1
+        # `x ""` forces STRING comparison. Bare `!=` on two numeric strings
+        # compares them as numbers, so "01" and "1" test equal (Codex, #154)
+        # and a genuinely new line reads as a duplicate of its neighbour.
+        for (k = 0; k < len; k++) if ((A[p + k] "") != (M[start + k] "")) { ok = 0; break }
+        if (ok) c++
+      }
+      return c
+    }
     BEGIN {
       n = 0; bad = 0
       while ((getline ln < dfile) > 0) {
@@ -154,6 +180,8 @@ _reinsert_only() {
         }
       }
       close(dfile)
+      no = 0; while ((getline ln < ofile) > 0) O[++no] = ln; close(ofile)
+      nt = 0; while ((getline ln < tfile) > 0) T[++nt] = ln; close(tfile)
     }
     { M[FNR] = $0 }
     END {
@@ -162,10 +190,12 @@ _reinsert_only() {
         len = hi[i] - lo[i] + 1
         after = 1; before = 1
         for (k = 0; k < len; k++)
-          if (hi[i] + 1 + k > FNR || M[lo[i] + k] != M[hi[i] + 1 + k]) { after = 0; break }
+          if (hi[i] + 1 + k > FNR || (M[lo[i] + k] "") != (M[hi[i] + 1 + k] "")) { after = 0; break }
         for (k = 0; k < len; k++)
-          if (lo[i] - len + k < 1 || M[lo[i] + k] != M[lo[i] - len + k]) { before = 0; break }
+          if (lo[i] - len + k < 1 || (M[lo[i] + k] "") != (M[lo[i] - len + k] "")) { before = 0; break }
         if (!after && !before) { exit 1 }
+        # Upstream must not hold MORE copies of this block than we do.
+        if (runs(O, no, lo[i], len) < runs(T, nt, lo[i], len)) { exit 1 }
       }
       exit 0
     }

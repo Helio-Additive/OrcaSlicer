@@ -687,7 +687,7 @@ print("\nupstream_content.sh — the three-way boundary\n")
 
 def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
                  mode_and_blob=False, mode_divergent=False, superset=False,
-                 distant=False, coincidental=False):
+                 distant=False, coincidental=False, adjacent_repeat=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
@@ -718,6 +718,11 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         # The block upstream will insert INTO, blank-line separated so the
         # merge has a real anchor to misplace.
         wr("widget.hpp", "k1=v1\nk2=v2\nk3=v3\n\nk10=v10\nk11=v11\n")
+    if adjacent_repeat:
+        # One `counter++;` at the base. Upstream will add a SECOND, adjacent.
+        wr("loop.c", "".join("line %d\n" % i for i in range(1, 10))
+                     + "counter++;\n"
+                     + "".join("line %d\n" % i for i in range(10, 20)))
     if coincidental:
         # `validate();` already present in first() and absent from second().
         wr("calls.c", "void first() {\n    prepare();\n    validate();\n"
@@ -751,6 +756,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         wr("widget.hpp",
            "k1=v1\nk2=v2\nk3=v3\n\nu1=up1\nu2=up2\nu3=up3\n\nk10=v10\nk11=v11\n")
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif adjacent_repeat:
+        # The second `counter++;` is REAL upstream content, not a duplicate.
+        wr("loop.c", "".join("line %d\n" % i for i in range(1, 10))
+                     + "counter++;\ncounter++;\n"
+                     + "".join("line %d\n" % i for i in range(10, 20)))
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
     elif coincidental:
         # Upstream adds that SAME line to second(). Nothing else changes.
         wr("calls.c", "void first() {\n    prepare();\n    validate();\n"
@@ -783,6 +794,10 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
     if distant:
         # Helio edits k18; upstream's inserted `up=1` is genuinely NOT here.
         edit(fork, "cfg.ini", "k18=v18", "k18=helio")
+    if adjacent_repeat:
+        # Helio edits a distant line, so all three blobs differ and the merge is
+        # clean -- it appends upstream's second `counter++;` right beside ours.
+        edit(fork, "loop.c", "line 18\n", "helio local change\n")
     if coincidental:
         # Helio edits only the distant comment, so all three blobs differ and
         # the merge is clean -- but second() never received `validate();`.
@@ -962,6 +977,24 @@ b.append(boundary("a coincidental line match disqualifies the graft base",
 b.append(boundary("a coincidental line match means NOT already-synced",
                   kw=dict(coincidental=True), cmd=["holds", "v2.4.1"], want_rc=1))
 
+# Round 11, CodeRabbit on #154. The hardest shape, and the reason adjacency
+# alone is not enough: upstream DELIBERATELY adds a second adjacent copy of a
+# line we hold once. The merge appends it right beside ours, so the positional
+# test is satisfied -- yet the new copy is real content we never received, and
+# grafting this candidate loses it with no conflict raised. Only counting the
+# copies in UPSTREAM's blob separates this from the #152 duplication:
+# ours 1 : theirs 2 is a real addition, ours 1 : theirs 1 is a merge artefact.
+b.append(boundary("upstream's 2nd adjacent copy is still missing",
+                  kw=dict(adjacent_repeat=True), cmd=["missing", "v2.4.1"],
+                  want_out="loop.c"))
+b.append(boundary("upstream's 2nd adjacent copy is NOT downgraded to unknown",
+                  kw=dict(adjacent_repeat=True), cmd=["unknown", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("upstream's 2nd adjacent copy disqualifies the graft base",
+                  kw=dict(adjacent_repeat=True), cmd=["base-ok", "v2.4.1"], want_rc=1))
+b.append(boundary("upstream's 2nd adjacent copy means NOT already-synced",
+                  kw=dict(adjacent_repeat=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
 # Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
 # undecidable paths, so the graft lands on a base where those paths are still in
 # motion and the merge has to present them. The permissive form must still stop
@@ -992,51 +1025,65 @@ def reinsert_boundary():
     Sourced out of the shipped script rather than reimplemented, same as the
     rest of this harness.
     """
+    # (label, ours, merged, theirs, want). `theirs` feeds the occurrence-count
+    # test; where it is None the harness writes ours, which is the neutral
+    # value for that test (upstream holds no more copies than we do), so the
+    # case exercises adjacency alone.
     cases = [
-        # label,                                   ours,              merged,                     want
         # The #152 shape: the merge re-inserts a block right beside its copy.
-        ("block re-inserted beside its copy",      "a\nX\nY\nb\n",    "a\nX\nY\nX\nY\nb\n",     "unknown"),
-        ("single line dup, adjacent",              "a\nX\nb\n",       "a\nX\nX\nb\n",            "unknown"),
-        ("two separate adjacent dups",             "X\na\nY\n",       "X\nX\na\nY\nY\n",         "unknown"),
-        # Codex's P1 on #154, and the reason adjacency is the test rather than
-        # "the line appears somewhere in ours". Upstream inserts a line that
-        # already occurs ELSEWHERE; we genuinely never received this one.
-        ("dup line far away (coincidental match)", "X\na\nb\n",       "X\na\nb\nX\n",            "absent"),
-        ("genuinely new line",                     "a\nb\n",          "a\nb\nzz\n",              "absent"),
-        # One real insertion beside a duplicate must still answer `absent`.
-        ("one adjacent dup AND one new line",      "a\nX\nb\n",       "a\nX\nX\nb\nzz\n",        "absent"),
-        ("a removal is a rewrite, not a dup",      "a\nb\n",          "a\n",                     "absent"),
-        ("a changed line (a `c` command)",         "a\nb\n",          "a\nB\n",                  "absent"),
-        ("empty ours, merge adds a line",          "",                "new\n",                   "absent"),
-        ("identical files (no diff at all)",       "a\nb\n",          "a\nb\n",                   "absent"),
-        ("blank line dup adjacent to a blank",     "a\n\nb\n",        "a\n\n\nb\n",               "unknown"),
-        # A leading `-` must not reach any tool as an option.
-        ("line starting with `-`, adjacent dup",   "a\n-x\nb\n",      "a\n-x\n-x\nb\n",           "unknown"),
-        # Compared literally, never as a pattern.
-        # Blocks at the file boundaries: only ONE side is available to compare.
-        ("dup block at the very start of the file", "X\nY\na\n",       "X\nY\nX\nY\na\n",       "unknown"),
-        ("dup block at the very end of the file",   "a\nX\nY\n",       "a\nX\nY\nX\nY\n",       "unknown"),
-        ("new line inserted at line 1",            "a\nb\n",          "zz\na\nb\n",            "absent"),
-        # Several append hunks in one diff: EVERY one must pass, not just one.
-        ("3 append hunks, all adjacent dups",       "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\n", "unknown"),
-        ("3 append hunks, one of them not a dup",   "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\nzz\n", "absent"),
-        # A `d` command, which the append-only parse must refuse outright.
-        ("diff contains a delete command",          "a\nb\nc\n",       "a\nc\n",               "absent"),
-        # Content that LOOKS like a normal-diff command line. It arrives
-        # prefixed with "> ", so it must be read as text, not as a range.
-        ("added line that mimics a diff header",    "5a6\nq\n",        "5a6\n5a6\nq\n",         "unknown"),
-        # A multi-line `NaM,P` range, which is the real TextInput.hpp shape.
-        ("multi-line NaM,P range, adjacent",        "p\nX\nY\nZ\nq\n", "p\nX\nY\nZ\nX\nY\nZ\nq\n", "unknown"),
+        ("block re-inserted beside its copy",      "a\nX\nY\nb\n",    "a\nX\nY\nX\nY\nb\n",     None, "unknown"),
+        ("single line dup, adjacent",              "a\nX\nb\n",       "a\nX\nX\nb\n",            None, "unknown"),
+        ("two separate adjacent dups",             "X\na\nY\n",       "X\nX\na\nY\nY\n",         None, "unknown"),
+        # Codex P1: upstream inserts a line that already occurs ELSEWHERE.
+        ("dup line far away (coincidental match)", "X\na\nb\n",       "X\na\nb\nX\n",            None, "absent"),
+        ("genuinely new line",                     "a\nb\n",          "a\nb\nzz\n",              None, "absent"),
+        ("one adjacent dup AND one new line",      "a\nX\nb\n",       "a\nX\nX\nb\nzz\n",        None, "absent"),
+        ("a removal is a rewrite, not a dup",      "a\nb\n",          "a\n",                     None, "absent"),
+        ("a changed line (a `c` command)",         "a\nb\n",          "a\nB\n",                  None, "absent"),
+        ("empty ours, merge adds a line",          "",                "new\n",                   None, "absent"),
+        ("identical files (no diff at all)",       "a\nb\n",          "a\nb\n",                   None, "absent"),
+        ("blank line dup adjacent to a blank",     "a\n\nb\n",        "a\n\n\nb\n",               None, "unknown"),
+        ("line starting with `-`, adjacent dup",   "a\n-x\nb\n",      "a\n-x\n-x\nb\n",           None, "unknown"),
+        ("regex-special line, adjacent dup",       "a\n.*[b]\nc\n",   "a\n.*[b]\n.*[b]\nc\n",     None, "unknown"),
+        # Boundaries: only ONE comparison window exists.
+        ("dup block at the very start of the file", "X\nY\na\n",       "X\nY\nX\nY\na\n",       None, "unknown"),
+        ("dup block at the very end of the file",   "a\nX\nY\n",       "a\nX\nY\nX\nY\n",       None, "unknown"),
+        ("new line inserted at line 1",            "a\nb\n",          "zz\na\nb\n",            None, "absent"),
+        # Several append hunks: EVERY one must pass, not just one.
+        ("3 append hunks, all adjacent dups",       "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\n", None, "unknown"),
+        ("3 append hunks, one of them not a dup",   "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\nzz\n", None, "absent"),
+        ("diff contains a delete command",          "a\nb\nc\n",       "a\nc\n",               None, "absent"),
+        # Content that LOOKS like a normal-diff command line; it arrives
+        # prefixed with "> " and must be read as text, not as a range.
+        ("added line that mimics a diff header",    "5a6\nq\n",        "5a6\n5a6\nq\n",         None, "unknown"),
+        ("multi-line NaM,P range, adjacent",        "p\nX\nY\nZ\nq\n", "p\nX\nY\nZ\nX\nY\nZ\nq\n", None, "unknown"),
+
+        # ---- the occurrence-count test, which needs a real `theirs` --------
+        # CodeRabbit on #154: upstream deliberately adds a SECOND adjacent
+        # copy. Adjacency is satisfied, so only the count against theirs can
+        # tell this from the #152 duplication. ours 1 : theirs 2 -> absent.
+        ("upstream adds a 2nd adjacent copy",      "a\nX\nb\n",       "a\nX\nX\nb\n",            "a\nX\nX\nb\n", "absent"),
+        # The #152 control for it: upstream holds ONE copy, we hold one, and
+        # the merge invented the second. ours 1 : theirs 1 -> unknown.
+        ("merge invented the 2nd copy",            "a\nX\nb\n",       "a\nX\nX\nb\n",            "a\nX\nb\n",    "unknown"),
+        # Codex P2: AWK's bare `!=` compares two numeric strings NUMERICALLY,
+        # so "01" and "1" test equal and a real insertion reads as a duplicate.
+        ("numeric strings `01` beside `1`",        "a\n1\nb\n",       "a\n1\n01\nb\n",           "a\n1\n01\nb\n", "absent"),
+        ("numeric strings, genuine duplication",   "a\n1\nb\n",       "a\n1\n1\nb\n",            "a\n1\nb\n",    "unknown"),
     ]
     fn = re.search(r"^_reinsert_only\(\) \{.*?^\}", open(CONTENT_SH).read(),
                    re.M | re.S)
     assert fn, "harness: _reinsert_only not found in upstream_content.sh"
     ok_all = True
-    for label, ours, merged, want in cases:
+    for label, ours, merged, theirs, want in cases:
         d = tempfile.mkdtemp()
         try:
             open(os.path.join(d, "ours"), "w").write(ours)
             open(os.path.join(d, "merged"), "w").write(merged)
+            # `_change_state` always writes theirs; the harness must too, or the
+            # count test reads an empty upstream blob and never fires.
+            open(os.path.join(d, "theirs"), "w").write(
+                ours if theirs is None else theirs)
             script = ("set -uo pipefail\n" + fn.group(0)
                       + '\nif _reinsert_only "$1"; then echo unknown;'
                         ' else echo absent; fi\n')
