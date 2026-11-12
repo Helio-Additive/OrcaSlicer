@@ -105,34 +105,71 @@ _blob_to() {
 }
 
 # _reinsert_only <dir>: true when the only thing a CLEAN three-way merge would
-# do to our blob is re-add lines our blob already contains.
+# do to our blob is re-insert a block IMMEDIATELY BESIDE an identical block we
+# already hold.
 #
 # This is the false-`missing` case that cost #150 a 472-file conflict set (#152).
-# `git merge-file` is positional: it knows where in the BASE upstream's hunk
-# belongs, not where that content ended up in ours. When Helio has appended to
-# the same file, our copy of upstream's lines can sit at a different offset than
-# the merge wants to insert them, so the merge cleanly inserts them a SECOND
-# time. The result then differs from ours and the old code read that difference
-# as "upstream's change is absent" — while our blob held every line of it.
+# `git merge-file` places upstream's hunk by its position in the BASE, not by
+# where that content ended up in ours. When Helio has edited next to upstream's
+# insertion anchor, the merge misaligns and inserts the block a SECOND time,
+# directly against the copy we already have. The result differs from ours, and
+# reading that difference as "upstream's change is absent" is what broke #150.
 #
-# Measured on the path that triggered #150, src/slic3r/GUI/Widgets/TextInput.hpp,
-# where the merge of v2.2.0 -> v2.4.2 onto our blob duplicates three lines
-# (`static_tips`, `static_tips_size`, `static_tips_icon`) that are already there.
+# Measured on the path that triggered it, src/slic3r/GUI/Widgets/TextInput.hpp,
+# where merging v2.2.0 -> v2.4.2 onto our blob re-inserts `static_tips`,
+# `static_tips_size` and `static_tips_icon` directly above the identical three.
 #
-# Deliberately narrow. Any REMOVAL means the merge genuinely rewrites our
-# content rather than duplicating it, and one added line our blob does not
-# already carry verbatim is enough to keep the `absent` answer.
+# ADJACENCY IS THE WHOLE TEST, and it must not be weakened to "every added line
+# appears somewhere in ours". That weaker form was the first version of this
+# function and it is wrong in the one direction that matters (Codex, #154):
+# upstream adding `    validate();` to `second()` when `first()` already has
+# that line produces a clean merge whose added line IS present elsewhere in
+# ours, while `second()` genuinely never received it. `base-ok` tolerates
+# `unknown`, so such a path can be grafted as a base, and a target that retains
+# the insertion then merges cleanly without re-adding it — upstream work
+# dropped silently, with no conflict to notice. Position is the only thing that
+# separates "the merge duplicated what we hold" from "we never got it", so the
+# comparison is against the neighbouring lines, never the whole file.
+#
+# Deliberately narrow in two further ways: the diff must consist ONLY of append
+# commands (a removal or a change means the merge genuinely rewrites our
+# content), and EVERY appended block must pass adjacency, so one real insertion
+# alongside a duplicate still answers `absent`.
 _reinsert_only() {
   local dir="$1"
+  # Normal diff format: `NaM,P` appends merged lines M..P. `c`/`d` commands mean
+  # the merge changes or drops our content, which duplication cannot explain.
   diff "$dir/ours" "$dir/merged" > "$dir/d" 2>/dev/null || true
-  # A removal is a real rewrite, not a duplication.
-  if grep -q '^<' "$dir/d"; then return 1; fi
-  sed -n 's/^> //p' "$dir/d" > "$dir/added"
-  # Differing with nothing added is not a shape this can explain; stay `absent`.
-  [ -s "$dir/added" ] || return 1
-  # Any added line absent from ours verbatim means content we never received.
-  if grep -qvxF -f "$dir/ours" -- "$dir/added"; then return 1; fi
-  return 0
+  [ -s "$dir/d" ] || return 1
+  awk -v dfile="$dir/d" '
+    BEGIN {
+      n = 0; bad = 0
+      while ((getline ln < dfile) > 0) {
+        if (ln ~ /^[0-9]/) {
+          if (ln !~ /^[0-9]+(,[0-9]+)?a[0-9]+(,[0-9]+)?$/) { bad = 1; break }
+          sub(/^[0-9]+(,[0-9]+)?a/, "", ln)
+          k = index(ln, ",")
+          if (k) { lo[++n] = substr(ln, 1, k - 1) + 0; hi[n] = substr(ln, k + 1) + 0 }
+          else   { lo[++n] = ln + 0; hi[n] = ln + 0 }
+        }
+      }
+      close(dfile)
+    }
+    { M[FNR] = $0 }
+    END {
+      if (bad || n == 0) { exit 1 }
+      for (i = 1; i <= n; i++) {
+        len = hi[i] - lo[i] + 1
+        after = 1; before = 1
+        for (k = 0; k < len; k++)
+          if (hi[i] + 1 + k > FNR || M[lo[i] + k] != M[hi[i] + 1 + k]) { after = 0; break }
+        for (k = 0; k < len; k++)
+          if (lo[i] - len + k < 1 || M[lo[i] + k] != M[lo[i] - len + k]) { before = 0; break }
+        if (!after && !before) { exit 1 }
+      }
+      exit 0
+    }
+  ' "$dir/merged"
 }
 
 # _change_state <orig> <ours> <theirs>: for a path all three sides changed, is

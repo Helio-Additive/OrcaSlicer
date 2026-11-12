@@ -687,7 +687,7 @@ print("\nupstream_content.sh — the three-way boundary\n")
 
 def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
                  mode_and_blob=False, mode_divergent=False, superset=False,
-                 distant=False):
+                 distant=False, coincidental=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
@@ -718,6 +718,11 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         # The block upstream will insert INTO, blank-line separated so the
         # merge has a real anchor to misplace.
         wr("widget.hpp", "k1=v1\nk2=v2\nk3=v3\n\nk10=v10\nk11=v11\n")
+    if coincidental:
+        # `validate();` already present in first() and absent from second().
+        wr("calls.c", "void first() {\n    prepare();\n    validate();\n"
+                      "    run();\n}\n\n// a comment\nvoid second() {\n"
+                      "    prepare();\n    run();\n}\n")
     sh("git add -A && git commit -q -m 2.4.0 && git tag v2.4.0", up)
 
     if prereleases:
@@ -746,6 +751,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         wr("widget.hpp",
            "k1=v1\nk2=v2\nk3=v3\n\nu1=up1\nu2=up2\nu3=up3\n\nk10=v10\nk11=v11\n")
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif coincidental:
+        # Upstream adds that SAME line to second(). Nothing else changes.
+        wr("calls.c", "void first() {\n    prepare();\n    validate();\n"
+                      "    run();\n}\n\n// a comment\nvoid second() {\n"
+                      "    prepare();\n    validate();\n    run();\n}\n")
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
     elif distant:
         # Upstream INSERTS a line (no removal, so only the added-line check can
         # keep this `absent`); Helio edits a far-away line of the same file.
@@ -772,6 +783,10 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
     if distant:
         # Helio edits k18; upstream's inserted `up=1` is genuinely NOT here.
         edit(fork, "cfg.ini", "k18=v18", "k18=helio")
+    if coincidental:
+        # Helio edits only the distant comment, so all three blobs differ and
+        # the merge is clean -- but second() never received `validate();`.
+        edit(fork, "calls.c", "// a comment", "// a comment, edited by Helio")
     if mode_and_blob:
         # Helio edits the file's CONTENT while leaving the mode at 100644.
         tool = os.path.join(fork, "tool.sh")
@@ -929,6 +944,24 @@ b.append(boundary("a genuine insertion means NOT already-synced",
 b.append(boundary("a genuine insertion also disqualifies the graft base",
                   kw=dict(distant=True), cmd=["base-ok", "v2.4.1"], want_rc=1))
 
+# Round 10, Codex P1 on #154. The guard above tests a line upstream never sent
+# at all. This tests the harder one: upstream inserts a line that ALREADY
+# occurs elsewhere in the same file (`validate();`, present in first(), added
+# to second()). A whole-file containment test calls that already-held and lets
+# `base-ok` graft the candidate, after which a target retaining the insertion
+# merges cleanly without re-adding it -- upstream work dropped silently, no
+# conflict raised. Only the insertion's POSITION separates the two cases.
+b.append(boundary("a coincidental line match elsewhere is still missing",
+                  kw=dict(coincidental=True), cmd=["missing", "v2.4.1"],
+                  want_out="calls.c"))
+b.append(boundary("a coincidental line match is NOT downgraded to unknown",
+                  kw=dict(coincidental=True), cmd=["unknown", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("a coincidental line match disqualifies the graft base",
+                  kw=dict(coincidental=True), cmd=["base-ok", "v2.4.1"], want_rc=1))
+b.append(boundary("a coincidental line match means NOT already-synced",
+                  kw=dict(coincidental=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
 # Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
 # undecidable paths, so the graft lands on a base where those paths are still in
 # motion and the merge has to present them. The permissive form must still stop
@@ -942,6 +975,75 @@ b.append(boundary("`first-held` (permissive) still stops at the undecidable cand
                   want_rc=0, want_not_v240=True))
 
 r += b
+
+
+def reinsert_boundary():
+    """Drive `_reinsert_only` directly over its decision boundary.
+
+    The repo-level cases above prove the duplication shape is reported
+    `unknown` and a genuine insertion stays `missing`, but they exercise one
+    input each. This is the function that decides it, and the safety of the
+    whole #152 change rests on it never answering `unknown` for content we
+    never received -- `base-ok` tolerates `unknown`, so a false one in a graft
+    BASE drops upstream work without a conflict to notice. Codex found exactly
+    that hole in the first version of this change (#154), which is why the test
+    is positional and these cases pin the position, not just the line set.
+
+    Sourced out of the shipped script rather than reimplemented, same as the
+    rest of this harness.
+    """
+    cases = [
+        # label,                                   ours,              merged,                     want
+        # The #152 shape: the merge re-inserts a block right beside its copy.
+        ("block re-inserted beside its copy",      "a\nX\nY\nb\n",    "a\nX\nY\nX\nY\nb\n",     "unknown"),
+        ("single line dup, adjacent",              "a\nX\nb\n",       "a\nX\nX\nb\n",            "unknown"),
+        ("two separate adjacent dups",             "X\na\nY\n",       "X\nX\na\nY\nY\n",         "unknown"),
+        # Codex's P1 on #154, and the reason adjacency is the test rather than
+        # "the line appears somewhere in ours". Upstream inserts a line that
+        # already occurs ELSEWHERE; we genuinely never received this one.
+        ("dup line far away (coincidental match)", "X\na\nb\n",       "X\na\nb\nX\n",            "absent"),
+        ("genuinely new line",                     "a\nb\n",          "a\nb\nzz\n",              "absent"),
+        # One real insertion beside a duplicate must still answer `absent`.
+        ("one adjacent dup AND one new line",      "a\nX\nb\n",       "a\nX\nX\nb\nzz\n",        "absent"),
+        ("a removal is a rewrite, not a dup",      "a\nb\n",          "a\n",                     "absent"),
+        ("a changed line (a `c` command)",         "a\nb\n",          "a\nB\n",                  "absent"),
+        ("empty ours, merge adds a line",          "",                "new\n",                   "absent"),
+        ("identical files (no diff at all)",       "a\nb\n",          "a\nb\n",                   "absent"),
+        ("blank line dup adjacent to a blank",     "a\n\nb\n",        "a\n\n\nb\n",               "unknown"),
+        # A leading `-` must not reach any tool as an option.
+        ("line starting with `-`, adjacent dup",   "a\n-x\nb\n",      "a\n-x\n-x\nb\n",           "unknown"),
+        # Compared literally, never as a pattern.
+        ("regex-special line, adjacent dup",       "a\n.*[b]\nc\n",   "a\n.*[b]\n.*[b]\nc\n",     "unknown"),
+    ]
+    fn = re.search(r"^_reinsert_only\(\) \{.*?^\}", open(CONTENT_SH).read(),
+                   re.M | re.S)
+    assert fn, "harness: _reinsert_only not found in upstream_content.sh"
+    ok_all = True
+    for label, ours, merged, want in cases:
+        d = tempfile.mkdtemp()
+        try:
+            open(os.path.join(d, "ours"), "w").write(ours)
+            open(os.path.join(d, "merged"), "w").write(merged)
+            script = ("set -uo pipefail\n" + fn.group(0)
+                      + '\nif _reinsert_only "$1"; then echo unknown;'
+                        ' else echo absent; fi\n')
+            got = subprocess.run(["bash", "-c", script, "bash", d],
+                                 capture_output=True, text=True).stdout.strip()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        full = "_reinsert_only: " + label
+        if got == want:
+            print("  PASS  " + full)
+        else:
+            ok_all = False
+            print("  FAIL  " + full)
+            print("        got %r, wanted %r" % (got, want))
+            FAILURES.append(full)
+    return ok_all
+
+
+print("\nupstream_content.sh — the _reinsert_only decision boundary (#152)\n")
+r.append(reinsert_boundary())
 
 
 def classify_cache():

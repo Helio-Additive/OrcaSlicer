@@ -1054,7 +1054,7 @@ Three rules keep that true, and all of them are load-bearing:
    | equals the candidate's | held |
    | equals the base's | **missing** |
    | neither, merge is clean and leaves ours alone | held |
-   | neither, merge is clean but only re-adds lines we already hold | **unknown** |
+   | neither, merge is clean but only re-inserts a block beside its copy | **unknown** |
    | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
 
@@ -1078,9 +1078,22 @@ Three rules keep that true, and all of them are load-bearing:
    graft, and the actual fix for #150) while `holds` still refuses (so no release
    is ever skipped on this evidence). Answering `held` here, as the issue
    originally proposed, would have opened the one direction that drops upstream
-   work silently and permanently. The test is deliberately narrow: any **removal**
-   means the merge genuinely rewrites our content, and a single added line our
-   blob does not already carry verbatim keeps the `missing` answer.
+   work silently and permanently. **Adjacency is the test, and it must not be
+   weakened to "every added line appears somewhere in ours".** That weaker form
+   was the first version of this fix and Codex rejected it on #154: upstream
+   adding `    validate();` to `second()` when `first()` already contains that
+   line produces a clean merge whose added line *is* present elsewhere in our
+   blob, while `second()` genuinely never received it. Since `base-ok` tolerates
+   `unknown`, such a path can be grafted as a base — and a sync target that
+   still carries the insertion then merges cleanly without re-adding it,
+   dropping upstream work with no conflict to notice. Position is the only thing
+   separating "the merge duplicated what we hold" from "we never got it", so the
+   comparison is against the neighbouring lines, never the whole file.
+
+   Narrow in two further ways: the diff must consist only of **append** commands
+   (a removal or a change means the merge genuinely rewrites our content), and
+   **every** appended block must pass adjacency, so one real insertion sitting
+   beside a duplicate still answers `missing`.
 
    Mode is part of the comparison, not just the blob, and it is decided **before**
    the three-way merge rather than inside it. A path whose only change is
