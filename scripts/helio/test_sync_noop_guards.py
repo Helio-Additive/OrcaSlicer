@@ -686,11 +686,24 @@ print("\nupstream_content.sh — the three-way boundary\n")
 
 
 def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
-                 mode_and_blob=False, mode_divergent=False):
+                 mode_and_blob=False, mode_divergent=False, superset=False,
+                 distant=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
     sh("git init -q -b main && git config user.email a@b && git config user.name A", up)
+
+    # Read BEFORE opening for write. `open(p, "w").write(open(p).read()...)`
+    # truncates the file while evaluating its own argument, so the nested read
+    # returns "" and the fixture degenerates to an EMPTY file. That is not a
+    # harmless slip: an empty `ours` conflicts against any base/theirs pair, so
+    # the `overlap` cases below went on asserting `unknown` and passing while
+    # testing nothing like an overlapping edit.
+    def edit(repo, path, old_text, new_text):
+        full = os.path.join(repo, path)
+        text = open(full).read()
+        assert old_text in text, "fixture: %r not in %s" % (old_text, path)
+        open(full, "w").write(text.replace(old_text, new_text))
 
     def wr(path, content, mode=None):
         full = os.path.join(up, path)
@@ -701,6 +714,10 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
 
     wr("tool.sh", "#!/bin/sh\necho hi\n", 0o644)
     wr("cfg.ini", "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\n")
+    if superset:
+        # The block upstream will insert INTO, blank-line separated so the
+        # merge has a real anchor to misplace.
+        wr("widget.hpp", "k1=v1\nk2=v2\nk3=v3\n\nk10=v10\nk11=v11\n")
     sh("git add -A && git commit -q -m 2.4.0 && git tag v2.4.0", up)
 
     if prereleases:
@@ -724,6 +741,17 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         wr("cfg.ini", "\n".join("k%d=v%d" % (i, i) for i in range(1, 21)).replace(
             "k5=v5", "k5=upstream") + "\n")
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif superset:
+        # Upstream inserts a block just after the blank line.
+        wr("widget.hpp",
+           "k1=v1\nk2=v2\nk3=v3\n\nu1=up1\nu2=up2\nu3=up3\n\nk10=v10\nk11=v11\n")
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif distant:
+        # Upstream INSERTS a line (no removal, so only the added-line check can
+        # keep this `absent`); Helio edits a far-away line of the same file.
+        wr("cfg.ini", ("\n".join("k%d=v%d" % (i, i) for i in range(1, 21)) + "\n")
+           .replace("k10=v10\n", "k10=v10\nup=1\n"))
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
     else:
         wr("new.c", "// new\n")
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
@@ -733,8 +761,17 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
     sh("git config user.email a@b && git config user.name A", fork)
     sh("git checkout -q -f v2.4.0 && git checkout -q --orphan release", fork)
     if overlap:
-        cfg = os.path.join(fork, "cfg.ini")
-        open(cfg, "w").write(open(cfg).read().replace("k5=v5", "k5=helio"))
+        edit(fork, "cfg.ini", "k5=v5", "k5=helio")
+    if superset:
+        # Our tree holds EVERY line upstream added -- plus a Helio line sitting
+        # immediately before upstream's insertion anchor, which is what makes
+        # `git merge-file` misalign and duplicate rather than recognise it.
+        open(os.path.join(fork, "widget.hpp"), "w").write(
+            "k1=v1\nk2=v2\nk3=v3\nhelio=local\n\n"
+            "u1=up1\nu2=up2\nu3=up3\n\nk10=v10\nk11=v11\n")
+    if distant:
+        # Helio edits k18; upstream's inserted `up=1` is genuinely NOT here.
+        edit(fork, "cfg.ini", "k18=v18", "k18=helio")
     if mode_and_blob:
         # Helio edits the file's CONTENT while leaving the mode at 100644.
         tool = os.path.join(fork, "tool.sh")
@@ -853,6 +890,44 @@ b.append(boundary("divergent modes mean NOT already-synced (`holds` refuses)",
                   kw=dict(mode_divergent=True), cmd=["holds", "v2.4.1"], want_rc=1))
 b.append(boundary("divergent modes still allow a graft base (`base-ok` tolerates)",
                   kw=dict(mode_divergent=True), cmd=["base-ok", "v2.4.1"], want_rc=0))
+
+# Round 9, #152. Upstream inserts a block, and Helio has a line of its own
+# immediately before upstream's insertion anchor. Our tree holds EVERY line of
+# upstream's change, but `git merge-file` places the hunk by its position in the
+# BASE, misaligns, and cleanly inserts the block a SECOND time. The merge result
+# then differs from ours, which the old code read as `absent` -- the DEFINITIVE
+# answer, which `base-ok` refuses outright. That is what rejected v2.4.2 as a
+# graft base and took #150 from 22 real conflicts to 472 reported ones.
+b.append(boundary("superset file (merge duplicates) is NOT reported missing",
+                  kw=dict(superset=True), cmd=["missing", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("superset file is reported `unknown` instead",
+                  kw=dict(superset=True), cmd=["unknown", "v2.4.1"],
+                  want_out="widget.hpp"))
+# The asymmetry is the whole point of answering `unknown` rather than `held`:
+# permissive must now accept the candidate (this is the #150 fix), while strict
+# must still refuse, because duplication shows presence is POSSIBLE, not that it
+# happened. A release must never be skipped on this evidence.
+b.append(boundary("`base-ok` ALLOWS the superset candidate -> the graft is kept",
+                  kw=dict(superset=True), cmd=["base-ok", "v2.4.1"], want_rc=0))
+b.append(boundary("`holds` still REFUSES on a superset -> no release is skipped",
+                  kw=dict(superset=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
+# The guard on the above being too broad. Upstream INSERTS a line and Helio
+# edits the same file far away, so the merge is clean, adds lines, and removes
+# nothing -- the one shape where only the "is every added line already ours?"
+# test stands between a real absence and a false `unknown`. It must stay
+# `missing`, or the fix for #152 would start dropping upstream work silently.
+b.append(boundary("a genuine insertion we never received is still missing",
+                  kw=dict(distant=True), cmd=["missing", "v2.4.1"],
+                  want_out="cfg.ini"))
+b.append(boundary("a genuine insertion is NOT downgraded to unknown",
+                  kw=dict(distant=True), cmd=["unknown", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("a genuine insertion means NOT already-synced",
+                  kw=dict(distant=True), cmd=["holds", "v2.4.1"], want_rc=1))
+b.append(boundary("a genuine insertion also disqualifies the graft base",
+                  kw=dict(distant=True), cmd=["base-ok", "v2.4.1"], want_rc=1))
 
 # Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
 # undecidable paths, so the graft lands on a base where those paths are still in

@@ -104,6 +104,37 @@ _blob_to() {
   if [ "$1" = "$EMPTY_BLOB" ]; then : > "$2"; else git cat-file blob "$1" > "$2" 2>/dev/null || : > "$2"; fi
 }
 
+# _reinsert_only <dir>: true when the only thing a CLEAN three-way merge would
+# do to our blob is re-add lines our blob already contains.
+#
+# This is the false-`missing` case that cost #150 a 472-file conflict set (#152).
+# `git merge-file` is positional: it knows where in the BASE upstream's hunk
+# belongs, not where that content ended up in ours. When Helio has appended to
+# the same file, our copy of upstream's lines can sit at a different offset than
+# the merge wants to insert them, so the merge cleanly inserts them a SECOND
+# time. The result then differs from ours and the old code read that difference
+# as "upstream's change is absent" — while our blob held every line of it.
+#
+# Measured on the path that triggered #150, src/slic3r/GUI/Widgets/TextInput.hpp,
+# where the merge of v2.2.0 -> v2.4.2 onto our blob duplicates three lines
+# (`static_tips`, `static_tips_size`, `static_tips_icon`) that are already there.
+#
+# Deliberately narrow. Any REMOVAL means the merge genuinely rewrites our
+# content rather than duplicating it, and one added line our blob does not
+# already carry verbatim is enough to keep the `absent` answer.
+_reinsert_only() {
+  local dir="$1"
+  diff "$dir/ours" "$dir/merged" > "$dir/d" 2>/dev/null || true
+  # A removal is a real rewrite, not a duplication.
+  if grep -q '^<' "$dir/d"; then return 1; fi
+  sed -n 's/^> //p' "$dir/d" > "$dir/added"
+  # Differing with nothing added is not a shape this can explain; stay `absent`.
+  [ -s "$dir/added" ] || return 1
+  # Any added line absent from ours verbatim means content we never received.
+  if grep -qvxF -f "$dir/ours" -- "$dir/added"; then return 1; fi
+  return 0
+}
+
 # _change_state <orig> <ours> <theirs>: for a path all three sides changed, is
 # upstream's orig->theirs change already in our blob? Prints held|absent|unknown.
 #
@@ -113,10 +144,18 @@ _blob_to() {
 # upstream's hunk is genuinely absent. Only looking inside the file answers it.
 #
 # A clean three-way merge that leaves our blob alone means we already have it. A
-# clean merge that CHANGES our blob means upstream's edit applies and we did not
-# have it. A CONFLICT means the two edits overlap and this cannot tell: an
-# up-to-date fork whose local edit sits on top of upstream's in the same region
-# conflicts exactly like a fork that never received it.
+# CONFLICT means the two edits overlap and this cannot tell: an up-to-date fork
+# whose local edit sits on top of upstream's in the same region conflicts
+# exactly like a fork that never received it.
+#
+# A clean merge that CHANGES our blob USUALLY means upstream's edit applies and
+# we did not have it — but not always, and the exception is not rare. The merge
+# places upstream's hunk by its position in the BASE; if Helio has appended to
+# the file, our copy of that same content can sit elsewhere and the merge adds a
+# duplicate. The result differs from ours while our blob holds every line of
+# upstream's change. `_reinsert_only` separates that case out, and it answers
+# `unknown` rather than `held` because duplication proves presence is POSSIBLE,
+# not that it happened. Reading it as `absent` is what produced #150/#152.
 #
 # `unknown` is a THIRD answer, not a synonym for held. Folding it into held is
 # what let a conflicting merge satisfy the already-synced check and skip a real
@@ -129,7 +168,19 @@ _change_state() {
   _blob_to "$ours" "$dir/ours"
   _blob_to "$theirs" "$dir/theirs"
   if git merge-file -q -p "$dir/ours" "$dir/base" "$dir/theirs" > "$dir/merged" 2>/dev/null; then
-    if cmp -s "$dir/ours" "$dir/merged"; then out=held; else out=absent; fi
+    if cmp -s "$dir/ours" "$dir/merged"; then
+      out=held
+    elif _reinsert_only "$dir"; then
+      # The merge only duplicated content we already hold, so it CANNOT show
+      # upstream's change to be absent. It also cannot prove it present: the
+      # lines could coincide. `unknown` is the honest answer, and it is the one
+      # that fixes #150 without opening the silent-drop direction — `base-ok`
+      # tolerates unknown (so the graft keeps the candidate) while `holds` still
+      # refuses (so no release is ever skipped on this evidence).
+      out=unknown
+    else
+      out=absent
+    fi
   else
     # Conflict, binary, or a merge-file error — all indistinguishable here.
     #

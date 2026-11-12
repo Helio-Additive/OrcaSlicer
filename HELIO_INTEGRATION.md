@@ -1053,9 +1053,34 @@ Three rules keep that true, and all of them are load-bearing:
    | --- | --- |
    | equals the candidate's | held |
    | equals the base's | **missing** |
-   | neither, merge is clean and changes ours | **missing** |
    | neither, merge is clean and leaves ours alone | held |
+   | neither, merge is clean but only re-adds lines we already hold | **unknown** |
+   | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
+
+   The second of those rows is the correction that #152 bought, and it was worth
+   a 472-file conflict set to learn. `git merge-file` places upstream's hunk by
+   its position in the **base**, not by where that content ended up in our copy.
+   When Helio has appended to the same file — the ordinary shape for a touchpoint
+   — our copy of upstream's lines can sit at a different offset than the merge
+   wants to insert them, so the merge cleanly inserts the block a **second**
+   time. The result then differs from ours while our blob holds every line of
+   upstream's change, and reading that difference as *missing* is a definitive
+   "never received" for content that is plainly present.
+
+   Measured on the path that caused it, `src/slic3r/GUI/Widgets/TextInput.hpp`:
+   merging v2.2.0 → v2.4.2 onto our blob duplicates `static_tips`,
+   `static_tips_size` and `static_tips_icon`, all three already there.
+
+   The verdict is **`unknown`, not `held`**, and that asymmetry is the whole
+   point. Duplication shows presence is *possible*, not that it happened — the
+   lines could coincide — so `base-ok` tolerates it (which is what rescues the
+   graft, and the actual fix for #150) while `holds` still refuses (so no release
+   is ever skipped on this evidence). Answering `held` here, as the issue
+   originally proposed, would have opened the one direction that drops upstream
+   work silently and permanently. The test is deliberately narrow: any **removal**
+   means the merge genuinely rewrites our content, and a single added line our
+   blob does not already carry verbatim keeps the `missing` answer.
 
    Mode is part of the comparison, not just the blob, and it is decided **before**
    the three-way merge rather than inside it. A path whose only change is
