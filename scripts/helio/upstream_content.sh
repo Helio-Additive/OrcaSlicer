@@ -104,6 +104,128 @@ _blob_to() {
   if [ "$1" = "$EMPTY_BLOB" ]; then : > "$2"; else git cat-file blob "$1" > "$2" 2>/dev/null || : > "$2"; fi
 }
 
+# _reinsert_only <dir>: true when the only thing a CLEAN three-way merge would
+# do to our blob is re-insert a block we ALREADY HOLD, beside the copy we hold.
+#
+# This is the false-`missing` case that cost #150 a 472-file conflict set (#152).
+# `git merge-file` places upstream's hunk by its position in the BASE, not by
+# where that content ended up in ours. When Helio has edited next to upstream's
+# insertion anchor the merge misaligns and inserts the block a SECOND time,
+# directly against the copy we already have. The result differs from ours, and
+# reading that difference as "upstream's change is absent" is what broke #150.
+#
+# Measured on the path that triggered it, src/slic3r/GUI/Widgets/TextInput.hpp,
+# where merging v2.2.0 -> v2.4.2 onto our blob re-inserts `static_tips`,
+# `static_tips_size` and `static_tips_icon` directly above the identical three.
+#
+# TWO tests, and the review history of #154 is why there are two. Both guard the
+# same direction: `base-ok` tolerates `unknown`, so a false `unknown` in a graft
+# BASE drops upstream work with no conflict to notice.
+#
+#   1. ADJACENCY. The appended block must equal the block immediately before or
+#      after it in the merged file. The first version of this function asked
+#      only "does every added line appear somewhere in ours?", and Codex showed
+#      that is wrong: upstream adding `    validate();` to `second()` when
+#      `first()` already carries that line passes whole-file containment while
+#      `second()` genuinely never received it. Position, not presence.
+#
+#   2. RUN LENGTH at the insertion site, against the longest run upstream has.
+#      Adjacency alone is not enough: CodeRabbit produced a case where upstream
+#      DELIBERATELY adds a second adjacent `counter++;` where we hold one. The
+#      merge appends it right beside ours, so adjacency is satisfied, yet the
+#      new copy is real content we never received.
+#
+#      A global occurrence count does not settle it either, which was the second
+#      version of this test and Codex broke it too: if OUR fork independently
+#      adds the same block somewhere distant, both blobs hold two copies and the
+#      totals match while upstream's adjacent one is still absent. Totals are
+#      not a local property, and this question is local.
+#
+#      So compare RUNS of consecutive copies. Duplication by the merge produces
+#      a run LONGER than upstream has anywhere; a genuine upstream addition does
+#      not, because upstream is where the run came from:
+#
+#        site run 2, longest run in theirs 1 -> merge invented a copy -> unknown
+#        site run 2, longest run in theirs 2 -> upstream has that run -> absent
+#
+#      Taking the longest run ANYWHERE in theirs (rather than at a matched
+#      location) is deliberate: it can only make the test refuse more often, and
+#      refusing is the safe direction — a wrong `absent` costs conflict volume,
+#      a wrong `unknown` costs upstream content.
+#
+# Narrow in two further ways: the diff must consist only of append commands (a
+# removal or a change means the merge genuinely rewrites our content), and EVERY
+# appended block must pass both tests, so one real insertion sitting beside a
+# duplicate still answers `absent`.
+_reinsert_only() {
+  local dir="$1"
+  # Normal diff format: `NaM,P` appends merged lines M..P. `c`/`d` commands mean
+  # the merge changes or drops our content, which duplication cannot explain.
+  diff "$dir/ours" "$dir/merged" > "$dir/d" 2>/dev/null || true
+  [ -s "$dir/d" ] || return 1
+  awk -v dfile="$dir/d" -v tfile="$dir/theirs" '
+    # `x ""` forces STRING comparison throughout. A bare `!=` on two numeric
+    # strings compares them as NUMBERS, so "01" and "1" test equal (Codex, #154)
+    # and a genuinely new line reads as a duplicate of its neighbour.
+    function same(A, p, start, len,   k) {
+      for (k = 0; k < len; k++) if ((A[p + k] "") != (M[start + k] "")) return 0
+      return 1
+    }
+    # Longest run of consecutive copies of merged[start..start+len-1] in A.
+    function maxrun(A, na, start, len,   best, p, r, q) {
+      best = 0
+      for (p = 1; p <= na - len + 1; p++) {
+        if (!same(A, p, start, len)) continue
+        r = 0; q = p
+        while (q + len - 1 <= na && same(A, q, start, len)) { r++; q += len }
+        if (r > best) best = r
+      }
+      return best
+    }
+    # Run of consecutive copies surrounding the inserted block in MERGED.
+    function siterun(start, len, total,   r, q) {
+      r = 1
+      q = start - len
+      while (q >= 1 && same(M, q, start, len)) { r++; q -= len }
+      q = start + len
+      while (q + len - 1 <= total && same(M, q, start, len)) { r++; q += len }
+      return r
+    }
+    BEGIN {
+      n = 0; bad = 0
+      while ((getline ln < dfile) > 0) {
+        if (ln ~ /^[0-9]/) {
+          if (ln !~ /^[0-9]+(,[0-9]+)?a[0-9]+(,[0-9]+)?$/) { bad = 1; break }
+          sub(/^[0-9]+(,[0-9]+)?a/, "", ln)
+          k = index(ln, ",")
+          if (k) { lo[++n] = substr(ln, 1, k - 1) + 0; hi[n] = substr(ln, k + 1) + 0 }
+          else   { lo[++n] = ln + 0; hi[n] = ln + 0 }
+        }
+      }
+      close(dfile)
+      nt = 0; while ((getline ln < tfile) > 0) T[++nt] = ln; close(tfile)
+    }
+    { M[FNR] = $0 }
+    END {
+      if (bad || n == 0) { exit 1 }
+      for (i = 1; i <= n; i++) {
+        len = hi[i] - lo[i] + 1
+        after = 1; before = 1
+        for (k = 0; k < len; k++)
+          if (hi[i] + 1 + k > FNR || (M[lo[i] + k] "") != (M[hi[i] + 1 + k] "")) { after = 0; break }
+        for (k = 0; k < len; k++)
+          if (lo[i] - len + k < 1 || (M[lo[i] + k] "") != (M[lo[i] - len + k] "")) { before = 0; break }
+        if (!after && !before) { exit 1 }
+        # The merge must have produced a run LONGER than upstream has anywhere.
+        # Otherwise upstream genuinely holds that many in a row and the extra
+        # copy is real content we never received.
+        if (siterun(lo[i], len, FNR) <= maxrun(T, nt, lo[i], len)) { exit 1 }
+      }
+      exit 0
+    }
+  ' "$dir/merged"
+}
+
 # _change_state <orig> <ours> <theirs>: for a path all three sides changed, is
 # upstream's orig->theirs change already in our blob? Prints held|absent|unknown.
 #
@@ -113,10 +235,18 @@ _blob_to() {
 # upstream's hunk is genuinely absent. Only looking inside the file answers it.
 #
 # A clean three-way merge that leaves our blob alone means we already have it. A
-# clean merge that CHANGES our blob means upstream's edit applies and we did not
-# have it. A CONFLICT means the two edits overlap and this cannot tell: an
-# up-to-date fork whose local edit sits on top of upstream's in the same region
-# conflicts exactly like a fork that never received it.
+# CONFLICT means the two edits overlap and this cannot tell: an up-to-date fork
+# whose local edit sits on top of upstream's in the same region conflicts
+# exactly like a fork that never received it.
+#
+# A clean merge that CHANGES our blob USUALLY means upstream's edit applies and
+# we did not have it — but not always, and the exception is not rare. The merge
+# places upstream's hunk by its position in the BASE; if Helio has appended to
+# the file, our copy of that same content can sit elsewhere and the merge adds a
+# duplicate. The result differs from ours while our blob holds every line of
+# upstream's change. `_reinsert_only` separates that case out, and it answers
+# `unknown` rather than `held` because duplication proves presence is POSSIBLE,
+# not that it happened. Reading it as `absent` is what produced #150/#152.
 #
 # `unknown` is a THIRD answer, not a synonym for held. Folding it into held is
 # what let a conflicting merge satisfy the already-synced check and skip a real
@@ -129,7 +259,19 @@ _change_state() {
   _blob_to "$ours" "$dir/ours"
   _blob_to "$theirs" "$dir/theirs"
   if git merge-file -q -p "$dir/ours" "$dir/base" "$dir/theirs" > "$dir/merged" 2>/dev/null; then
-    if cmp -s "$dir/ours" "$dir/merged"; then out=held; else out=absent; fi
+    if cmp -s "$dir/ours" "$dir/merged"; then
+      out=held
+    elif _reinsert_only "$dir"; then
+      # The merge only duplicated content we already hold, so it CANNOT show
+      # upstream's change to be absent. It also cannot prove it present: the
+      # lines could coincide. `unknown` is the honest answer, and it is the one
+      # that fixes #150 without opening the silent-drop direction — `base-ok`
+      # tolerates unknown (so the graft keeps the candidate) while `holds` still
+      # refuses (so no release is ever skipped on this evidence).
+      out=unknown
+    else
+      out=absent
+    fi
   else
     # Conflict, binary, or a merge-file error — all indistinguishable here.
     #

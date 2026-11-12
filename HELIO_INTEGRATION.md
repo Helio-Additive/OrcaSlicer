@@ -1053,9 +1053,86 @@ Three rules keep that true, and all of them are load-bearing:
    | --- | --- |
    | equals the candidate's | held |
    | equals the base's | **missing** |
-   | neither, merge is clean and changes ours | **missing** |
    | neither, merge is clean and leaves ours alone | held |
+   | neither, merge is clean but only re-inserts a block we already hold | **unknown** |
+   | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
+
+   The second of those rows is the correction that #152 bought, and it was worth
+   a 472-file conflict set to learn. `git merge-file` places upstream's hunk by
+   its position in the **base**, not by where that content ended up in our copy.
+   When Helio has appended to the same file — the ordinary shape for a touchpoint
+   — our copy of upstream's lines can sit at a different offset than the merge
+   wants to insert them, so the merge cleanly inserts the block a **second**
+   time. The result then differs from ours while our blob holds every line of
+   upstream's change, and reading that difference as *missing* is a definitive
+   "never received" for content that is plainly present.
+
+   Measured on the path that caused it, `src/slic3r/GUI/Widgets/TextInput.hpp`:
+   merging v2.2.0 → v2.4.2 onto our blob duplicates `static_tips`,
+   `static_tips_size` and `static_tips_icon`, all three already there.
+
+   The verdict is **`unknown`, not `held`**, and that asymmetry is the whole
+   point. Duplication shows presence is *possible*, not that it happened — the
+   lines could coincide — so `base-ok` tolerates it (which is what rescues the
+   graft, and the actual fix for #150) while `holds` still refuses (so no release
+   is ever skipped on this evidence). Answering `held` here, as the issue
+   originally proposed, would have opened the one direction that drops upstream
+   work silently and permanently. **Two tests decide it, and the review of
+   #154 is why there are two.** Both guard the same direction: `base-ok`
+   tolerates `unknown`, so a false `unknown` in a graft base drops upstream work
+   with no conflict to notice.
+
+   **1. Adjacency.** The appended block must equal the block immediately before
+   or after it in the merged file. This must not be weakened to "every added
+   line appears somewhere in ours". That weaker form
+   was the first version of this fix and Codex rejected it on #154: upstream
+   adding `    validate();` to `second()` when `first()` already contains that
+   line produces a clean merge whose added line *is* present elsewhere in our
+   blob, while `second()` genuinely never received it. Since `base-ok` tolerates
+   `unknown`, such a path can be grafted as a base — and a sync target that
+   still carries the insertion then merges cleanly without re-adding it,
+   dropping upstream work with no conflict to notice. Position is the only thing
+   separating "the merge duplicated what we hold" from "we never got it", so the
+   comparison is against the neighbouring lines, never the whole file.
+
+   **2. Run length at the insertion site, against the longest run upstream
+   has.** Adjacency alone is still not
+   enough, and CodeRabbit produced the case on #154: upstream *deliberately*
+   adds a second adjacent `counter++;` where we hold one. The merge appends it
+   right beside ours, so the positional test is satisfied — yet the new copy is
+   real content we never received. Counting separates the two cleanly, because
+   it asks about upstream's blob rather than only about the merge:
+
+   A **global occurrence count** does not settle it either — that was the
+   second version of the test, and Codex broke it as well: if *our* fork
+   independently adds the same block somewhere distant, both blobs hold two
+   copies, the totals match, and upstream's adjacent one is still absent.
+   Totals are not a local property, and this question is local.
+
+   So compare **runs of consecutive copies**. Duplication by the merge produces
+   a run longer than upstream has anywhere; a genuine upstream addition does
+   not, because upstream is where the run came from:
+
+   | run at the site, in merged | longest run in theirs | verdict |
+   | --- | --- | --- |
+   | 2 | 1 | the merge invented a copy → `unknown` |
+   | 2 | 2 | upstream holds that run → **`missing`** |
+
+   Taking the longest run *anywhere* in theirs, rather than at a matched
+   location, is deliberate: it can only make the test refuse more often, and
+   refusing is the safe direction — a wrong `missing` costs conflict volume, a
+   wrong `unknown` costs upstream content.
+
+   Narrow in two further ways: the diff must consist only of **append** commands
+   (a removal or a change means the merge genuinely rewrites our content), and
+   **every** appended block must pass **both** tests, so one real insertion
+   sitting beside a duplicate still answers `missing`.
+
+   One `awk` detail that is a correctness matter, not style: the line
+   comparisons force string context with `x ""`. A bare `!=` on two numeric
+   strings compares them as **numbers**, so `01` and `1` test equal and a
+   genuinely new line reads as a duplicate of its neighbour (Codex, #154).
 
    Mode is part of the comparison, not just the blob, and it is decided **before**
    the three-way merge rather than inside it. A path whose only change is
