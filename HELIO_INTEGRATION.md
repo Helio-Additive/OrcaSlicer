@@ -1096,22 +1096,33 @@ Three rules keep that true, and all of them are load-bearing:
    separating "the merge duplicated what we hold" from "we never got it", so the
    comparison is against the neighbouring lines, never the whole file.
 
-   **2. Occurrence count against upstream's blob.** Adjacency alone is still not
+   **2. Run length at the insertion site, against the longest run upstream
+   has.** Adjacency alone is still not
    enough, and CodeRabbit produced the case on #154: upstream *deliberately*
    adds a second adjacent `counter++;` where we hold one. The merge appends it
    right beside ours, so the positional test is satisfied — yet the new copy is
    real content we never received. Counting separates the two cleanly, because
    it asks about upstream's blob rather than only about the merge:
 
-   | ours | theirs | merged | verdict |
-   | --- | --- | --- | --- |
-   | 1 copy | 1 copy | 2 | the merge duplicated it → `unknown` |
-   | 1 copy | 2 copies | 2 | upstream added one → **`missing`** |
+   A **global occurrence count** does not settle it either — that was the
+   second version of the test, and Codex broke it as well: if *our* fork
+   independently adds the same block somewhere distant, both blobs hold two
+   copies, the totals match, and upstream's adjacent one is still absent.
+   Totals are not a local property, and this question is local.
 
-   So every appended block must occur in **our** blob at least as many times as
-   it occurs in **upstream's**. That subsumes the coincidental-match case too
-   (one `validate();` in ours, two in theirs), but adjacency is kept as an
-   independent check rather than replaced by it.
+   So compare **runs of consecutive copies**. Duplication by the merge produces
+   a run longer than upstream has anywhere; a genuine upstream addition does
+   not, because upstream is where the run came from:
+
+   | run at the site, in merged | longest run in theirs | verdict |
+   | --- | --- | --- |
+   | 2 | 1 | the merge invented a copy → `unknown` |
+   | 2 | 2 | upstream holds that run → **`missing`** |
+
+   Taking the longest run *anywhere* in theirs, rather than at a matched
+   location, is deliberate: it can only make the test refuse more often, and
+   refusing is the safe direction — a wrong `missing` costs conflict volume, a
+   wrong `unknown` costs upstream content.
 
    Narrow in two further ways: the diff must consist only of **append** commands
    (a removal or a change means the merge genuinely rewrites our content), and

@@ -687,7 +687,8 @@ print("\nupstream_content.sh — the three-way boundary\n")
 
 def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
                  mode_and_blob=False, mode_divergent=False, superset=False,
-                 distant=False, coincidental=False, adjacent_repeat=False):
+                 distant=False, coincidental=False, adjacent_repeat=False,
+                 fork_local_copy=False):
     """Upstream + a squashed fork, shaped for one boundary case."""
     up = os.path.join(tmp, "up")
     os.makedirs(up)
@@ -718,6 +719,11 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         # The block upstream will insert INTO, blank-line separated so the
         # merge has a real anchor to misplace.
         wr("widget.hpp", "k1=v1\nk2=v2\nk3=v3\n\nk10=v10\nk11=v11\n")
+    if fork_local_copy:
+        # One `counter++;` in first(); second() has none yet.
+        wr("calls2.c", "void first() {\n    prepare();\n    counter++;\n"
+                       "    run();\n}\n\nvoid second() {\n    prepare();\n"
+                       "    run();\n}\n")
     if adjacent_repeat:
         # One `counter++;` at the base. Upstream will add a SECOND, adjacent.
         wr("loop.c", "".join("line %d\n" % i for i in range(1, 10))
@@ -755,6 +761,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         # Upstream inserts a block just after the blank line.
         wr("widget.hpp",
            "k1=v1\nk2=v2\nk3=v3\n\nu1=up1\nu2=up2\nu3=up3\n\nk10=v10\nk11=v11\n")
+        sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
+    elif fork_local_copy:
+        # Upstream adds a SECOND adjacent `counter++;` inside first().
+        wr("calls2.c", "void first() {\n    prepare();\n    counter++;\n"
+                       "    counter++;\n    run();\n}\n\nvoid second() {\n"
+                       "    prepare();\n    run();\n}\n")
         sh("git add -A && git commit -q -m 2.4.1 && git tag v2.4.1", up)
     elif adjacent_repeat:
         # The second `counter++;` is REAL upstream content, not a duplicate.
@@ -794,6 +806,12 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
     if distant:
         # Helio edits k18; upstream's inserted `up=1` is genuinely NOT here.
         edit(fork, "cfg.ini", "k18=v18", "k18=helio")
+    if fork_local_copy:
+        # Helio independently adds `counter++;` to second(), far from
+        # upstream's. Global totals now match at two copies each, while
+        # upstream's adjacent one is still absent from first().
+        edit(fork, "calls2.c", "void second() {\n    prepare();\n",
+             "void second() {\n    prepare();\n    counter++;\n")
     if adjacent_repeat:
         # Helio edits a distant line, so all three blobs differ and the merge is
         # clean -- it appends upstream's second `counter++;` right beside ours.
@@ -995,6 +1013,23 @@ b.append(boundary("upstream's 2nd adjacent copy disqualifies the graft base",
 b.append(boundary("upstream's 2nd adjacent copy means NOT already-synced",
                   kw=dict(adjacent_repeat=True), cmd=["holds", "v2.4.1"], want_rc=1))
 
+# Round 12, Codex P1 on #154 (third finding). The hardest of the set, and why
+# a GLOBAL occurrence count is not enough either: upstream adds a second
+# adjacent `counter++;` in first(), while OUR fork independently adds one to
+# second(). Both blobs then hold two copies, so the totals match and the count
+# guard passes, while upstream's adjacent copy is genuinely absent from our
+# first(). Totals are not a local property; the run at the insertion site is.
+b.append(boundary("a fork-local distant copy does not excuse the insertion",
+                  kw=dict(fork_local_copy=True), cmd=["missing", "v2.4.1"],
+                  want_out="calls2.c"))
+b.append(boundary("fork-local distant copy is NOT downgraded to unknown",
+                  kw=dict(fork_local_copy=True), cmd=["unknown", "v2.4.1"],
+                  want_empty=True))
+b.append(boundary("fork-local distant copy disqualifies the graft base",
+                  kw=dict(fork_local_copy=True), cmd=["base-ok", "v2.4.1"], want_rc=1))
+b.append(boundary("fork-local distant copy means NOT already-synced",
+                  kw=dict(fork_local_copy=True), cmd=["holds", "v2.4.1"], want_rc=1))
+
 # Round 7, Codex P1. `first-held ... strict` must walk PAST a candidate carrying
 # undecidable paths, so the graft lands on a base where those paths are still in
 # motion and the merge has to present them. The permissive form must still stop
@@ -1058,14 +1093,22 @@ def reinsert_boundary():
         ("added line that mimics a diff header",    "5a6\nq\n",        "5a6\n5a6\nq\n",         None, "unknown"),
         ("multi-line NaM,P range, adjacent",        "p\nX\nY\nZ\nq\n", "p\nX\nY\nZ\nX\nY\nZ\nq\n", None, "unknown"),
 
-        # ---- the occurrence-count test, which needs a real `theirs` --------
+        # ---- the run-length test, which needs a real `theirs` -------------
         # CodeRabbit on #154: upstream deliberately adds a SECOND adjacent
-        # copy. Adjacency is satisfied, so only the count against theirs can
-        # tell this from the #152 duplication. ours 1 : theirs 2 -> absent.
+        # copy. Adjacency is satisfied, so only upstream's own run length can
+        # tell this from the #152 duplication. site run 2 : theirs run 2.
         ("upstream adds a 2nd adjacent copy",      "a\nX\nb\n",       "a\nX\nX\nb\n",            "a\nX\nX\nb\n", "absent"),
-        # The #152 control for it: upstream holds ONE copy, we hold one, and
-        # the merge invented the second. ours 1 : theirs 1 -> unknown.
+        # The #152 control for it: upstream holds a run of ONE and the merge
+        # invented the second. site run 2 : theirs run 1 -> unknown.
         ("merge invented the 2nd copy",            "a\nX\nb\n",       "a\nX\nX\nb\n",            "a\nX\nb\n",    "unknown"),
+        # Codex round 3 on #154, and the reason a GLOBAL count is not enough:
+        # our fork independently holds the same block somewhere distant, so the
+        # totals match (2 each) while upstream's adjacent copy is still absent.
+        # Only the run at the insertion site distinguishes them.
+        ("fork-local distant copy, totals equal",  "a\nX\nb\nX\n",    "a\nX\nX\nb\nX\n",         "a\nX\nX\nb\n", "absent"),
+        # Control: same distant fork-local copy, but upstream holds a run of
+        # one, so the adjacent second copy really is the merge's invention.
+        ("distant fork copy, merge invented it",   "a\nX\nb\nX\n",    "a\nX\nX\nb\nX\n",         "a\nX\nb\n",    "unknown"),
         # Codex P2: AWK's bare `!=` compares two numeric strings NUMERICALLY,
         # so "01" and "1" test equal and a real insertion reads as a duplicate.
         ("numeric strings `01` beside `1`",        "a\n1\nb\n",       "a\n1\n01\nb\n",           "a\n1\n01\nb\n", "absent"),

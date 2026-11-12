@@ -129,20 +129,29 @@ _blob_to() {
 #      `first()` already carries that line passes whole-file containment while
 #      `second()` genuinely never received it. Position, not presence.
 #
-#   2. OCCURRENCE COUNT against THEIRS. Adjacency alone is still not enough,
-#      and CodeRabbit produced the case: upstream deliberately adds a SECOND
-#      adjacent `counter++;` where we hold one. The merge appends it right
-#      beside ours, so adjacency is satisfied, yet the new copy is real content
-#      we never received. Counting separates the two cleanly, because it asks
-#      about upstream's blob rather than only about the merge:
+#   2. RUN LENGTH at the insertion site, against the longest run upstream has.
+#      Adjacency alone is not enough: CodeRabbit produced a case where upstream
+#      DELIBERATELY adds a second adjacent `counter++;` where we hold one. The
+#      merge appends it right beside ours, so adjacency is satisfied, yet the
+#      new copy is real content we never received.
 #
-#        ours 1 copy, theirs 1 copy, merged 2  -> the merge duplicated  -> unknown
-#        ours 1 copy, theirs 2 copies, merged 2 -> upstream added one   -> absent
+#      A global occurrence count does not settle it either, which was the second
+#      version of this test and Codex broke it too: if OUR fork independently
+#      adds the same block somewhere distant, both blobs hold two copies and the
+#      totals match while upstream's adjacent one is still absent. Totals are
+#      not a local property, and this question is local.
 #
-#      So every appended block must occur in OUR blob at least as many times as
-#      it occurs in UPSTREAM's. That subsumes Codex's case too (one `validate();`
-#      in ours, two in theirs), but adjacency is kept as an independent check
-#      rather than replaced by it.
+#      So compare RUNS of consecutive copies. Duplication by the merge produces
+#      a run LONGER than upstream has anywhere; a genuine upstream addition does
+#      not, because upstream is where the run came from:
+#
+#        site run 2, longest run in theirs 1 -> merge invented a copy -> unknown
+#        site run 2, longest run in theirs 2 -> upstream has that run -> absent
+#
+#      Taking the longest run ANYWHERE in theirs (rather than at a matched
+#      location) is deliberate: it can only make the test refuse more often, and
+#      refusing is the safe direction — a wrong `absent` costs conflict volume,
+#      a wrong `unknown` costs upstream content.
 #
 # Narrow in two further ways: the diff must consist only of append commands (a
 # removal or a change means the merge genuinely rewrites our content), and EVERY
@@ -154,19 +163,33 @@ _reinsert_only() {
   # the merge changes or drops our content, which duplication cannot explain.
   diff "$dir/ours" "$dir/merged" > "$dir/d" 2>/dev/null || true
   [ -s "$dir/d" ] || return 1
-  awk -v dfile="$dir/d" -v ofile="$dir/ours" -v tfile="$dir/theirs" '
-    function runs(A, na, start, len,   c, p, k, ok) {
-      # Contiguous occurrences of merged[start..start+len-1] inside A[1..na].
-      c = 0
+  awk -v dfile="$dir/d" -v tfile="$dir/theirs" '
+    # `x ""` forces STRING comparison throughout. A bare `!=` on two numeric
+    # strings compares them as NUMBERS, so "01" and "1" test equal (Codex, #154)
+    # and a genuinely new line reads as a duplicate of its neighbour.
+    function same(A, p, start, len,   k) {
+      for (k = 0; k < len; k++) if ((A[p + k] "") != (M[start + k] "")) return 0
+      return 1
+    }
+    # Longest run of consecutive copies of merged[start..start+len-1] in A.
+    function maxrun(A, na, start, len,   best, p, r, q) {
+      best = 0
       for (p = 1; p <= na - len + 1; p++) {
-        ok = 1
-        # `x ""` forces STRING comparison. Bare `!=` on two numeric strings
-        # compares them as numbers, so "01" and "1" test equal (Codex, #154)
-        # and a genuinely new line reads as a duplicate of its neighbour.
-        for (k = 0; k < len; k++) if ((A[p + k] "") != (M[start + k] "")) { ok = 0; break }
-        if (ok) c++
+        if (!same(A, p, start, len)) continue
+        r = 0; q = p
+        while (q + len - 1 <= na && same(A, q, start, len)) { r++; q += len }
+        if (r > best) best = r
       }
-      return c
+      return best
+    }
+    # Run of consecutive copies surrounding the inserted block in MERGED.
+    function siterun(start, len, total,   r, q) {
+      r = 1
+      q = start - len
+      while (q >= 1 && same(M, q, start, len)) { r++; q -= len }
+      q = start + len
+      while (q + len - 1 <= total && same(M, q, start, len)) { r++; q += len }
+      return r
     }
     BEGIN {
       n = 0; bad = 0
@@ -180,7 +203,6 @@ _reinsert_only() {
         }
       }
       close(dfile)
-      no = 0; while ((getline ln < ofile) > 0) O[++no] = ln; close(ofile)
       nt = 0; while ((getline ln < tfile) > 0) T[++nt] = ln; close(tfile)
     }
     { M[FNR] = $0 }
@@ -194,8 +216,10 @@ _reinsert_only() {
         for (k = 0; k < len; k++)
           if (lo[i] - len + k < 1 || (M[lo[i] + k] "") != (M[lo[i] - len + k] "")) { before = 0; break }
         if (!after && !before) { exit 1 }
-        # Upstream must not hold MORE copies of this block than we do.
-        if (runs(O, no, lo[i], len) < runs(T, nt, lo[i], len)) { exit 1 }
+        # The merge must have produced a run LONGER than upstream has anywhere.
+        # Otherwise upstream genuinely holds that many in a row and the extra
+        # copy is real content we never received.
+        if (siterun(lo[i], len, FNR) <= maxrun(T, nt, lo[i], len)) { exit 1 }
       }
       exit 0
     }
