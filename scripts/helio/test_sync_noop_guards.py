@@ -1013,7 +1013,20 @@ def reinsert_boundary():
         # A leading `-` must not reach any tool as an option.
         ("line starting with `-`, adjacent dup",   "a\n-x\nb\n",      "a\n-x\n-x\nb\n",           "unknown"),
         # Compared literally, never as a pattern.
-        ("regex-special line, adjacent dup",       "a\n.*[b]\nc\n",   "a\n.*[b]\n.*[b]\nc\n",     "unknown"),
+        # Blocks at the file boundaries: only ONE side is available to compare.
+        ("dup block at the very start of the file", "X\nY\na\n",       "X\nY\nX\nY\na\n",       "unknown"),
+        ("dup block at the very end of the file",   "a\nX\nY\n",       "a\nX\nY\nX\nY\n",       "unknown"),
+        ("new line inserted at line 1",            "a\nb\n",          "zz\na\nb\n",            "absent"),
+        # Several append hunks in one diff: EVERY one must pass, not just one.
+        ("3 append hunks, all adjacent dups",       "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\n", "unknown"),
+        ("3 append hunks, one of them not a dup",   "A\nb\nB\nc\nC\n", "A\nA\nb\nB\nB\nc\nC\nC\nzz\n", "absent"),
+        # A `d` command, which the append-only parse must refuse outright.
+        ("diff contains a delete command",          "a\nb\nc\n",       "a\nc\n",               "absent"),
+        # Content that LOOKS like a normal-diff command line. It arrives
+        # prefixed with "> ", so it must be read as text, not as a range.
+        ("added line that mimics a diff header",    "5a6\nq\n",        "5a6\n5a6\nq\n",         "unknown"),
+        # A multi-line `NaM,P` range, which is the real TextInput.hpp shape.
+        ("multi-line NaM,P range, adjacent",        "p\nX\nY\nZ\nq\n", "p\nX\nY\nZ\nX\nY\nZ\nq\n", "unknown"),
     ]
     fn = re.search(r"^_reinsert_only\(\) \{.*?^\}", open(CONTENT_SH).read(),
                    re.M | re.S)
