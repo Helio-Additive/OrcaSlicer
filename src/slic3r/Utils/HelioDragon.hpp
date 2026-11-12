@@ -2,6 +2,7 @@
 #define slic3r_HelioDragon_hpp_
 
 #include <string>
+#include <vector>
 #include <wx/string.h>
 #include <boost/optional.hpp>
 #include <boost/filesystem.hpp>
@@ -120,8 +121,8 @@ public:
         std::string name;
         std::string id;
         std::string error;
-        vector<std::string> warning_flags;
-        vector<std::string> error_flags;
+        std::vector<std::string> warning_flags;
+        std::vector<std::string> error_flags;
         std::string trace_id;
 
         // V2 API fields
