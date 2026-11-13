@@ -123,7 +123,7 @@ generation so work started under the old credential can never land.
 |-|-|
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
-| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
+| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, posts the weekly digest on issue #21. New-tag selection is version-order, never ancestry — upstream cuts `release/*` from `main`, so releases are siblings. Tests: `scripts/helio/test_upstream_watch_tags.py` |
 | `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
 | `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
