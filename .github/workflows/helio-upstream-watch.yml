@@ -24,6 +24,25 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
+          # Upstream's tags AGAIN, into a namespace of their own. `git tag -l`
+          # lists the union of upstream's tags and the fork's own, and the fork
+          # really does carry four v*-shaped tags (v2.3.0.1-rc1..rc3,
+          # v2.3.1-rc1). Enumerating `v*` from refs/tags would therefore let a
+          # fork tag be reported as an upstream release and, if it were the
+          # newest stable one, be named this digest's sync target. Today all
+          # four sit below the baseline so nothing is misreported, but the
+          # digest must not depend on that staying true.
+          #
+          # This is a second fetch invocation, so a second network operation —
+          # the refs are the same but they are asked for twice. What it is not
+          # is a new failure mode: with no `|| true` a failure exits THIS step,
+          # so the digest never runs and nothing is posted. That is the policy
+          # the plain --tags fetch above already set, on the grounds that a
+          # wrong digest is worse than none. The alternative considered was
+          # `git ls-remote` inside the digest step, which costs the same network
+          # operation but puts the failure in the middle of digest generation,
+          # where the policy would have to be decided from scratch.
+          git fetch upstream --force 'refs/tags/*:refs/upstream-tags/*'
           git fetch upstream 'refs/heads/release/*:refs/remotes/upstream/release/*' || true
           git fetch upstream main || true
 
@@ -31,6 +50,23 @@ jobs:
         id: digest
         run: |
           RELEASE_BRANCH="${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}"
+
+          # Upstream tag names, read from the namespace the fetch step filled.
+          # Every `v*` enumeration below goes through this rather than
+          # `git tag -l`, which lists the union of upstream's tags and the
+          # fork's own — the fork carries four v*-shaped tags of its own
+          # (v2.3.0.1-rc1..rc3, v2.3.1-rc1), and any of them above the baseline
+          # would otherwise be reported as an upstream release and could be
+          # named the sync target. Defined here, not in the fetch step: every
+          # `run:` block is a separate shell, so a function defined there would
+          # not exist by the time this one runs.
+          # --sort matches the `git tag -l --sort=-version:refname` this
+          # replaced, so the stable-tag lookup below is unchanged in every
+          # respect except which refs it can see.
+          upstream_tags() {
+            git for-each-ref --sort=-version:refname \
+              --format='%(refname:strip=2)' "refs/upstream-tags/$1"
+          }
 
           # Baseline: the upstream release this branch actually holds.
           #
@@ -54,45 +90,44 @@ jobs:
           BASELINE_TAG="v$BASELINE_VER"
           BASELINE_SOURCE="version.inc"
 
-          # Verify through refs/tags/ explicitly. A bare name resolves branches
-          # too, and while git's disambiguation happens to prefer tags over
-          # heads, "happens to" is not what a baseline should rest on — upstream
-          # ships release/* branches alongside these tags.
-          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+          # Verify through refs/upstream-tags/ explicitly. Two things this
+          # buys: a bare name resolves branches too (and while git's
+          # disambiguation happens to prefer tags over heads, "happens to" is
+          # not what a baseline should rest on — upstream ships release/*
+          # branches alongside these tags), and the namespace holds only
+          # upstream's tags, so this now proves the baseline names an UPSTREAM
+          # release. Against refs/tags it would also have been satisfied by one
+          # of the fork's own v*-shaped tags.
+          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/upstream-tags/$BASELINE_TAG^{commit}" >/dev/null; then
             echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
             BASELINE_TAG="v2.3.2-rc2"
             BASELINE_SOURCE="hardcoded fallback"
             # If even the fallback is absent, stop. Handing an unresolved ref to
             # the merge-base loop below silently yields a wrong digest, and a
             # wrong digest is worse than none: it is read as "nothing to sync".
-            if ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+            if ! git rev-parse -q --verify "refs/upstream-tags/$BASELINE_TAG^{commit}" >/dev/null; then
               echo "::error title=No usable digest baseline::Neither version.inc nor the v2.3.2-rc2 fallback resolves to an upstream tag. Refusing to compute a digest from an unresolved baseline."
               exit 1
             fi
           fi
-          # Every git operation consuming the baseline goes through this, so
-          # what was verified above is what gets used. BASELINE_TAG stays bare
-          # for the string compare below (it matches `git tag -l` output) and
-          # for display.
-          BASELINE_REF="refs/tags/$BASELINE_TAG"
+          # BASELINE_TAG stays bare from here on: it matches `upstream_tags`
+          # output, which is what the version comparison below consumes, and it
+          # is what the digest displays. There is deliberately no BASELINE_REF
+          # any more — the new-tag selection compares version strings and never
+          # resolves the baseline as a git ref, so the only thing the
+          # verification above still establishes is that the baseline names a
+          # real upstream tag. That is exactly what gates the fallback, so the
+          # check stays; a second variable asserting more than that would be
+          # claiming a guarantee nothing relies on.
           echo "Digest baseline: $BASELINE_TAG (source: $BASELINE_SOURCE)"
-
-          # New tags since baseline
-          NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
-            if git merge-base --is-ancestor "$BASELINE_REF" "refs/tags/$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
-              COMMIT_DATE=$(git log -1 --format='%ci' "$tag" | cut -d' ' -f1)
-              echo "- \`$tag\` ($COMMIT_DATE)"
-            fi
-          done)
-
-          if [ -z "$NEW_TAGS" ]; then
-            NEW_TAGS="None"
-          fi
 
           # Commits on main since last release (exclude prereleases — git's
           # version:refname sort ranks e.g. v2.3.2-rc2 above v2.3.2 otherwise).
           # `|| true` keeps pipefail happy when grep finds nothing.
-          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
+          #
+          # Computed before the new-tag list below, which annotates whichever
+          # entry equals it as the sync target.
+          LATEST_TAG=$(upstream_tags 'v*' \
             | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
             | head -1 || true)
           if [ -z "$LATEST_TAG" ]; then
@@ -100,6 +135,110 @@ jobs:
             exit 1
           fi
           MAIN_COMMITS=$(git rev-list --count "$LATEST_TAG"..upstream/main 2>/dev/null || echo "unknown")
+
+          # >>> new-tags-selection (extracted verbatim by scripts/helio/test_upstream_watch_tags.py)
+          # "Is this tag newer than what we hold?" is a VERSION-ORDER question,
+          # not an ancestry one.
+          #
+          # This block used to ask `git merge-base --is-ancestor $BASELINE_REF
+          # <tag>`. Upstream cuts every release/* branch from `main` and tags
+          # there, so consecutive releases are siblings, not descendants:
+          # v2.4.2 is not an ancestor of v2.5.0 (their merge-base is a commit on
+          # main below both). The ancestor test therefore holds only WITHIN one
+          # release family — v2.3.2-rc2 -> v2.3.2, tagged on the same branch —
+          # and fails across every family boundary, which is exactly where a new
+          # release appears.
+          #
+          # Measured against the real 84-tag upstream set: from baseline v2.4.2
+          # the old test passed for one tag, the baseline itself, which the `!=`
+          # guard then dropped — so this section read "None" with four v2.5.0
+          # tags present, and said so in the same comment that printed
+          # "Latest upstream tag: v2.5.0". From the v2.3.2-rc2 fallback baseline
+          # it reported only v2.3.2 while v2.4.0, v2.4.1, v2.4.2 and v2.5.0 all
+          # existed. v2.5.0 went unannounced for five days and was noticed only
+          # because the sync workflow picks its target by version sort instead.
+          #
+          # norm_ver exists because both `sort -V` and git's version:refname
+          # rank a stable release BELOW its own prereleases (v2.5.0 <
+          # v2.5.0-alpha). Appending a suffix that sorts after alpha/beta/rc/pre
+          # to stable tags only corrects that. It is load-bearing whenever the
+          # baseline is itself a prerelease — including the hardcoded
+          # v2.3.2-rc2 fallback above, where raw ordering would omit the stable
+          # v2.3.2 that followed it, which is the silent-drop direction.
+          #
+          # The `_` fold is not cosmetic. Upstream's older tags separate the
+          # prerelease with an underscore (v1.4.0_beta1, _beta2, _beta3 are all
+          # real), so a hyphen-only test reads them as STABLE and appends the
+          # sentinel to them — making v1.4.0_beta1-zzzzz outrank v1.4.0-zzzzz
+          # and dropping the stable release that followed. Folding `_` to `-`
+          # before the test is what fixes it; merely adding `*_*` to the case
+          # does not, because `sort -V` ranks `-` before `_` and v1.4.0-zzzzz
+          # would still land below v1.4.0_beta1. Note the consistency guard
+          # below cannot catch this class of error, since it shares this same
+          # comparison — so this has to be right here rather than be caught
+          # downstream.
+          norm_ver() {
+            _v=$(printf '%s' "$1" | tr '_' '-')
+            case "$_v" in
+              *-*) printf '%s' "$_v" ;;
+              *)   printf '%s-zzzzz' "$_v" ;;
+            esac
+          }
+          # ver_newer A B: true when A is a strictly newer release than B.
+          ver_newer() {
+            _a=$(norm_ver "$1"); _b=$(norm_ver "$2")
+            [ "$_a" != "$_b" ] \
+              && [ "$(printf '%s\n%s\n' "$_a" "$_b" | sort -V | head -1)" = "$_b" ]
+          }
+
+          # Sorted on the normalised key, not on git's, so the newest release
+          # heads the list instead of trailing its own prereleases. The tag name
+          # is carried alongside the key rather than recomputed.
+          #
+          # `-t"$TAB" -k1,1` is not decoration. `sort -V` compares the whole
+          # line by default, and a tab embedded in a version string makes it
+          # rank v2.3.2-rc ABOVE v2.3.2-rc2 — measured, and caught by
+          # test_upstream_watch_tags.py. Restricting the comparison to the key
+          # field keeps the tab out of it. TAB goes through printf rather than
+          # $'\t' so the fragment does not depend on the shell being bash.
+          TAB=$(printf '\t')
+          NEW_TAGS=$(upstream_tags 'v*' | while read -r tag; do
+              [ -n "$tag" ] || continue
+              if ver_newer "$tag" "$BASELINE_TAG"; then
+                printf '%s\t%s\n' "$(norm_ver "$tag")" "$tag"
+              fi
+            done | sort -t"$TAB" -k1,1 -rV | cut -f2 | while read -r tag; do
+              COMMIT_DATE=$(git log -1 --format='%ci' "refs/upstream-tags/$tag" | cut -d' ' -f1)
+              # Only the newest stable tag is what the sync workflow would
+              # target; saying so stops a prerelease reading as actionable.
+              if [ "$tag" = "$LATEST_TAG" ]; then
+                echo "- \`$tag\` ($COMMIT_DATE) — **sync target**"
+              else
+                echo "- \`$tag\` ($COMMIT_DATE)"
+              fi
+            done)
+
+          if [ -z "$NEW_TAGS" ]; then
+            NEW_TAGS="None"
+          fi
+
+          # Consistency guard. If the newest stable tag is strictly newer than
+          # the baseline then at least one tag is newer than the baseline by
+          # construction, so an empty list is arithmetically impossible and
+          # means this selection is broken again. The comparison has to be
+          # ver_newer and not `!=`: a baseline that is a prerelease ahead of the
+          # newest stable release (v2.5.0-rc held, v2.4.2 newest stable) is a
+          # legitimately empty list, and `!=` would cry wolf on it.
+          #
+          # Warns rather than fails: a digest missing one section still carries
+          # the other five, and failing here posts nothing at all. The point is
+          # that the contradiction which hid the ancestry bug for five days can
+          # no longer be printed silently.
+          if [ "$NEW_TAGS" = "None" ] && ver_newer "$LATEST_TAG" "$BASELINE_TAG"; then
+            echo "::warning title=Digest tag list inconsistent::Newest stable upstream tag $LATEST_TAG is newer than baseline $BASELINE_TAG, so 'New Tags Since Last Sync' cannot legitimately be empty. Do not read this digest as 'nothing to sync'."
+            NEW_TAGS="None reported — **inconsistent with the baseline above, do not trust this section.** \`$LATEST_TAG\` is newer than \`$BASELINE_TAG\`, so this list cannot be empty; the tag-selection logic is broken. See the run's warning annotation."
+          fi
+          # <<< new-tags-selection
 
           # Active release branches
           RELEASE_BRANCHES=$(git branch -r --list 'upstream/release/*' | while read branch; do
