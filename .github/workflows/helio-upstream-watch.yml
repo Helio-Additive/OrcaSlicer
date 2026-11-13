@@ -33,10 +33,15 @@ jobs:
           # four sit below the baseline so nothing is misreported, but the
           # digest must not depend on that staying true.
           #
-          # No `|| true`: a failed fetch leaves the namespace empty, the
-          # stable-tag lookup finds nothing and the step exits — which is the
-          # behaviour this file already chose for the plain --tags fetch above,
-          # on the grounds that a wrong digest is worse than none.
+          # This is a second fetch invocation, so a second network operation —
+          # the refs are the same but they are asked for twice. What it is not
+          # is a new failure mode: with no `|| true` a failure exits THIS step,
+          # so the digest never runs and nothing is posted. That is the policy
+          # the plain --tags fetch above already set, on the grounds that a
+          # wrong digest is worse than none. The alternative considered was
+          # `git ls-remote` inside the digest step, which costs the same network
+          # operation but puts the failure in the middle of digest generation,
+          # where the policy would have to be decided from scratch.
           git fetch upstream --force 'refs/tags/*:refs/upstream-tags/*'
           git fetch upstream 'refs/heads/release/*:refs/remotes/upstream/release/*' || true
           git fetch upstream main || true
