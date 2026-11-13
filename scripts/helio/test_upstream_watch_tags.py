@@ -252,6 +252,34 @@ def main():
         case("empty list + strictly newer latest -> warns and says so",
              repo, "v2.5.0", "v2.9.9", want_none=True, want_warning=True)
 
+        print("\n== legacy underscore prereleases (upstream really ships these) ==")
+        # Codex P2 on PR #157. Upstream tagged v1.4.0_beta1/2/3 with an
+        # UNDERSCORE. A hyphen-only stable/prerelease test reads those as
+        # stable, appends the sentinel to them, and then ranks
+        # v1.4.0_beta1-zzzzz above v1.4.0-zzzzz — silently omitting the stable
+        # release that followed. The consistency guard cannot catch it because
+        # it shares the same comparison, which is what makes it worth a test
+        # rather than a comment.
+        git(repo, "checkout", "-q", "-b", "release/v1.4", "main")
+        for t in ["v1.4.0_beta1", "v1.4.0_beta2", "v1.4.0"]:
+            git(repo, "tag", t)
+        git(repo, "checkout", "-q", "main")
+        case("stable v1.4.0 is newer than v1.4.0_beta1/2, not older",
+             repo, "v1.4.0_beta1", "v1.4.0",
+             want_tags=["v2.5.0", "v2.5.0-rc", "v2.5.0-beta",
+                        "v2.5.0-alpha", "v2.4.2", "v2.4.1", "v2.4.0",
+                        "v2.4.0-alpha", "v2.3.2", "v2.3.2-rc2", "v2.3.2-rc",
+                        "v2.3.2-beta", "v1.4.0", "v1.4.0_beta2"],
+             want_target=["v1.4.0"])
+
+        case("and the underscore family orders among itself",
+             repo, "v1.4.0_beta2", "v1.4.0",
+             want_tags=["v2.5.0", "v2.5.0-rc", "v2.5.0-beta",
+                        "v2.5.0-alpha", "v2.4.2", "v2.4.1", "v2.4.0",
+                        "v2.4.0-alpha", "v2.3.2", "v2.3.2-rc2", "v2.3.2-rc",
+                        "v2.3.2-beta", "v1.4.0"],
+             want_target=["v1.4.0"])
+
         print("\n== ordering is numeric, not lexical ==")
         git(repo, "checkout", "-q", "main")
         git(repo, "checkout", "-q", "-b", "release/v2.10", "main")

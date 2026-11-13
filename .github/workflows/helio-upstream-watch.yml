@@ -125,10 +125,23 @@ jobs:
           # baseline is itself a prerelease — including the hardcoded
           # v2.3.2-rc2 fallback above, where raw ordering would omit the stable
           # v2.3.2 that followed it, which is the silent-drop direction.
+          #
+          # The `_` fold is not cosmetic. Upstream's older tags separate the
+          # prerelease with an underscore (v1.4.0_beta1, _beta2, _beta3 are all
+          # real), so a hyphen-only test reads them as STABLE and appends the
+          # sentinel to them — making v1.4.0_beta1-zzzzz outrank v1.4.0-zzzzz
+          # and dropping the stable release that followed. Folding `_` to `-`
+          # before the test is what fixes it; merely adding `*_*` to the case
+          # does not, because `sort -V` ranks `-` before `_` and v1.4.0-zzzzz
+          # would still land below v1.4.0_beta1. Note the consistency guard
+          # below cannot catch this class of error, since it shares this same
+          # comparison — so this has to be right here rather than be caught
+          # downstream.
           norm_ver() {
-            case "$1" in
-              *-*) printf '%s' "$1" ;;
-              *)   printf '%s-zzzzz' "$1" ;;
+            _v=$(printf '%s' "$1" | tr '_' '-')
+            case "$_v" in
+              *-*) printf '%s' "$_v" ;;
+              *)   printf '%s-zzzzz' "$_v" ;;
             esac
           }
           # ver_newer A B: true when A is a strictly newer release than B.
