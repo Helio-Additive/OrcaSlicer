@@ -74,7 +74,40 @@ def selection_block():
     return out
 
 
+def upstream_tags_fn():
+    """The `upstream_tags` helper, lifted out of the same step.
+
+    It sits outside the extracted markers because the selection is not its only
+    caller, so the harness has to supply it — and supplying a transcription
+    would mean the suite could pass while the shipped helper enumerated
+    something else. Extracting it keeps that impossible.
+    """
+    wf = yaml.safe_load(open(WF))
+    steps = wf["jobs"]["watch"]["steps"]
+    body = next(s["run"] for s in steps if s.get("id") == "digest")
+
+    m = re.search(r"^[ \t]*upstream_tags\(\)[ \t]*\{.*?^[ \t]*\}[ \t]*$",
+                  body, re.S | re.M)
+    if not m:
+        sys.exit("FATAL: upstream_tags() not found in the digest step of %s. "
+                 "If it was renamed or inlined, this harness is feeding the "
+                 "selection a helper the workflow no longer has." % WF)
+
+    fn = m.group(0)
+    lines = fn.split("\n")
+    pad = min(len(ln) - len(ln.lstrip()) for ln in lines if ln.strip())
+    fn = "\n".join(ln[pad:] if ln.strip() else "" for ln in lines)
+
+    if "refs/upstream-tags/" not in fn:
+        sys.exit("FATAL: upstream_tags() no longer reads refs/upstream-tags/. "
+                 "If the enumeration moved back to refs/tags, fork-created v* "
+                 "tags are visible to the digest again and the exclusion test "
+                 "below would be asserting nothing.")
+    return fn
+
+
 BLOCK = selection_block()
+UPSTREAM_TAGS_FN = upstream_tags_fn()
 
 
 def git(repo, *args, **kw):
@@ -102,12 +135,23 @@ def build_repo(tmp):
         git(repo, "commit", "-q", "-m", msg)
         return git(repo, "rev-parse", "HEAD")
 
+    def up_tag(name, rev="HEAD"):
+        """Tag as the workflow sees upstream tags: in refs/upstream-tags/.
+
+        The fetch step mirrors upstream's refs/tags/* into a namespace of its
+        own precisely so a fork-created tag cannot be read as an upstream
+        release, so the fixture has to put them where the selection looks. A
+        plain `git tag` here would test nothing about that split.
+        """
+        git(repo, "update-ref", "refs/upstream-tags/" + name,
+            git(repo, "rev-parse", rev))
+
     def release(branch, base, tags):
         """Cut `branch` off main at `base` and tag on it, as upstream does."""
         git(repo, "checkout", "-q", "-b", branch, base)
         for t in tags:
             commit("work for " + t)
-            git(repo, "tag", t)
+            up_tag(t)
         git(repo, "checkout", "-q", "main")
 
     commit("initial")
@@ -128,6 +172,10 @@ def run_selection(repo, baseline, latest):
     """Run the extracted block and return (NEW_TAGS, warnings)."""
     script = (
         "set -e -o pipefail\n"
+        # Defined in the digest step outside the extracted markers, so the
+        # harness supplies it. Kept byte-identical to the workflow's body by
+        # upstream_tags_drift() below rather than by hope.
+        + UPSTREAM_TAGS_FN + "\n"
         'BASELINE_TAG="$1"\n'
         'LATEST_TAG="$2"\n'
         + BLOCK +
@@ -189,14 +237,14 @@ def ancestry_selftest(repo):
     """
     label = "selftest: the old ancestor test fails across a release boundary"
     anc = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", "refs/tags/v2.4.2",
-         "refs/tags/v2.5.0"], cwd=repo, capture_output=True)
+        ["git", "merge-base", "--is-ancestor", "refs/upstream-tags/v2.4.2",
+         "refs/upstream-tags/v2.5.0"], cwd=repo, capture_output=True)
     check(label, anc.returncode != 0, True)
 
     label2 = "selftest: and it holds WITHIN one release family"
     anc2 = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", "refs/tags/v2.3.2-rc2",
-         "refs/tags/v2.3.2"], cwd=repo, capture_output=True)
+        ["git", "merge-base", "--is-ancestor", "refs/upstream-tags/v2.3.2-rc2",
+         "refs/upstream-tags/v2.3.2"], cwd=repo, capture_output=True)
     check(label2, anc2.returncode == 0, True)
 
 
@@ -240,10 +288,11 @@ def main():
         # cut v2.5.0-rc and we hold it, but v2.5.0 itself does not exist yet,
         # so LATEST_TAG is still v2.4.2 and an empty list is correct. A `!=`
         # comparison in the guard would cry wolf here; ver_newer must not.
-        git(repo, "tag", "-d", "v2.5.0")
+        git(repo, "update-ref", "-d", "refs/upstream-tags/v2.5.0")
         case("prerelease baseline above the newest stable -> None, quietly",
              repo, "v2.5.0-rc", "v2.4.2", want_none=True, want_warning=False)
-        git(repo, "tag", "v2.5.0", "refs/tags/v2.5.0-rc")
+        git(repo, "update-ref", "refs/upstream-tags/v2.5.0",
+            git(repo, "rev-parse", "refs/upstream-tags/v2.5.0-rc"))
 
         print("\n== the consistency guard fires on an impossible answer ==")
         # LATEST_TAG names a release newer than the baseline that is absent
@@ -262,7 +311,8 @@ def main():
         # rather than a comment.
         git(repo, "checkout", "-q", "-b", "release/v1.4", "main")
         for t in ["v1.4.0_beta1", "v1.4.0_beta2", "v1.4.0"]:
-            git(repo, "tag", t)
+            git(repo, "update-ref", "refs/upstream-tags/" + t,
+                git(repo, "rev-parse", "HEAD"))
         git(repo, "checkout", "-q", "main")
         case("stable v1.4.0 is newer than v1.4.0_beta1/2, not older",
              repo, "v1.4.0_beta1", "v1.4.0",
@@ -280,14 +330,38 @@ def main():
                         "v2.3.2-beta", "v1.4.0"],
              want_target=["v1.4.0"])
 
+        print("\n== fork-created v* tags are not upstream releases ==")
+        # CodeRabbit on PR #157. `git tag -l 'v*'` lists the union of
+        # upstream's tags and the fork's own, and this fork really carries four
+        # v*-shaped tags (v2.3.0.1-rc1..rc3, v2.3.1-rc1). All four happen to
+        # sit below today's baseline, so nothing is misreported right now — the
+        # digest simply must not depend on that. These go in refs/tags only,
+        # exactly as actions/checkout leaves them.
+        git(repo, "tag", "v2.9.9")          # stable-looking, above the baseline
+        git(repo, "tag", "v2.6.0-rc1")      # prerelease-looking
+        # A real upstream release above the baseline, so this discriminates
+        # rather than just asserting an empty list: v2.9.9 sorts ABOVE v2.6.0,
+        # so if fork tags were visible it would head the list and take the
+        # sync-target mark.
+        git(repo, "checkout", "-q", "-b", "release/v2.6", "main")
+        git(repo, "update-ref", "refs/upstream-tags/v2.6.0",
+            git(repo, "rev-parse", "HEAD"))
+        git(repo, "checkout", "-q", "main")
+        case("fork tags are invisible; the real upstream release still lists",
+             repo, "v2.5.0", "v2.6.0",
+             want_tags=["v2.6.0"], want_target=["v2.6.0"])
+
         print("\n== ordering is numeric, not lexical ==")
         git(repo, "checkout", "-q", "main")
         git(repo, "checkout", "-q", "-b", "release/v2.10", "main")
-        git(repo, "tag", "v2.10.0")
+        git(repo, "update-ref", "refs/upstream-tags/v2.10.0",
+            git(repo, "rev-parse", "HEAD"))
         git(repo, "checkout", "-q", "main")
-        case("v2.10.0 sorts above v2.9.x-era tags, not below",
+        # v2.6.0 exists from the case above, and v2.10.0 must sort ABOVE it
+        # rather than lexically below ("1" < "6").
+        case("v2.10.0 sorts above v2.6.0, not lexically below it",
              repo, "v2.5.0", "v2.10.0",
-             want_tags=["v2.10.0"], want_target=["v2.10.0"])
+             want_tags=["v2.10.0", "v2.6.0"], want_target=["v2.10.0"])
 
     print("")
     if failures:

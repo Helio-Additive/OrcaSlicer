@@ -24,6 +24,20 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
+          # Upstream's tags AGAIN, into a namespace of their own. `git tag -l`
+          # lists the union of upstream's tags and the fork's own, and the fork
+          # really does carry four v*-shaped tags (v2.3.0.1-rc1..rc3,
+          # v2.3.1-rc1). Enumerating `v*` from refs/tags would therefore let a
+          # fork tag be reported as an upstream release and, if it were the
+          # newest stable one, be named this digest's sync target. Today all
+          # four sit below the baseline so nothing is misreported, but the
+          # digest must not depend on that staying true.
+          #
+          # No `|| true`: a failed fetch leaves the namespace empty, the
+          # stable-tag lookup finds nothing and the step exits — which is the
+          # behaviour this file already chose for the plain --tags fetch above,
+          # on the grounds that a wrong digest is worse than none.
+          git fetch upstream --force 'refs/tags/*:refs/upstream-tags/*'
           git fetch upstream 'refs/heads/release/*:refs/remotes/upstream/release/*' || true
           git fetch upstream main || true
 
@@ -31,6 +45,23 @@ jobs:
         id: digest
         run: |
           RELEASE_BRANCH="${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}"
+
+          # Upstream tag names, read from the namespace the fetch step filled.
+          # Every `v*` enumeration below goes through this rather than
+          # `git tag -l`, which lists the union of upstream's tags and the
+          # fork's own — the fork carries four v*-shaped tags of its own
+          # (v2.3.0.1-rc1..rc3, v2.3.1-rc1), and any of them above the baseline
+          # would otherwise be reported as an upstream release and could be
+          # named the sync target. Defined here, not in the fetch step: every
+          # `run:` block is a separate shell, so a function defined there would
+          # not exist by the time this one runs.
+          # --sort matches the `git tag -l --sort=-version:refname` this
+          # replaced, so the stable-tag lookup below is unchanged in every
+          # respect except which refs it can see.
+          upstream_tags() {
+            git for-each-ref --sort=-version:refname \
+              --format='%(refname:strip=2)' "refs/upstream-tags/$1"
+          }
 
           # Baseline: the upstream release this branch actually holds.
           #
@@ -54,31 +85,35 @@ jobs:
           BASELINE_TAG="v$BASELINE_VER"
           BASELINE_SOURCE="version.inc"
 
-          # Verify through refs/tags/ explicitly. A bare name resolves branches
-          # too, and while git's disambiguation happens to prefer tags over
-          # heads, "happens to" is not what a baseline should rest on — upstream
-          # ships release/* branches alongside these tags.
-          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+          # Verify through refs/upstream-tags/ explicitly. Two things this
+          # buys: a bare name resolves branches too (and while git's
+          # disambiguation happens to prefer tags over heads, "happens to" is
+          # not what a baseline should rest on — upstream ships release/*
+          # branches alongside these tags), and the namespace holds only
+          # upstream's tags, so this now proves the baseline names an UPSTREAM
+          # release. Against refs/tags it would also have been satisfied by one
+          # of the fork's own v*-shaped tags.
+          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/upstream-tags/$BASELINE_TAG^{commit}" >/dev/null; then
             echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
             BASELINE_TAG="v2.3.2-rc2"
             BASELINE_SOURCE="hardcoded fallback"
             # If even the fallback is absent, stop. Handing an unresolved ref to
             # the merge-base loop below silently yields a wrong digest, and a
             # wrong digest is worse than none: it is read as "nothing to sync".
-            if ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+            if ! git rev-parse -q --verify "refs/upstream-tags/$BASELINE_TAG^{commit}" >/dev/null; then
               echo "::error title=No usable digest baseline::Neither version.inc nor the v2.3.2-rc2 fallback resolves to an upstream tag. Refusing to compute a digest from an unresolved baseline."
               exit 1
             fi
           fi
-          # BASELINE_TAG stays bare from here on: it matches `git tag -l`
+          # BASELINE_TAG stays bare from here on: it matches `upstream_tags`
           # output, which is what the version comparison below consumes, and it
           # is what the digest displays. There is deliberately no BASELINE_REF
           # any more — the new-tag selection compares version strings and never
           # resolves the baseline as a git ref, so the only thing the
-          # refs/tags/ verification above still establishes is that the baseline
-          # names a real upstream tag. That is exactly what gates the fallback,
-          # so the check stays; a second variable asserting more than that
-          # would be claiming a guarantee nothing relies on.
+          # verification above still establishes is that the baseline names a
+          # real upstream tag. That is exactly what gates the fallback, so the
+          # check stays; a second variable asserting more than that would be
+          # claiming a guarantee nothing relies on.
           echo "Digest baseline: $BASELINE_TAG (source: $BASELINE_SOURCE)"
 
           # Commits on main since last release (exclude prereleases — git's
@@ -87,7 +122,7 @@ jobs:
           #
           # Computed before the new-tag list below, which annotates whichever
           # entry equals it as the sync target.
-          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
+          LATEST_TAG=$(upstream_tags 'v*' \
             | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
             | head -1 || true)
           if [ -z "$LATEST_TAG" ]; then
@@ -162,13 +197,13 @@ jobs:
           # field keeps the tab out of it. TAB goes through printf rather than
           # $'\t' so the fragment does not depend on the shell being bash.
           TAB=$(printf '\t')
-          NEW_TAGS=$(git tag -l 'v*' | while read -r tag; do
+          NEW_TAGS=$(upstream_tags 'v*' | while read -r tag; do
               [ -n "$tag" ] || continue
               if ver_newer "$tag" "$BASELINE_TAG"; then
                 printf '%s\t%s\n' "$(norm_ver "$tag")" "$tag"
               fi
             done | sort -t"$TAB" -k1,1 -rV | cut -f2 | while read -r tag; do
-              COMMIT_DATE=$(git log -1 --format='%ci' "refs/tags/$tag" | cut -d' ' -f1)
+              COMMIT_DATE=$(git log -1 --format='%ci' "refs/upstream-tags/$tag" | cut -d' ' -f1)
               # Only the newest stable tag is what the sync workflow would
               # target; saying so stops a prerelease reading as actionable.
               if [ "$tag" = "$LATEST_TAG" ]; then
