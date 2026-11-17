@@ -1078,7 +1078,7 @@ Three rules keep that true, and all of them are load-bearing:
    The verdict is **`unknown`, not `held`**, and that asymmetry is the whole
    point. Duplication shows presence is *possible*, not that it happened — the
    lines could coincide — so `base-ok` tolerates it (which is what rescues the
-   graft, and the actual fix for #150) while `holds` still refuses (so no release
+   graft, and the actual fix for #152) while `holds` still refuses (so no release
    is ever skipped on this evidence). Answering `held` here, as the issue
    originally proposed, would have opened the one direction that drops upstream
    work silently and permanently. **Two tests decide it, and the review of

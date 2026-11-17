@@ -254,7 +254,7 @@ _reinsert_only() {
 # duplicate. The result differs from ours while our blob holds every line of
 # upstream's change. `_reinsert_only` separates that case out, and it answers
 # `unknown` rather than `held` because duplication proves presence is POSSIBLE,
-# not that it happened. Reading it as `absent` is what produced #150/#152.
+# not that it happened. Reading it as `absent` is the defect #152 reports.
 #
 # `unknown` is a THIRD answer, not a synonym for held. Folding it into held is
 # what let a conflicting merge satisfy the already-synced check and skip a real
@@ -273,7 +273,7 @@ _change_state() {
       # The merge only duplicated content we already hold, so it CANNOT show
       # upstream's change to be absent. It also cannot prove it present: the
       # lines could coincide. `unknown` is the honest answer, and it is the one
-      # that fixes #150 without opening the silent-drop direction — `base-ok`
+      # that fixes #152 without opening the silent-drop direction — `base-ok`
       # tolerates unknown (so the graft keeps the candidate) while `holds` still
       # refuses (so no release is ever skipped on this evidence).
       out=unknown
