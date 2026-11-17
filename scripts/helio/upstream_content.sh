@@ -107,12 +107,20 @@ _blob_to() {
 # _reinsert_only <dir>: true when the only thing a CLEAN three-way merge would
 # do to our blob is re-insert a block we ALREADY HOLD, beside the copy we hold.
 #
-# This is the false-`missing` case that cost #150 a 472-file conflict set (#152).
+# This is the false-`missing` case reported as #152.
+#
+# It did NOT cause #150's 472-file conflict set, though earlier versions of this
+# comment said so. The graft gates every candidate on `git merge-base
+# --is-ancestor` BEFORE any content check, and v2.4.2 is not an ancestor of
+# v2.5.0, so CANDS was empty and this script was never consulted on that run
+# (#158; confirmed when the v2.5.1 sync exploded the same way in #160). A false
+# `missing` is still the dangerous direction and will decide real outcomes as
+# soon as the graft does consult content -- it is just not that bug's cause.
 # `git merge-file` places upstream's hunk by its position in the BASE, not by
 # where that content ended up in ours. When Helio has edited next to upstream's
 # insertion anchor the merge misaligns and inserts the block a SECOND time,
 # directly against the copy we already have. The result differs from ours, and
-# reading that difference as "upstream's change is absent" is what broke #150.
+# reading that difference as "upstream's change is absent" is the defect (#152).
 #
 # Measured on the path that triggered it, src/slic3r/GUI/Widgets/TextInput.hpp,
 # where merging v2.2.0 -> v2.4.2 onto our blob re-inserts `static_tips`,

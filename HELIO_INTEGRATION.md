@@ -1058,8 +1058,11 @@ Three rules keep that true, and all of them are load-bearing:
    | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
 
-   The second of those rows is the correction that #152 bought, and it was worth
-   a 472-file conflict set to learn. `git merge-file` places upstream's hunk by
+   The second of those rows is the correction that #152 bought. (An earlier
+   version of this paragraph said it was "worth a 472-file conflict set to
+   learn" — that attribution was wrong: #150's 472 conflicts came from the
+   ancestry gate, which skipped this script entirely. See #158, and #160 for
+   the same failure recurring on v2.5.1.) `git merge-file` places upstream's hunk by
    its position in the **base**, not by where that content ended up in our copy.
    When Helio has appended to the same file — the ordinary shape for a touchpoint
    — our copy of upstream's lines can sit at a different offset than the merge

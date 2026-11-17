@@ -944,8 +944,9 @@ b.append(boundary("divergent modes still allow a graft base (`base-ok` tolerates
 # upstream's change, but `git merge-file` places the hunk by its position in the
 # BASE, misaligns, and cleanly inserts the block a SECOND time. The merge result
 # then differs from ours, which the old code read as `absent` -- the DEFINITIVE
-# answer, which `base-ok` refuses outright. That is what rejected v2.4.2 as a
-# graft base and took #150 from 22 real conflicts to 472 reported ones.
+# answer, which `base-ok` refuses outright, so a path in this shape disqualifies
+# an otherwise-correct graft base. (This did not cause #150's 472 conflicts --
+# the ancestry gate did, and it skipped this script altogether; see #158/#160.)
 b.append(boundary("superset file (merge duplicates) is NOT reported missing",
                   kw=dict(superset=True), cmd=["missing", "v2.4.1"],
                   want_empty=True))
@@ -953,7 +954,7 @@ b.append(boundary("superset file is reported `unknown` instead",
                   kw=dict(superset=True), cmd=["unknown", "v2.4.1"],
                   want_out="widget.hpp"))
 # The asymmetry is the whole point of answering `unknown` rather than `held`:
-# permissive must now accept the candidate (this is the #150 fix), while strict
+# permissive must now accept the candidate (this is #152's fix), while strict
 # must still refuse, because duplication shows presence is POSSIBLE, not that it
 # happened. A release must never be skipped on this evidence.
 b.append(boundary("`base-ok` ALLOWS the superset candidate -> the graft is kept",
