@@ -753,9 +753,9 @@ void HelioQuery::request_pat_token(std::function<void(std::string)> func)
     std::string url_copy = "";
 
     if (GUI::wxGetApp().app_config->get("region") == "China") {
-        url_copy = "https://api.helioam.cn/rest/auth/anonymous_token/bambustudio";
+        url_copy = "https://api.helioam.cn/rest/auth/anonymous_token/orcaslicer";
     } else {
-        url_copy = "https://api.helioadditive.com/rest/auth/anonymous_token/bambustudio";
+        url_copy = "https://api.helioadditive.com/rest/auth/anonymous_token/orcaslicer";
     }
 
     auto http = Http::get(url_copy);
