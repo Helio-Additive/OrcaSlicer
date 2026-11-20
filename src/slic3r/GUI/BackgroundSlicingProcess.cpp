@@ -207,7 +207,10 @@ void BackgroundSlicingProcess::process_fff()
 		evt.SetInt((int)(m_fff_print->step_state_with_timestamp(PrintStep::psSlicingFinished).timestamp));
 		wxQueueEvent(GUI::wxGetApp().mainframe->m_plater, evt.Clone());
 
-		m_temp_output_path = this->get_current_plate()->get_tmp_gcode_path();
+		// A completed Helio optimization keeps its printable artifact separate from
+		// the annotated preview and the original temporary G-code. Resolve the
+		// plate's canonical printable file before exporting or uploading it.
+		m_temp_output_path = this->get_current_plate()->get_gcode_filename();
 		if (! m_export_path.empty()) {
 			BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: export gcode from %2% directly to %3%")%__LINE__%m_temp_output_path %m_export_path;
 		}

@@ -20,6 +20,7 @@
 
 #include <float.h>
 #include <assert.h>
+#include <cmath>
 #include <regex>
 #include <charconv>
 #include <string>
@@ -44,6 +45,38 @@ static const float DRAW_ARC_TOLERANCE = 0.0125f;            //0.0125mm tolerance
 static const float DEFAULT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_RETRACT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_TRAVEL_ACCELERATION = 1250.0f;
+
+static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& values)
+{
+    static constexpr std::array<std::string_view, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
+    bool parsed = false;
+
+    while (!fields.empty()) {
+        const size_t           delimiter = fields.find(',');
+        std::string_view       field     = fields.substr(0, delimiter);
+        if (!field.empty() && field.front() == '(')
+            field.remove_prefix(1);
+        if (!field.empty() && field.back() == ')')
+            field.remove_suffix(1);
+        const size_t           separator = field.find('=');
+        if (separator != std::string_view::npos) {
+            const auto key = std::find(keys.begin(), keys.end(), field.substr(0, separator));
+            if (key != keys.end()) {
+                const std::string_view number = field.substr(separator + 1);
+                float                  value;
+                const auto [end, error] = fast_float::from_chars(number.data(), number.data() + number.size(), value);
+                if (error == std::errc() && end == number.data() + number.size() && std::isfinite(value)) {
+                    values[std::distance(keys.begin(), key)] = value;
+                    parsed = true;
+                }
+            }
+        }
+        if (delimiter == std::string_view::npos)
+            break;
+        fields.remove_prefix(delimiter + 1);
+    }
+    return parsed;
+}
 
 static const size_t MIN_EXTRUDERS_COUNT = 5;
 static const float DEFAULT_FILAMENT_DIAMETER = 1.75f;
@@ -1686,6 +1719,8 @@ void GCodeProcessorResult::reset() {
     filament_change_count_map.clear();
     warnings.clear();
     is_helio_gcode = false;
+    warpage_wdm_p95 = NAN;
+    warpage_whs_p95 = NAN;
 
     //BBS: add mutex for protection of gcode result
     unlock();
@@ -2527,6 +2562,7 @@ void GCodeProcessor::reset()
     m_fan_speed = 0.0f;
     m_z_offset = 0.0f;
     m_is_helio_gcode = false;
+    m_pending_helio_gcode_id.reset();
 
     m_extrusion_role = erNone;
 
@@ -2902,12 +2938,46 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
 {
 /* std::cout << line.raw() << std::endl; */
 
+    const std::string& raw = line.raw();
+    std::string_view   standalone_comment(raw);
+    const size_t       comment_begin = standalone_comment.find_first_not_of(" \t");
+    if (comment_begin != std::string_view::npos)
+        standalone_comment.remove_prefix(comment_begin);
+    const bool is_standalone_helio_comment = boost::starts_with(standalone_comment, ";helioadditive=");
+    if (m_pending_helio_gcode_id && is_standalone_helio_comment) {
+        std::array<float, 9> warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
+        if (parse_warpage_fields(standalone_comment.substr(sizeof(";helioadditive=") - 1), warpage_fields)) {
+            m_is_helio_gcode = true;
+            // calculate_time() may insert speed vertices while processing a move.
+            // Associate metadata by the stable G-code ID, not a saved vector index.
+            // Event vertices borrow the following motion's ID but do not belong to it.
+            for (auto it = m_result.moves.rbegin(); it != m_result.moves.rend() &&
+                 it->gcode_id == *m_pending_helio_gcode_id &&
+                 it->type != EMoveType::Color_change && it->type != EMoveType::Pause_Print &&
+                 it->type != EMoveType::Custom_GCode; ++it) {
+                auto& move = *it;
+                if (!std::isnan(warpage_fields[0])) move.warpage_displacement    = warpage_fields[0];
+                if (!std::isnan(warpage_fields[1])) move.warpage_disp_x          = warpage_fields[1];
+                if (!std::isnan(warpage_fields[2])) move.warpage_disp_y          = warpage_fields[2];
+                if (!std::isnan(warpage_fields[3])) move.warpage_disp_z          = warpage_fields[3];
+                if (!std::isnan(warpage_fields[4])) move.warpage_risk            = warpage_fields[4];
+                if (!std::isnan(warpage_fields[5])) move.warpage_ti_gradient     = warpage_fields[5];
+                if (!std::isnan(warpage_fields[6])) move.warpage_thermal_strain  = warpage_fields[6];
+                if (!std::isnan(warpage_fields[7])) move.warpage_hull_shrinkage  = warpage_fields[7];
+                if (!std::isnan(warpage_fields[8])) move.warpage_layer_shrinkage = warpage_fields[8];
+            }
+        }
+    }
+    m_pending_helio_gcode_id.reset();
+
     ++m_line_id;
 
     // update start position
     m_start_position = m_end_position;
 
     const std::string_view cmd = line.cmd();
+    const bool is_move = boost::iequals(cmd, "G0") || boost::iequals(cmd, "G1") ||
+                         boost::iequals(cmd, "G2") || boost::iequals(cmd, "G3");
     if (m_flavor == gcfKlipper)
     {
         if (boost::iequals(cmd, "SET_VELOCITY_LIMIT"))
@@ -2924,8 +2994,14 @@ void GCodeProcessor::process_gcode_line(const GCodeReader::GCodeLine& line, bool
     }
 
     if (cmd.length() > 1) {
+        // A no-op must not reuse an event vertex whose ID points to this line.
+        const size_t moves_count_before = m_result.moves.size();
         // process command lines
         m_command_processor.process_comand(cmd, line);
+        // Helio may emit the warpage record on the line after a move even when
+        // that move has no inline thermal-index annotation.
+        if (is_move && m_result.moves.size() > moves_count_before && m_result.moves.back().gcode_id == m_line_id)
+            m_pending_helio_gcode_id = m_line_id;
     }
     else {
         const std::string &comment = line.raw();
@@ -3163,7 +3239,20 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
         return;
     }
 
-    // Helio thermal index: handled in process_G1() to ensure parsing occurs before vertex storage
+    // Helio thermal index and warpage fields are handled while processing moves so
+    // they are available before the corresponding vertex is stored.
+
+    auto parse_warpage_percentile = [comment](const std::string_view prefix, float& value) {
+        if (!boost::starts_with(comment, prefix))
+            return false;
+        float parsed = NAN;
+        if (parse_number(comment.substr(prefix.size()), parsed) && std::isfinite(parsed))
+            value = parsed;
+        return true;
+    };
+    if (parse_warpage_percentile(" WARPAGE_WDM_P95=", m_result.warpage_wdm_p95) ||
+        parse_warpage_percentile(" WARPAGE_WHS_P95=", m_result.warpage_whs_p95))
+        return;
 
     // wipe start tag
     if (boost::starts_with(comment, reserved_tag(ETags::Wipe_Start))) {
@@ -3839,6 +3928,7 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
     m_thermal_index_mean = -200.0f;
     m_thermal_index_min = -200.0f;
     m_thermal_index_max = -200.0f;
+    m_warpage_fields.fill(NAN);
     {
         const std::string& raw = line.raw();
         auto pos = raw.find(";helioadditive=");
@@ -3852,6 +3942,8 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line, const std::o
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
+            if (parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields))
+                m_is_helio_gcode = true;
         }
     }
 
@@ -4595,6 +4687,7 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
     m_thermal_index_mean = -200.0f;
     m_thermal_index_min = -200.0f;
     m_thermal_index_max = -200.0f;
+    m_warpage_fields.fill(NAN);
     {
         const std::string& raw = line.raw();
         auto pos = raw.find(";helioadditive=");
@@ -4608,6 +4701,8 @@ void GCodeProcessor::process_G2_G3(const GCodeReader::GCodeLine& line, bool cloc
                 m_thermal_index_mean = static_cast<float>(std::atof(match[3].str().c_str())) * 100.0f;
                 m_is_helio_gcode = true;
             }
+            if (parse_warpage_fields(std::string_view(raw).substr(pos + sizeof(";helioadditive=") - 1), m_warpage_fields))
+                m_is_helio_gcode = true;
         }
     }
 
@@ -5761,6 +5856,15 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_thermal_index_mean,
         m_thermal_index_min,
         m_thermal_index_max,
+        m_warpage_fields[0],
+        m_warpage_fields[1],
+        m_warpage_fields[2],
+        m_warpage_fields[3],
+        m_warpage_fields[4],
+        m_warpage_fields[5],
+        m_warpage_fields[6],
+        m_warpage_fields[7],
+        m_warpage_fields[8],
         { 0.0f, 0.0f }, // time
         static_cast<float>(m_layer_id), //layer_duration: set later
         std::max<unsigned int>(1, m_layer_id) - 1,

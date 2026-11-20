@@ -184,6 +184,7 @@ private:
     wxString m_lastValidValue = wxEmptyString;
 
     std::string m_material_id;
+    bool m_is_multi_material{false};
     std::vector<HelioQuery::PrintPriorityOption> m_print_priority_options;
     std::vector<HelioQuery::PrintPriorityOption> m_available_print_priority_options;
     bool m_print_priority_loading{false};
@@ -226,7 +227,7 @@ private:
     
     int m_original_tooltip_delay{500};
 public:
-    HelioInputDialog(wxWindow *parent = nullptr, const std::string& material_id = "");
+    HelioInputDialog(wxWindow *parent = nullptr, const std::string& material_id = "", bool is_multi_material = false);
     ~HelioInputDialog();
 
 public:
