@@ -57,7 +57,11 @@ workflows:
   build_check_cache.yml:
     status: run
     owner: upstream
-    reason: Reusable dependency-cache stage called by build_all.yml and helio-release.yml.
+    requires_vars: [MACOS_RUNNER_LIMIT]
+    reason: >-
+      Reusable dependency-cache stage called by build_all.yml and helio-release.yml.
+      MACOS_RUNNER_LIMIT (new in v2.5.0) caps concurrent macOS legs; unset means
+      upstream's default, which is what this fork wants.
 
   build_deps.yml:
     status: run
@@ -77,11 +81,62 @@ workflows:
       - ORCA_UPDATER_SIG_KEY
       - P12_PASSWORD
       - TEAM_ID
-    requires_vars: [ENABLE_SIGNING, SELF_HOSTED]
+    requires_vars:
+      - ENABLE_SIGNING
+      - ORCA_MSIX_IDENTITY_NAME
+      - ORCA_MSIX_PUBLISHER
+      - ORCA_MSIX_PUBLISHER_DISPLAY_NAME
+      - SELF_HOSTED
+      - WINDOWS_SIGN_CERT_CHAIN
+      - WINDOWS_SIGN_KMS_KEY
+      - WINDOWS_SIGN_SERVICE_ACCOUNT
+      - WINDOWS_SIGN_WIF_PROVIDER
     reason: >-
       Reusable app-build stage. The macOS signing/notarisation secrets are only
       consumed when the ENABLE_SIGNING repo variable is set, so they are expected
       to be absent on an unsigned build.
+
+      New in v2.5.0: the ORCA_MSIX_* variables only label the Microsoft Store
+      package (each has an upstream default in the expression, and Helio does not
+      publish to the Store), and the WINDOWS_SIGN_* variables drive Windows code
+      signing through Google Cloud Workload Identity Federation. All are expected
+      to be absent here; unset leaves both paths at upstream's defaults.
+
+  unit_tests.yml:
+    status: run
+    owner: upstream
+    requires_vars: [SELF_HOSTED]
+    reason: >-
+      New in v2.5.0. Reusable (workflow_call only) unit-test stage that build_all.yml
+      calls once per built arch. Reachable only through build_all, so it inherits the
+      parity branch's `ready-to-build` gate.
+
+  unit_tests_flatpak.yml:
+    status: run
+    owner: upstream
+    reason: >-
+      New in v2.5.0. Reusable (workflow_call only) Flatpak unit-test stage called by
+      build_all.yml after the flatpak job. Same inherited gating as unit_tests.yml.
+
+  cancel_closed_pr_builds.yml:
+    status: run
+    owner: upstream
+    reason: >-
+      New in v2.5.0. Cancels in-flight builds when a PR is closed by joining
+      build_all.yml's concurrency group by name. No repository guard and no branch
+      filter, so it works on parity-branch PRs as-is, and this fork does run
+      build_all — so it saves runner time here. NOTE: it depends on build_all.yml's
+      concurrency group name (`build-all-...`); if that is ever changed, change it
+      here too.
+
+  main_build_status.yml:
+    status: disabled
+    owner: upstream
+    reason: >-
+      New in v2.5.0. Publishes upstream's `main` build-status badge. Guarded by
+      `github.repository == 'OrcaSlicer/OrcaSlicer'` and triggered on workflow_run
+      for branch `main`, so it is doubly inert here (this fork's base is
+      orca-latest-parity-bambu and its README carries Helio's own badge).
 
   helio-release.yml:
     status: run
@@ -167,6 +222,31 @@ workflows:
     reason: >-
       Posts check_profiles results back onto the PR via workflow_run. Inert as
       long as check_profiles.yml never fires here — it has nothing to report on.
+
+  clang_tidy.yml:
+    status: disabled
+    owner: upstream
+    requires_vars: [SELF_HOSTED]
+    reason: >-
+      New in v2.5.0. Static analysis on `pull_request` filtered to
+      `branches: [main, release/*]`, so like check_profiles.yml / check_locale.yml it
+      has never run on this fork — the parity branch is not in the filter (Rule 14).
+      Left inert deliberately: adding the parity branch means editing an
+      upstream-owned file, which build_all.yml shows costs a conflict on every future
+      sync. Still has workflow_dispatch if a specific sync warrants a manual run.
+
+  approve_pr_checks.yml:
+    status: disabled
+    owner: upstream
+    reason: >-
+      New in v2.5.0. Approves the pending runs of check_profiles.yml,
+      check_locale.yml and clang_tidy.yml on fork PRs. All three of those are inert
+      on this fork (branch filters target main/release/*), so it has nothing to
+      approve here — but unlike most inherited infrastructure it has NO
+      `github.repository` guard and carries a `cron: '7,17,...'` schedule, so left
+      enabled it burns a run every 10 minutes (~144/day) doing nothing. Disable it at
+      the repo level under Settings -> Actions; the file stays byte-identical
+      (Rule 12).
 
   shellcheck.yml:
     status: run
@@ -272,7 +352,57 @@ workflows:
       firing on its own. DECISION (2026-08-11): `disabled` alongside the rest of
       the dedup family.
 
+  pr-merge-bot.yml:
+    status: disabled
+    owner: upstream
+    requires_vars: [FOLDER_MERGERS, MERGE_BOT_DRY_RUN]
+    reason: >-
+      New in v2.5.0. Upstream's profile auto-merge bot: it merges PRs on maintainer
+      comment commands and labels profile PRs. All three jobs are guarded by
+      `github.repository == 'OrcaSlicer/OrcaSlicer'`, so it is inert here — which is
+      what this fork wants, because its `issue_comment: created` trigger has no
+      branch filter and this fork's maintainers and merge policy are not upstream's.
+      Do not remove that guard.
+
   # ---------------------------------------------------------------- upstream-only
+  ofl-ota-cronjob.yml:
+    status: disabled
+    owner: upstream
+    requires_secrets: [OFL_OTA_PUBLISH_KEY]
+    requires_vars: [OTA_API_BASE_URL]
+    reason: >-
+      New in v2.5.0. Daily cron that publishes profile OTA updates to upstream's OFL
+      OTA service. This targets UPSTREAM's distribution channel, so it must never run
+      here (same class as winget_updater.yml). Guarded by
+      `github.repository == 'OrcaSlicer/OrcaSlicer'`, and OFL_OTA_PUBLISH_KEY is
+      unset — but as winget_updater.yml records, an unset secret is not a control.
+      The repository guard is the control here; do not remove it.
+
+  post_merge_profiles.yml:
+    status: disabled
+    owner: upstream
+    requires_secrets:
+      - OFL_OTA_PUBLISH_KEY
+      - PROFILES_APP_ID
+      - PROFILES_APP_PRIVATE_KEY
+    requires_vars: [FOLDER_MERGERS, OTA_API_BASE_URL]
+    reason: >-
+      New in v2.5.0. Publishes profile caches and OTA payloads after a push to
+      upstream's `main` / `release/v*.*.*`. The parity branch is not in that filter,
+      so it is inert here, and it needs a GitHub App credential plus the OTA publish
+      key that only upstream holds. Another upstream-distribution workflow this fork
+      must not run.
+
+  parity_nightly.yml:
+    status: disabled
+    owner: upstream
+    reason: >-
+      New in v2.5.0. Upstream's nightly parity harness. The `schedule` trigger is
+      guarded by `github.repository == 'OrcaSlicer/OrcaSlicer'` so the cron is inert
+      here, but note the guard is `github.event_name != 'schedule' || <repo>`, which
+      means a manual `workflow_dispatch` WOULD run it on this fork. Disable it at the
+      repo level so a stray dispatch cannot.
+
   doxygen-docs.yml:
     status: run
     owner: upstream
