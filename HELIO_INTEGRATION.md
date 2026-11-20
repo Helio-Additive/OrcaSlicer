@@ -20,6 +20,11 @@
 
 ## Stats
 - **70 files changed**: 36 new, 34 modified, 0 deleted
+- These counts were last recomputed before the v2.5.0 sync and are approximate.
+  v2.5.0 removed one modified file from the set (`GLCanvas3D.hpp`, now
+  byte-identical to upstream) and added one that had never been listed
+  (`.github/workflows/build_orca.yml`). Always confirm with
+  `git diff <baseline> HEAD -- <file>` rather than trusting this list (Rule 15).
 - **+13,363 lines added, -195 lines removed** — measured at the v2.4.0-beta sync.
   The support-data catalog work (#95) adds ~1,000 further lines in the four new
   `HelioSupportData` / `HelioRetryPolicy` files, plus the region-change hook in
@@ -129,6 +134,23 @@ generation so work started under the old credential can never land.
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
+
+#### `.github/workflows/build_orca.yml` (+2/-2) — **added to this map at the v2.5.0 sync**
+Upstream only signs and notarises macOS builds for its own repository:
+`github.repository == 'OrcaSlicer/OrcaSlicer' && (main || release/*)`. That is false
+on this fork, so without a change here Helio could never ship a signed macOS build.
+Helio widens the condition on **two** steps:
+
+- `Sign app and notary` — adds
+  `|| (vars.ENABLE_SIGNING == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.merged == true))`
+- `Create DMG without notary` — must be the **exact negation** of the above, or a
+  signed Helio build also gets an unsigned DMG written over the top of it.
+
+Keep those two conditions in lockstep. `CLAUDE.md` has always referred to
+"macOS signing/notarization gated by `ENABLE_SIGNING`", but the file was absent from
+this map, so the v2.5.0 resolution had to rediscover it from `git diff`. That is the
+drift Rule 15 warns about: **the map is a faster first look, not the qualifier — git
+settles ownership.**
 
 ### CRITICAL RISK
 
@@ -297,20 +319,36 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   when the region actually changed — otherwise catalogs from the previous endpoint
   survive a wizard-driven region switch
 
-#### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
-- Null-guard fix: added `get_notification_manager()` null check in existing condition
-- `_update_imgui_select_plate_toolbar()` takes a `force` flag. `IMToolbar::is_render_finish`
-  is set at the end of every plate-toolbar render and is only cleared by
-  `set_enabled(false)` (i.e. when the preview panel is left), so any refresh
-  requested while the preview is already showing was silently dropped. The Helio
-  completion path never leaves the preview panel — `select_tab_silent()` uses
-  `ChangeSelection` and `set_current_panel(preview, true)` re-enables the toolbar
-  without resetting the flag — so the plate items stayed stuck with whatever
-  textures they had when `on_idle` first built them (none, if that happened before
-  the thumbnails were rendered) and the plate preview rendered black forever.
-  The explicit refresh entry points (`update_plate_thumbnails()`, `on_set_focus()`
-  on the preview canvas) now pass `force = true`; the idle path still uses the
-  cache, so textures are not regenerated every frame.
+#### `src/slic3r/GUI/GLCanvas3D.cpp` (+2/-2)
+- Null-guard fix: added `get_notification_manager()` null check in existing condition.
+  This is now the **only** Helio content in this file.
+- **The `force`-flag plate-toolbar workaround was removed at the v2.5.0 sync, because
+  upstream wrote a real fix for the same bug.** Kept here as the worked example of
+  Rule 15 in the other direction — retiring a Helio patch once upstream supersedes it.
+
+  The bug: `IMToolbar::is_render_finish` is set at the end of every plate-toolbar
+  render and was only cleared by `set_enabled(false)` (i.e. when the preview panel is
+  left), so a refresh requested while the preview was already showing got dropped.
+  The Helio completion path never leaves the preview panel (`select_tab_silent()`
+  uses `ChangeSelection`), so plate items stayed stuck with whatever textures they
+  had when `on_idle` first built them — none, if that happened before the thumbnails
+  were rendered — and the plate preview rendered black forever. Helio's fix added a
+  `force` parameter and passed `force = true` from the explicit refresh entry points.
+
+  Upstream v2.5.0 replaced that with a dirty-flag mechanism:
+  `Plater::{mark,clear,is}_plate_toolbar_image_dirty()`, marked from `PartPlate.cpp`
+  and `Jobs/FillBedJob.cpp` and consumed inside
+  `_update_imgui_select_plate_toolbar()`, which now re-renders the thumbnails itself
+  when the flag is set. It also deleted both of Helio's call sites —
+  `GLCanvas3D::update_plate_thumbnails()` (whose only caller was already commented
+  out) and the plate-toolbar block in `on_set_focus()`. Keeping the `force` flag on
+  top would have been a divergence front-running a fix upstream already shipped, so
+  the sync took upstream's and dropped the parameter.
+
+  Net effect: **`GLCanvas3D.hpp` is now byte-identical to upstream and is no longer a
+  touchpoint at all** (it is kept in the list below only as a pointer to this note).
+  If the black-plate-preview symptom ever returns, the thing to check is whether the
+  Helio completion path marks the toolbar image dirty — not to reinstate `force`.
 
 #### `src/slic3r/GUI/GLToolbar.cpp` (+1)
 - Added `wxDEFINE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
@@ -318,8 +356,11 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 #### `src/slic3r/GUI/GLToolbar.hpp` (+1)
 - Added `wxDECLARE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
 
-#### `src/slic3r/GUI/Selection.cpp` (+4/-1)
-- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks
+#### `src/slic3r/GUI/Selection.cpp` (+3/-1)
+- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks.
+- v2.5.0: upstream added its own `is_closing()` early return for the same
+  use-after-free. The sync took upstream's shape and kept only the extra pointer
+  guard, which still covers `plater()` / `canvas3D()` being null outside shutdown.
 
 #### `src/slic3r/GUI/Widgets/SwitchButton.cpp` (+469)
 - **Appended** entire `CustomToggleButton` class + `ExpandButtonHolder` class (no upstream entanglement)
@@ -348,6 +389,11 @@ Files where Helio code is inserted within upstream functions: `Plater.cpp`, `Mai
 - The large handler block goes after `on_slicing_completed()` — find that function and insert after it
 - If upstream renamed `get_slice_result()`, update Helio calls to match
 - If upstream added parameters to functions Helio calls, add defaults
+- `Plater::~Plater` is Helio's and must stay **below** the complete `Plater::priv`
+  definition — it stops the Helio background thread and resets `p` before
+  `~wxWindow()` runs `DestroyChildren()`. v2.5.0 added an upstream
+  `Plater::~Plater() = default;` high up in the file, and the merge kept both with
+  no conflict. See Rule 16; `= default` there reintroduces a use-after-free
 
 **MainFrame.cpp rules:**
 - `ExpandButtonHolder` creation goes in `create_side_tools()`
@@ -625,9 +671,91 @@ for cand in "v$VER" "$VER"; do                  # upstream tags both forms
 done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
 
-git diff --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
-git diff        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks — that is the test
+# --ignore-cr-at-eol is load-bearing, not tidiness. See the caveat below.
+git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? no Helio content*
+git diff --ignore-cr-at-eol        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks
+# * not byte identity — rerun both without the flag if the symptom could be
+#   line-ending-sensitive. See the caveat below.
 ```
+
+**Line endings defeat this test silently, and `git blame` with it.** Without
+`--ignore-cr-at-eol` the diff can report a file Helio has barely touched as
+rewritten end to end, which reads as "all of it is ours" — the precise conclusion
+Rule 15 exists to prevent. Upstream ships some files CRLF; where a Helio commit
+normalised one to LF, **every** line differs. Measured on the branch today:
+
+| `.github/workflows/build_all.yml` vs `v2.4.2` | reported delta |
+|---|---|
+| `git diff` (the old command above) | 297 insertions, 269 deletions — the whole file |
+| `git diff --ignore-cr-at-eol` | 76 insertions, 48 deletions — the real Helio delta |
+
+**Ordinary `git blame` fails the same way, and `-w` only half-repairs it.** The
+normalising commit rewrote every line, so plain blame names that commit's author —
+a Helio author — for upstream's content:
+
+```bash
+$ git blame    -L 133,133 .github/workflows/build_all.yml
+aa9c1e368 (Priyesh 2026-03-25 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+$ git blame -w -L 133,133 .github/workflows/build_all.yml   # -w ignores whitespace
+^d0e90c94 (Priyesh 2026-03-12 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+```
+
+`-w` does see through the normalisation — it moves off `aa9c1e36` — so "no flag can
+recover the attribution" would be wrong. **It still does not answer the ownership
+question**, for two reasons that `-w` cannot touch:
+
+- **Blame answers "which commit last touched this line", not "whose content is
+  this".** A Helio commit that moves, re-indents or re-wraps an upstream line owns
+  the line by blame and owns none of it by Rule 15.
+- **The answer depends on clone depth.** In a shallow clone blame bottoms out at the
+  graft boundary and attributes everything there — the `^` on `d0e90c94` above marks
+  exactly that, in a 51-commit shallow checkout. The same command in a full clone
+  returns something else.
+
+So blame is a lead, never the verdict. **Settle ownership with the hunk diff above.**
+Worked example, the one this caveat exists for: the `macos-14` runner label at
+`:133`/`:144` blames to a Helio commit and is upstream's own line, byte-identical at
+`v2.4.2:.github/workflows/build_all.yml` `:110`/`:121`, and present in **no** Helio
+hunk once CRs are ignored.
+
+**What `--ignore-cr-at-eol` costs: it also hides a Helio line-ending change, and that
+one *is* ours.** The flag ignores carriage returns at end of line, so empty output
+means "equivalent apart from trailing CRs" — **not** byte-identical. If the Helio
+delta in a file *is* the line endings, this command disowns it, and a line-ending
+change is squarely the "caused by a Helio hunk" half of Rule 15 rather than an
+upstream defect. It is not hypothetical damage; CRLF in a shebang is unrunnable:
+
+```bash
+$ git diff --stat                   HEAD~1 HEAD -- s.sh   # 1 file changed, 2 ins, 2 del
+$ git diff --stat --ignore-cr-at-eol HEAD~1 HEAD -- s.sh   # (empty)
+$ ./s.sh
+./s.sh: cannot execute: required file not found
+```
+
+So: `--ignore-cr-at-eol` for the ownership question, and **the unfiltered diff as
+well** whenever the symptom could be line-ending-sensitive — a shell or Python
+script, a shebang, a file some code parses line by line, a checksum or signature
+mismatch, or "works upstream, fails here" with no visible difference.
+
+Scope of the trap, measured rather than assumed: across all 104 files that differ
+from `v2.4.2`, `build_all.yml` is the **only** one where the two commands disagree,
+and no file is a pure line-ending diff. So this is a single known case today — but
+a sync can normalise another file at any time, which is why the flag belongs in the
+command and not in a footnote.
+
+**Before concluding "ours", check whether upstream has already fixed it.** Rule 15's
+cost argument is about front-running a fix upstream has written, so the cheap check
+is whether a release *newer* than our baseline already carries it:
+
+```bash
+git show "refs/tags/<newer-release>:<file>" | grep -n "<the line>"
+```
+
+Worked example, the one that prompted this caveat: `build_all.yml`'s dead `macos-14`
+label (#147) is already `macos-15` upstream in **both** `v2.5.0` and `v2.5.1`. It
+needs no patch here at all — it arrives with the sync, which is PR #151. A local fix
+would have bought a permanent divergence in an upstream-owned file to deliver a
+change already written and already waiting in the queue: #116's mistake exactly.
 
 **Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
 tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
@@ -692,8 +820,9 @@ answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
 
 **`--stat` answers the first question, the patch answers the real one.** A diffstat
-shows *whether* the file differs, which settles the empty case outright — byte-identical
-to upstream, not ours, stop. It cannot settle the non-empty case, because ownership
+shows *whether* the file differs, which settles the empty case for **content** — no Helio
+content in it, so a content defect is not ours, stop. (Not byte identity, and so not the
+line-ending case: see the caveat above.) It cannot settle the non-empty case, because ownership
 turns on **where** the defect sits, and a file-count tells you nothing about that. Run
 the second command and read the hunks. Treating the stat as the whole test is how
 "this file differs" quietly becomes "this file is ours", which is the exception this
@@ -714,8 +843,10 @@ a release older than the one we hold, a file we merely *inherited* from a later
 release shows a non-empty diff, reads as Helio-owned, and this rule then waves
 through exactly the patch it exists to prevent.
 
-**Empty output means the file is byte-identical to upstream's** — no Helio content
-in it, so a defect in it is not ours. Non-empty means *something* differs, which
+**Empty output means no Helio content in the file** — so a content defect in it is not
+ours. It does **not** mean byte-identical: the flag ignores trailing CRs, so a file whose
+only Helio delta is its line endings reads as empty here and is still ours (the caveat
+above has the shebang demonstration). Non-empty means *something* differs, which
 is a prompt to read the diff, **not** by itself proof of Helio ownership: check
 whether the hunks are Helio's or upstream changes made after the baseline.
 
@@ -912,6 +1043,76 @@ the divergence this rule exists to stop. The map says *where to look and what th
 touchpoint was for*; `git diff` against the synced baseline says whether it is
 still there.
 
+### Rule 16: A clean merge can still duplicate a definition
+
+Every other rule here is about resolving a conflict. This one is about the
+opposite: a merge git reports as **clean** that is nevertheless broken, because
+git compares *text at locations*, not *symbols*.
+
+**The shape.** Neither side has a definition at the merge base. Upstream adds
+one. Helio independently adds one, in a different place in the same file. Both
+additions are insertions into unrelated regions, so there is no textual overlap,
+no conflict, and no marker — and the merged file now defines the same symbol
+twice.
+
+**The worked example (v2.5.0, `Plater.cpp`).** `Plater::~Plater` was undefined at
+`v2.4.2`. Upstream v2.5.0 added `Plater::~Plater() = default;` immediately after
+the `Plater::priv` class body. Helio had added a real destructor ~5,700 lines
+further down. The merge took both, and the build failed with
+`redefinition of '~Plater'`.
+
+Helio's had to win, and that part is not a judgement call — it is load-bearing:
+
+```cpp
+Plater::~Plater()
+{
+    if (p) {                                  // stop the Helio background thread
+        p->helio_background_process.stop();
+        if (p->helio_background_process.m_thread.joinable())
+            p->helio_background_process.m_thread.join();
+    }
+    p.reset();   // BEFORE base ~wxWindow() runs DestroyChildren()
+}
+```
+
+`= default` destroys members in declaration order, which reintroduces exactly the
+use-after-free the comment guards against: `DestroyChildren()` →
+`GLCanvas3D::~GLCanvas3D()` → `Selection::clear()` → `canvas3D()` dereferencing an
+already-destroyed `priv`. Note it must also stay *below* the complete `Plater::priv`
+definition, so "move it up to where upstream put theirs" is not an option. Leave a
+comment at upstream's location saying why nothing lives there, or the next sync
+restores it.
+
+**Why none of the usual post-merge checks catch it.** There is no conflict marker
+to grep for. No Helio identifier went missing, so the `helio|Helio|thermal_index|
+EVT_HELIO` sweep passes. The diff reads as two unrelated additions, which is why
+three Codex passes over it said nothing. **Only a compile finds this** — which is
+the concrete reason the build-verification step is not optional on a sync.
+
+**How to look for it without a compiler.** `scripts/helio/find_merge_doubled_defs.py`:
+
+```bash
+# --ours is the Helio tip as it was BEFORE the merge, not the merge result
+scripts/helio/find_merge_doubled_defs.py --upstream v2.5.0 --ours <pre-merge-tip>
+```
+
+For each file the sync touched it lists every symbol defined more than once in the
+merged tree, then drops any already defined more than once in *either* parent —
+those are ordinary overload sets, and they are the overwhelming majority (on
+v2.5.0, 466 raw duplicates reduced to 1). Exit status is 1 when it finds
+something, so it can gate a sync.
+
+**Validate it before trusting a zero.** Re-run with `--merged` set to a commit you
+know carries the bug and check it reports it; a scan that finds nothing is
+worthless until you have watched it find something. For v2.5.0, `--merged 71930bc`
+returns exactly `Plater::~Plater` and nothing else.
+
+The same shape applies to any one-definition-per-program entity, not just
+destructors: a non-inline free function, a static data member's definition, an
+explicit template specialisation. It cannot happen for a *declaration* in a
+header, which merely re-declares, but it can for a default argument or an
+in-class initialiser, which also may appear only once.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
@@ -933,7 +1134,8 @@ workflow ephemerally grafts the upstream commit our content is based on onto the
 branch tip. For tag-release syncs that commit is derived from `version.inc` (it
 names the synced release) provided it is a **strict** ancestor of the sync target —
 see the rules below for why that qualifier matters; for `main` syncs it comes from
-the `helio-last-synced-main` tracking tag (`version.inc` would name an older release
+the `upstream-commit:` record on the previous sync commit, falling back to the
+`helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
 ```bash
@@ -981,7 +1183,74 @@ work**, with every later run reaching the same wrong conclusion. That failure is
 invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
 baseline and sets an expectation, and the merged-tree comparison decides.
 
-Three rules keep that true, and all of them are load-bearing:
+### The `upstream-commit:` baseline record
+
+The squash step writes two lines as the **final paragraph** of every sync commit:
+
+```text
+upstream-commit: <40-hex upstream sha>
+upstream-sync-mode: tag|main
+```
+
+**Why it exists, given `version.inc` and the tracking tag.** It is for `main` mode.
+There `version.inc` is deliberately excluded — it names a *release*, and a `main`
+sync is ahead of it — so the only other candidate is `helio-last-synced-main`, a tag
+that is mutable and, **with the workflow's current `GITHUB_TOKEN`, cannot be
+written**: pushing it makes upstream's `.github/workflows/**` reachable, and a
+GitHub App token may not introduce workflow content without the `workflows`
+permission — which a workflow's `permissions:` block cannot grant. That is a
+property of the credential, not of the repository: a PAT with `workflows` scope
+could write it, at the cost of a long-lived credential able to rewrite workflow
+files. See "Why the push is refused" below for the full diagnosis and the three
+options, none of which has been chosen. So as things stand a `main` sync has no
+durable baseline. A trailer on the commit is immutable, travels with the branch,
+and needs no permission beyond committing.
+
+It only **adds a candidate**. It is content-validated alongside every other one, so
+a record that disagrees with the tree loses to one that matches it.
+
+Four properties are load-bearing; changing any of them breaks it silently:
+
+- **The two lines must be adjacent**, and the mode must match. That is what stops a
+  message quoting an older record from being spliced onto a newer one.
+- **The last such pair in a message wins** — a commit's own record is written below
+  anything it quotes.
+- **Read the full message, not `%(trailers:…)`.** Git parses trailers only from the
+  last paragraph, and GitHub appends `Co-authored-by:` in a paragraph of its own
+  when it squash-merges a PR with more than one commit author, which drops the
+  record.
+- **`git log --grep` is a candidate filter, not the answer.** It matches when both
+  patterns appear anywhere, including non-adjacently, so parsing only the newest
+  match lets one malformed commit **shadow every valid record beneath it**. Walk
+  candidates newest-first and take the first that yields an adjacent pair.
+- **The repository's squash-merge message setting must stay "PR title and commit
+  details."** The record lives in the sync commit's message, and only that setting
+  copies commit messages into the squash commit. Under *PR title and description*
+  the squash body comes from the PR description instead, and under *PR title only*
+  there is no body at all — under either, the record is dropped at merge and every
+  later sync silently falls back to `version.inc` or the tracking tag. Nothing in
+  this repository can detect that; it is a toggle in **Settings → General → Pull
+  Requests** that any admin can flip.
+
+  It is currently correct, established from merged commits rather than from the
+  settings page: `3c3dec5e` (#113, a multi-commit branch) carries GitHub's
+  `*`-bulleted concatenation of that branch's commit messages, and `ce472ef4`
+  (#96, a single-commit branch) carries its commit message verbatim. Both are
+  `COMMIT_MESSAGES` behaviour — under *PR title and description* the first would
+  have opened with that PR's `# Description` template instead. **If you ever need
+  to re-check this, that is how**: look at the shape of a recent squash commit's
+  body, not at anything in the tree.
+
+  This is also why the record is not additionally copied into the generated PR
+  body. A second copy would survive a setting change, but it can drift from the
+  first — this PR shipped exactly that bug once (`7e0d05bf`, a reused PR whose
+  body kept the previous SHA). One record plus this note beats two records that
+  can disagree.
+
+When resolving a sync by hand, carry the record into your commit — the same two
+lines, adjacent, as the final paragraph, naming **the commit you actually merged**.
+
+Three further rules keep the baseline honest, and all of them are load-bearing:
 
 1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
    a clean no-diff trial merge, the tree-level content test, a merged resolution
@@ -1053,9 +1322,89 @@ Three rules keep that true, and all of them are load-bearing:
    | --- | --- |
    | equals the candidate's | held |
    | equals the base's | **missing** |
-   | neither, merge is clean and changes ours | **missing** |
    | neither, merge is clean and leaves ours alone | held |
+   | neither, merge is clean but only re-inserts a block we already hold | **unknown** |
+   | neither, merge is clean and changes ours otherwise | **missing** |
    | neither, merge conflicts | **unknown** |
+
+   The second of those rows is the correction that #152 bought. (An earlier
+   version of this paragraph said it was "worth a 472-file conflict set to
+   learn" — that attribution was wrong: #150's 472 conflicts came from the
+   ancestry gate, which skipped this script entirely. See #158, and #160 for
+   the same failure recurring on v2.5.1.) `git merge-file` places upstream's hunk by
+   its position in the **base**, not by where that content ended up in our copy.
+   When Helio has appended to the same file — the ordinary shape for a touchpoint
+   — our copy of upstream's lines can sit at a different offset than the merge
+   wants to insert them, so the merge cleanly inserts the block a **second**
+   time. The result then differs from ours while our blob holds every line of
+   upstream's change, and reading that difference as *missing* is a definitive
+   "never received" for content that is plainly present.
+
+   Measured on the path that caused it, `src/slic3r/GUI/Widgets/TextInput.hpp`:
+   merging v2.2.0 → v2.4.2 onto our blob duplicates `static_tips`,
+   `static_tips_size` and `static_tips_icon`, all three already there.
+
+   The verdict is **`unknown`, not `held`**, and that asymmetry is the whole
+   point. Duplication shows presence is *possible*, not that it happened — the
+   lines could coincide — so `base-ok` tolerates it (which is what rescues the
+   graft, and the actual fix for #152) while `holds` still refuses (so no release
+   is ever skipped on this evidence). Answering `held` here, as the issue
+   originally proposed, would have opened the one direction that drops upstream
+   work silently and permanently. **Two tests decide it, and the review of
+   #154 is why there are two.** Both guard the same direction: `base-ok`
+   tolerates `unknown`, so a false `unknown` in a graft base drops upstream work
+   with no conflict to notice.
+
+   **1. Adjacency.** The appended block must equal the block immediately before
+   or after it in the merged file. This must not be weakened to "every added
+   line appears somewhere in ours". That weaker form
+   was the first version of this fix and Codex rejected it on #154: upstream
+   adding `    validate();` to `second()` when `first()` already contains that
+   line produces a clean merge whose added line *is* present elsewhere in our
+   blob, while `second()` genuinely never received it. Since `base-ok` tolerates
+   `unknown`, such a path can be grafted as a base — and a sync target that
+   still carries the insertion then merges cleanly without re-adding it,
+   dropping upstream work with no conflict to notice. Position is the only thing
+   separating "the merge duplicated what we hold" from "we never got it", so the
+   comparison is against the neighbouring lines, never the whole file.
+
+   **2. Run length at the insertion site, against the longest run upstream
+   has.** Adjacency alone is still not
+   enough, and CodeRabbit produced the case on #154: upstream *deliberately*
+   adds a second adjacent `counter++;` where we hold one. The merge appends it
+   right beside ours, so the positional test is satisfied — yet the new copy is
+   real content we never received. Counting separates the two cleanly, because
+   it asks about upstream's blob rather than only about the merge:
+
+   A **global occurrence count** does not settle it either — that was the
+   second version of the test, and Codex broke it as well: if *our* fork
+   independently adds the same block somewhere distant, both blobs hold two
+   copies, the totals match, and upstream's adjacent one is still absent.
+   Totals are not a local property, and this question is local.
+
+   So compare **runs of consecutive copies**. Duplication by the merge produces
+   a run longer than upstream has anywhere; a genuine upstream addition does
+   not, because upstream is where the run came from:
+
+   | run at the site, in merged | longest run in theirs | verdict |
+   | --- | --- | --- |
+   | 2 | 1 | the merge invented a copy → `unknown` |
+   | 2 | 2 | upstream holds that run → **`missing`** |
+
+   Taking the longest run *anywhere* in theirs, rather than at a matched
+   location, is deliberate: it can only make the test refuse more often, and
+   refusing is the safe direction — a wrong `missing` costs conflict volume, a
+   wrong `unknown` costs upstream content.
+
+   Narrow in two further ways: the diff must consist only of **append** commands
+   (a removal or a change means the merge genuinely rewrites our content), and
+   **every** appended block must pass **both** tests, so one real insertion
+   sitting beside a duplicate still answers `missing`.
+
+   One `awk` detail that is a correctness matter, not style: the line
+   comparisons force string context with `x ""`. A bare `!=` on two numeric
+   strings compares them as **numbers**, so `01` and `1` test equal and a
+   genuinely new line reads as a duplicate of its neighbour (Codex, #154).
 
    Mode is part of the comparison, not just the blob, and it is decided **before**
    the three-way merge rather than inside it. A path whose only change is
