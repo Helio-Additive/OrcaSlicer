@@ -45,6 +45,22 @@ namespace GUI {
 #include "DeviceCore/DevManager.h"
 #include "DeviceCore/DevStorage.h"
 
+// Helio: v2.5.0 slimmed what reached this file transitively, so declare the
+// dependencies explicitly rather than relying on another header to carry them.
+//  - <regex>            upstream removed it from src/slic3r/pchheader.hpp, the
+//                       force-included GUI precompiled header.
+//  - the rest           upstream removed MainFrame.hpp's block of GUI includes,
+//                       which is what used to drag these in.
+#include <regex>
+#include "nlohmann/json.hpp"
+#include "MsgDialog.hpp"          // MessageDialog
+#include "PartPlate.hpp"          // PartPlateList (Plater.hpp only forward-declares it)
+#include "../Utils/NetworkAgent.hpp"   // complete type for wxGetApp().getAgent()->...
+#include "DeviceCore/DevConfigUtil.h"  // DevPrinterConfigUtil
+#include "Widgets/AMSItem.hpp"   // AMS_CONTROL_BRAND_COLOUR
+
+using json = nlohmann::json;
+
 namespace Slic3r { namespace GUI {
 
 // Helio dark palette theme helper - defined early so it can be used throughout
@@ -461,7 +477,7 @@ void HelioStatementDialog::create_legal_page()
     terms_html_window->SetPage(html_content);
     
     // Handle link clicks
-    terms_html_window->Bind(wxEVT_HTML_LINK_CLICKED, [this](wxHtmlLinkEvent& event) {
+    terms_html_window->Bind(wxEVT_HTML_LINK_CLICKED, [](wxHtmlLinkEvent& event) {
         wxString url = event.GetLinkInfo().GetHref();
         if (url.StartsWith("http://") || url.StartsWith("https://")) {
             wxLaunchDefaultBrowser(url);
@@ -731,7 +747,7 @@ void HelioStatementDialog::create_pat_page()
         // Use CallAfter to defer modal dialog creation until after mouse event processing
         // This prevents crashes on Windows where opening a modal during mouse-down corrupts mouse capture state
         // Note: Do NOT call e.Skip() here - it causes multiple triggers on Mac
-        CallAfter([this]() {
+        CallAfter([]() {
             try {
                 BOOST_LOG_TRIVIAL(info) << "History button clicked, creating dialog...";
                 HelioHistoryDialog dlg(nullptr);  // Use mainframe as parent for cross-platform compatibility
@@ -1871,7 +1887,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     buy_now_button->SetMinSize(wxSize(-1, FromDIP(28)));
     buy_now_button->SetCornerRadius(FromDIP(12));
     buy_now_button->SetToolTip(_L("Loading..."));
-    buy_now_button->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+    buy_now_button->Bind(wxEVT_LEFT_DOWN, [](wxMouseEvent& e) {
         std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
         if (!helio_api_key.empty()) {
             wxString link_url;
@@ -3399,7 +3415,7 @@ HelioRatingDialog::HelioRatingDialog(wxWindow *parent, int original, int optimiz
 
     save_icon->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
     save_icon->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
-    save_icon->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+    save_icon->Bind(wxEVT_LEFT_DOWN, [](wxMouseEvent& e) {
         wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_EXPORT_SLICED_FILE));
     });
 
@@ -3450,7 +3466,7 @@ HelioRatingDialog::HelioRatingDialog(wxWindow *parent, int original, int optimiz
         EndModal(wxID_CLOSE);
         // Switch to the Preview panel to show details
         wxGetApp().plater()->CallAfter([]() {
-            wxGetApp().mainframe->select_tab(size_t(MainFrame::tpPreview));
+            wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
         });
     });
     m_button_view_details->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
@@ -4295,7 +4311,7 @@ void HelioSimulationResultsDialog::on_view_details(wxMouseEvent& event)
     
     // Switch to the Preview panel to show details
     wxGetApp().plater()->CallAfter([]() {
-        wxGetApp().mainframe->select_tab(size_t(MainFrame::tpPreview));
+        wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
     });
 }
 
