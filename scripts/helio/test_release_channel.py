@@ -79,6 +79,40 @@ GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
 
 
+FAKE_GH = r"""#!/usr/bin/env bash
+# Stand-in for `gh api --paginate repos/$GITHUB_REPOSITORY/releases --jq EXPR`.
+# Serves FAKE_RELEASES (a JSON array, as the API returns) and applies the step's
+# own --jq expression with real jq, so the draft/prerelease filter under test is
+# the one in helio-release.yml, not a copy of it.
+[ -n "${FAKE_GH_FAIL:-}" ] && { echo "gh: HTTP 503" >&2; exit 1; }
+expr=""
+while [ $# -gt 0 ]; do
+  case "$1" in --jq) expr="$2"; shift 2;; *) shift;; esac
+done
+printf '%s' "${FAKE_RELEASES:-[]}" | jq -r "$expr"
+"""
+
+
+def install_fake_gh(tmp):
+    d = os.path.join(tmp, "fakebin")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "gh")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(FAKE_GH)
+    os.chmod(path, 0o755)
+    os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+    os.environ["GITHUB_REPOSITORY"] = "test/test"
+
+
+def releases(*published, drafts=(), prereleases=()):
+    """JSON for FAKE_RELEASES: published finals, plus drafts and prereleases."""
+    import json
+    rows = [{"tag_name": t, "draft": False, "prerelease": False} for t in published]
+    rows += [{"tag_name": t, "draft": True, "prerelease": False} for t in drafts]
+    rows += [{"tag_name": t, "draft": False, "prerelease": True} for t in prereleases]
+    return json.dumps(rows)
+
+
 def commit_gui_app(repo, reads_experimental_tags, msg="x"):
     """Commit a GUI_App.cpp that does, or does not, carry the new tag parser.
 
@@ -155,6 +189,7 @@ def comparator_cases():
 def main():
     comparator_cases()
     with tempfile.TemporaryDirectory() as tmp:
+        install_fake_gh(tmp)
         stable = write_header(tmp, "0", "stable")
         experimental = write_header(os.path.join(tmp, "exp"), "1", "experimental")
         contradictory = write_header(os.path.join(tmp, "bad"), "1", "stable")
@@ -313,6 +348,24 @@ def main():
         p = run_channel(stable, "2.4.3", "orca-latest-parity-bambu", "2.4.2",
                         bridge_release="")
         check("stable release needs no bridge", p.returncode == 0, p.stderr)
+        # CI checks a branch's own consistency, not what has been published
+        # (Codex, #130: the guard-tests step would otherwise fail on every
+        # experimental PR). Opt-in only; the release path stays fail-closed.
+        p = subprocess.run(
+            [sys.executable, SCRIPT, "check", "--header", experimental,
+             "--version", "2.4.3-exp01", "--branch", "helio-experimental", "--tree-only"],
+            capture_output=True, text=True)
+        check("--tree-only skips the bridge rule", p.returncode == 0, p.stderr[:300])
+        p = subprocess.run(
+            [sys.executable, SCRIPT, "check", "--header", experimental,
+             "--version", "2.4.3-exp.1", "--branch", "helio-experimental", "--tree-only"],
+            capture_output=True, text=True)
+        check("  ... but still checks the tree", p.returncode != 0, p.stdout)
+        p = subprocess.run(
+            [sys.executable, SCRIPT, "check", "--header", experimental,
+             "--version", "2.4.3-exp01", "--branch", "helio-experimental"],
+            capture_output=True, text=True)
+        check("no flags at all fails closed", p.returncode != 0, p.stdout)
 
         # --- the real baseline step --------------------------------------------
         # The ordering guard is only as good as the baseline it is given. A
@@ -332,7 +385,8 @@ def main():
             subprocess.run(["git", "-C", base, "tag", t], check=True)
 
         env = dict(os.environ, VERSION="2.4.2-exp01", BRANCH="helio-experimental",
-                   GITHUB_OUTPUT=os.path.join(tmp, "bout"))
+                   GITHUB_OUTPUT=os.path.join(tmp, "bout"),
+                   FAKE_RELEASES=releases("helio-v2.4.1", "helio-v2.4.2+rebuild1"))
         open(env["GITHUB_OUTPUT"], "w").close()
         r = subprocess.run(["bash", "-c", chan_step], cwd=base, env=env,
                            capture_output=True, text=True)
@@ -363,7 +417,8 @@ def main():
         subprocess.run(["git", "-C", first, "tag", "helio-v2.4.2"], check=True)
 
         env = dict(os.environ, VERSION="2.4.3-exp01", BRANCH="helio-experimental",
-                   GITHUB_OUTPUT=os.path.join(tmp, "fout"))
+                   GITHUB_OUTPUT=os.path.join(tmp, "fout"),
+                   FAKE_RELEASES=releases("helio-v2.4.2"))
         open(env["GITHUB_OUTPUT"], "w").close()
         r = subprocess.run(["bash", "-c", chan_step], cwd=first, env=env,
                            capture_output=True, text=True)
@@ -376,6 +431,7 @@ def main():
 
         # Once one exists, it must not become the stable baseline.
         subprocess.run(["git", "-C", first, "tag", "helio-exp-v2.4.3-exp01"], check=True)
+        env["FAKE_RELEASES"] = releases("helio-v2.4.2", prereleases=("helio-exp-v2.4.3-exp01",))
         env["VERSION"] = "2.4.3-exp02"
         open(env["GITHUB_OUTPUT"], "w").close()
         r = subprocess.run(["bash", "-c", chan_step], cwd=first, env=env,
@@ -385,8 +441,9 @@ def main():
               "Newest published stable release: 2.4.2" in r.stdout, r.stdout[:200])
 
         # --- the bridge, through the real step ---------------------------------
-        # The step finds the bridge by reading each stable tag's own source, so
-        # this runs it against real tags on real trees rather than against flags.
+        # The step finds the bridge among *published* releases and reads each
+        # one's own tagged source, so this runs it against real tags on real
+        # trees, with the release list served through the step's own --jq filter.
         nb = os.path.join(tmp, "nobridge")
         os.makedirs(os.path.join(nb, "scripts", "helio"), exist_ok=True)
         os.makedirs(os.path.join(nb, "src", "libslic3r"), exist_ok=True)
@@ -396,35 +453,52 @@ def main():
         commit_gui_app(nb, reads_experimental_tags=False, msg="pre-channel stable")
         subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.2"], check=True)
 
-        env = dict(os.environ, VERSION="2.4.3-exp01", BRANCH="helio-experimental",
-                   GITHUB_OUTPUT=os.path.join(tmp, "nbout"))
-        open(env["GITHUB_OUTPUT"], "w").close()
-        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
-                           capture_output=True, text=True)
+        def run_nb(version, published):
+            env = dict(os.environ, VERSION=version, BRANCH="helio-experimental",
+                       GITHUB_OUTPUT=os.path.join(tmp, "nbout"), FAKE_RELEASES=published)
+            open(env["GITHUB_OUTPUT"], "w").close()
+            return subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
+                                  capture_output=True, text=True)
+
+        NONE = "Stable release that can see previews: <none>"
+        r = run_nb("2.4.3-exp01", releases("helio-v2.4.2"))
         check("step: preview refused before any bridge", r.returncode != 0,
               "rc=%d out=%s" % (r.returncode, r.stdout[:200]))
-        check("  ... and reports no bridge",
-              "Stable release that can see previews: <none>" in r.stdout, r.stdout[:300])
+        check("  ... and reports no bridge", NONE in r.stdout, r.stdout[:300])
 
-        # A prerelease-shaped stable tag carrying the parser is not a bridge:
-        # it is not a final release, so the stable users this rule is about
-        # were never offered it.
+        # The parser lands, and a final-shaped tag is pushed on that tree.
         commit_gui_app(nb, reads_experimental_tags=True, msg="parser lands")
-        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3-beta"], check=True)
-        open(env["GITHUB_OUTPUT"], "w").close()
-        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
-                           capture_output=True, text=True)
-        check("step: prerelease tag is not a bridge", r.returncode != 0,
-              "rc=%d out=%s" % (r.returncode, r.stdout[:200]))
-        check("  ... because no bridge was found",
-              "Stable release that can see previews: <none>" in r.stdout, r.stdout[:300])
-
-        # The stable release cut from a tree with the parser is the bridge.
         subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3"], check=True)
-        env["VERSION"] = "2.4.4-exp01"
-        open(env["GITHUB_OUTPUT"], "w").close()
-        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
-                           capture_output=True, text=True)
+
+        # Codex, #130: a tag is not a release. Pushed but never published, it
+        # must not count — installed users have nothing to download.
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2"))
+        check("step: unpublished tag is not a bridge", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # ... nor while its release is a draft,
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", drafts=("helio-v2.4.3",)))
+        check("step: draft release is not a bridge", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # ... nor when published as a prerelease, which stable users never see.
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", prereleases=("helio-v2.4.3",)))
+        check("step: prerelease is not a bridge", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # A published release whose tag is absent locally cannot be inspected,
+        # so it does not count either (fail closed).
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v9.9.9"))
+        check("step: uninspectable release is not a bridge", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # An API failure means no bridge: experimental refused ...
+        os.environ["FAKE_GH_FAIL"] = "1"
+        try:
+            r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v2.4.3"))
+            check("step: API failure refuses a preview", r.returncode != 0 and NONE in r.stdout,
+                  "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        finally:
+            del os.environ["FAKE_GH_FAIL"]
+
+        # Published as a final release on a tree with the parser: the bridge.
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v2.4.3"))
         check("step: preview accepted after the bridge", r.returncode == 0, r.stderr[:300])
         check("  ... and names it",
               "Stable release that can see previews: helio-v2.4.3" in r.stdout, r.stdout[:300])

@@ -1258,14 +1258,29 @@ Two fixes were possible, and **the chosen one is the bridge**:
   cannot, which is the same reach any stable release has.
 
 `helio-release.yml` enforces it. For an experimental release, the `check` job
-looks for a published **final** stable tag (`helio-v<X.Y.Z>`, with optional
-`+metadata`; prerelease-shaped tags such as `helio-v2.4.3-beta` do not count)
-whose own `src/slic3r/GUI/GUI_App.cpp` references
-`HELIO_EXPERIMENTAL_TAG_PREFIX`, and passes it as `--bridge-release`.
-`version_channel.py` refuses an experimental release when none exists. The test
-reads the tagged source rather than comparing against a version constant, so it
-cannot drift from what actually shipped. `test_release_channel.py` covers the
-refusal, the prerelease exclusion, and acceptance once a bridge is tagged.
+lists **published** GitHub releases (not drafts, not prereleases) through the
+API, keeps the final-shaped ones (`helio-v<X.Y.Z>`, optional `+metadata`), and
+looks for one whose own tagged `src/slic3r/GUI/GUI_App.cpp` references
+`HELIO_EXPERIMENTAL_TAG_PREFIX`. That tag is passed as `--bridge-release`, and
+`version_channel.py` refuses an experimental release when there is none.
+
+- **Releases, not tags.** A tag proves nothing about what users could
+  download: it can be pushed before its release, or outlive a release that was
+  deleted or turned back into a draft (Codex, #130).
+- **Source, not a version number.** Reading the tagged tree means the check
+  cannot drift from what actually shipped.
+- **Fails closed.** If the API call fails, or a published release's tag cannot
+  be inspected, there is no bridge. An experimental release is then refused,
+  and a stable release is unaffected.
+- **CI uses `--tree-only`.** `helio-sync-guard-tests.yml`'s "Check this tree's
+  own channel" step checks a branch's consistency, not what has been published,
+  so it skips this rule. The flag is opt-in, and a release never passes it.
+
+`test_release_channel.py` runs the real step against real tags, with the
+release list served through the step's own `--jq` filter. It covers: refused
+before any bridge; an unpublished tag, a draft, a prerelease, an uninspectable
+release and an API failure all refused; accepted once a final release is
+published on a tree with the parser.
 
 **In practice:** the first stable release cut after this lands (planned:
 `helio-v2.5.1`) is the bridge. Previews can start after it is published.

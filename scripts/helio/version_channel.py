@@ -154,7 +154,7 @@ def read_channel(header_path):
 
 
 def validate(channel, version, branch, latest_stable, latest_experimental="",
-             bridge_release=""):
+             bridge_release="", tree_only=False):
     expected_branch = BRANCH_FOR_CHANNEL[channel]
     if branch != expected_branch:
         die("this tree is a %s build (per HelioChannel.hpp) but the release was "
@@ -182,7 +182,9 @@ def validate(channel, version, branch, latest_stable, latest_experimental="",
                 "is rejected by it and the release is skipped in silence; an "
                 "unpadded number sorts wrongly, with 'exp9' ABOVE 'exp10'."
                 % version)
-        if not bridge_release:
+        # Publication rule, not a property of the tree: skipped for `--tree-only`
+        # (CI checking a branch's consistency), enforced by default (a release).
+        if not bridge_release and not tree_only:
             die("no published stable release can see experimental releases yet.\n"
                 "Builds released before the experimental channel existed read only "
                 "'helio-v' and 'v' tags, so they drop every 'helio-exp-v' tag as an "
@@ -298,6 +300,9 @@ def main(argv=None):
     check.add_argument("--bridge-release", default="",
                        help="a published stable tag whose update check reads helio-exp-v tags; "
                             "an experimental release is refused when empty")
+    check.add_argument("--tree-only", action="store_true",
+                       help="check the tree and branch rules only, skipping rules about what "
+                            "has been published; for CI, never for a release")
 
     tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
     tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
@@ -313,7 +318,7 @@ def main(argv=None):
 
     channel = read_channel(args.header)
     validate(channel, args.version, args.branch, args.latest_stable,
-             args.latest_experimental, args.bridge_release)
+             args.latest_experimental, args.bridge_release, args.tree_only)
 
     tag_prefix, prerelease, asset_tag, suffix = CHANNELS[channel]
     for line in (

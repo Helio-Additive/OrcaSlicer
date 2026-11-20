@@ -103,7 +103,11 @@ jobs:
             orca-latest-parity-bambu|helio-experimental) ;;
             *) echo "Branch '$BRANCH' is not a release branch — channel check not applicable."; exit 0 ;;
           esac
+          # --tree-only: this checks the branch's own consistency. Whether a
+          # bridge release has been published is a release-time question, and
+          # helio-release.yml enforces it there (fail-closed by default).
           python3 scripts/helio/version_channel.py check \
             --header src/libslic3r/HelioChannel.hpp \
             --version "$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)" \
-            --branch "$BRANCH"
+            --branch "$BRANCH" \
+            --tree-only

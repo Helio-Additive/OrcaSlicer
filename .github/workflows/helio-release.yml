@@ -59,6 +59,8 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # list published releases for the bridge check
     outputs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.tag.outputs.tag }}
@@ -97,6 +99,7 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Newest published stable release, for the ordering check. Tags are
@@ -138,8 +141,23 @@ jobs:
           # before any bridge exists reaches nobody. Detected from each stable
           # tag's own source (the parser names HELIO_EXPERIMENTAL_TAG_PREFIX), not
           # from a version constant, so it cannot drift from what actually shipped.
+          #
+          # Candidates come from *published* GitHub releases, not from tags: a tag
+          # proves nothing about whether users could download a build (it can be
+          # pushed before its release, or outlive a release that was deleted or
+          # turned back into a draft). Drafts and prereleases are excluded. If
+          # the API call fails there is no bridge, which refuses an experimental
+          # release and leaves a stable one unaffected: closed in the direction
+          # that matters.
+          published_stable=""
+          if ! published_stable=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+                --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'); then
+            echo "::warning::could not list published releases; treating as no bridge release" >&2
+            published_stable=""
+          fi
           bridge_release=""
-          for t in $(git tag --list 'helio-v*'); do
+          for t in $published_stable; do
+            [[ "$t" == helio-v* ]] || continue
             v=${t#helio-v}; v=${v%%+*}
             [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
             if git grep -q 'HELIO_EXPERIMENTAL_TAG_PREFIX' "$t" -- src/slic3r/GUI/GUI_App.cpp; then
