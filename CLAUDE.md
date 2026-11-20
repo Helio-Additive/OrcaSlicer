@@ -102,7 +102,10 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   macOS 26, while `build_orca.yml` passes `-t 10.15` and the deps cache key
   (`build_check_cache.yml`) is keyed on **arch only, not on the runner image** — so a cache
   built on one image is silently consumed on another. Pinning to `macos-15` keeps the SDK
-  close to what that target and that cache were built against. Both `macos-14` and
+  close to what that target and that cache were built against — and since v2.5.0 moved
+  `build_all.yml` to `macos-15` too, both callers of the shared workflows now request the
+  same image, which is what makes that image-independent cache key safe rather than merely
+  untested. Keep the two in step for that reason. Both `macos-14` and
   `macos-15` are arm64, so the `x86_64` leg is cross-compiled exactly as it was before.
   **The Xcode cleanup in `build_orca.yml` is upstream's again.** Before v2.5.0, its
   `Free disk space` step kept `Xcode_15.4.app` by name. That deletes the whole toolchain

@@ -122,7 +122,11 @@ jobs:
       # macos-15 rather than macos-latest: macos-latest now tracks macOS 26, and
       # the `-t 10.15` deployment target build_orca.yml passes, plus the deps cache
       # built against the macOS 14/15 SDK are closest to what macos-15 provides.
-      # Revisit when the deployment target is raised.
+      # It is also what upstream moved build_all.yml to in v2.5.0, so both callers
+      # of the shared workflows now request the same image. That is what makes
+      # build_check_cache.yml's macOS cache key safe — it is keyed on arch alone,
+      # not on the image, so two callers on different images would quietly share
+      # one cache. Keep these in step, and revisit when the target is raised.
       os: macos-15
       arch: ${{ matrix.arch }}
     secrets: inherit
