@@ -80,6 +80,31 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
   outcome today, but the gate on those two is inherited, not stated — dropping or
   re-pointing a `needs:` would let them run unlabelled.
+- **`unit_tests`' `needs: build_linux` has a second consequence, and it currently costs
+  the fork its entire Catch2 signal.** The job is `needs: build_linux` +
+  `if: ${{ !cancelled() && success() }}`, and `success()` is false if any needed job
+  failed — so a red `build_linux` skips `unit_tests`. `build_linux` goes red at
+  *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
+  everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
+  *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
+  unexpired, and `unit_tests` declines to run it anyway. So while the external suite is
+  red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
+  `ctest` instructions further down this file describe a local-only signal. Observed
+  casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
+  a silent warpage-metadata cross-attribution bug, which have never had an assertion run
+  in CI. The gate is inherited upstream code, so per Rule 15 it is recorded here, not
+  patched; #133 carries the options.
+- **The test *targets* are only ever compiled on Linux, so the skip above is the whole
+  story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
+  only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
+  whose `t` sets `BUILD_TESTS=1`. The other legs do not: macOS runs
+  `./build_release_macos.sh … -t 10.15` (`:118`, `:154`) where `getopts ":dpa:snt:xbc:i:1Tuh"`
+  makes **lowercase `-t` the deployment target** and **uppercase `-T` the tests flag**, and
+  Windows runs `build_release_vs.bat slicer` (`:293`). So a test file that fails to compile
+  on Windows or macOS is not caught anywhere, and "it built on every platform" is never
+  evidence about `tests/**`. Said plainly because the opposite was asserted on #126 and in
+  this file before Codex corrected it on #138 — the error ran in the reassuring direction,
+  which is the one that matters.
 - **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
   the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
   never starts the workflow at all and the `ready-to-build` label does nothing — the
@@ -92,6 +117,313 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
   PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
   translation-only PR to those branches now builds the full matrix. This fork opens none.
+
+### External slicer regression tests — red since 14 Sep 2026 on a v2.4.2 tree (#133)
+**Everything in this section is an observation of a moving third-party repository, not a
+standing fact.** It describes builds of this fork while pinned to **v2.4.2**, between
+14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
+any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
+against the job log before concluding a red `build_linux` is this issue; do not treat a
+red Linux leg as pre-diagnosed. If you confirm it still applies, note the date on #133.
+
+**When it stops applying, re-scope this section — do not delete it.** An upstream sync past
+v2.4.2 may close the version skew below, but it does not fix the **mechanism**: `:410` still
+clones a default branch with no ref, so one later commit in `orca-test-repo` can recreate
+the skew against a post-2.4.2 tree with no commit here. Delete the dated incident details
+(the drift table, the 2.5.0-dev baseline, the `0dfd8df` numbers) and keep the unpinned-clone
+warning and the ownership reasoning, which are durable. Deleting the lot discards the one
+part that stops this being re-derived a twelfth time.
+
+**How good is the evidence below — read this before quoting any of it.** The step records no
+suite revision, so *nothing here establishes which revision produced which result*; every
+such link is inferred from run times and is not sound (see the re-run note). What survives
+that gap are the claims that do not depend on the revision at all: that the clone is
+unpinned (read from the workflow), that #135 contains no C++ and so cannot have changed
+slicer behaviour, and the ownership facts. Treat the rest as dated observation. Where this
+section states a conclusion, it is about the runs named — not a rule about future ones.
+
+`build_orca.yml:403` runs a pytest suite from a **third party's default branch, cloned
+unpinned on every build**: `git clone --depth 1 https://github.com/OrcaSlicer/orca-test-repo.git`
+(`:410`) — no tag, no SHA, no `--branch`. Over that window it was the sole red check on
+every PR that built, and **none of the changes in #126, #135 or #137 could have turned it
+green** — which is a claim about those three diffs, not about the repository. Changes that
+plainly *could* turn it green exist: pinning the clone, a sync that aligns this tree with
+the suite's expectations, or implementing the features its failing cases exercise. None was
+in those PRs.
+
+**Attribution rests on one sound argument and several weaker ones. Use the sound one.**
+Three structurally unrelated diffs produced a byte-identical tally: #135 (two files,
+`build_all.yml` trigger paths + `CLAUDE.md`, **no C++ at all**), #126 (26 files of GUI/C++)
+and #137 (a Helio download-lifecycle change).
+
+- **Sound, and independent of the suite revision:** #135 compiles no code, so it cannot
+  have changed slicer behaviour. Whatever made its Linux leg red was not its diff. That
+  argument needs no revision data and is the one to cite.
+- **Weaker:** that the three *identical* tallies show a common cause. It is suggestive, but
+  it assumes the three runs used the same suite revision, which nothing recorded. Same for
+  the same commit going `13 failed` → `24 failed` 21 hours apart with no push between —
+  consistent with the suite moving, and not proof of it.
+
+So "this red is not my diff's" is well supported for a diff that touches no compiled code,
+and is an inference for anything else. Check it per-PR rather than by precedent.
+
+**What is established is *provenance*, not *cause*, and provenance does NOT clear a PR.**
+`orca-test-repo` is public and `git clone` works (only the GitHub *API* is scoped to Helio
+repos), so the suite can be read directly rather than inferred from our job logs. What that
+measures is **when each failing case entered the repository** — and that is all it measures.
+It does not say why any case fails, and critically it does **not** establish that a PR's diff
+is innocent: a case added after v2.4.2 can perfectly well expose a regression a Helio hunk
+introduced in long-standing code. Version skew is established for some of the 25, refuted for
+others, and untraced for the rest. Two measured facts:
+
+- **Every failing case postdates our pin, and they arrive from two commits.** All 25 failures
+  live in `test_cases.py` (21) and `test_settings_import.py` (4). `8d475c2` *"CLI Test Suite"*
+  (31 Aug 2026, merged `a4faa36` on 8 Sep) introduced **20** of them — 16 in `test_cases.py`
+  and all 4 in `test_settings_import.py`; `f720aad` (11 Sep) introduced the **5**
+  `mixed-filament-*` cases. Dating each failing case file by its introducing commit
+  (`git log --diff-filter=A`) returns **those two dates and nothing else**. No failure comes
+  from content that predates v2.4.2. That also explains the 8 Sep → 14 Sep flip this section
+  opens on: the suite merged to `main` on 8 Sep.
+- **The baseline is re-pegged to upstream `main` automatically.**
+  `cases/_snapshots/cli_surface_full.json` is refreshed by `github-actions[bot]` under the
+  commit subject *"Refresh `cli_surface_full.json` from OrcaSlicer main"* — **10 times**
+  between 25 Sep and 26 Oct 2026. Twelve commits touch that file in all; the other two are
+  the suite's own introduction and a formatting normalisation, both human-authored.
+
+So the suite is a **moving conformance test against upstream `main`**, and we build v2.4.2 —
+*an inherited workflow pulling a floating upstream-`main` artifact into a release-pinned fork*.
+This dating is **revision-independent**: it asks when a case entered the repository, not which
+revision a run resolved, so the unrecorded-SHA gap below does not weaken it.
+
+**What provenance does not buy — and the measurement nobody has taken.** It is tempting to read
+"every case postdates our tree" as "no PR's diff caused these". It does not follow. Dating a
+case establishes neither that it fails on an unchanged baseline nor that Helio hunks cannot
+reach the code it exercises — and the transform crashes make that concrete, since `--scale`
+and `--rotate-*` are long-standing paths a Helio change to shared geometry or G-code code
+could plausibly disturb. Two further non-arguments: `grep -i` for `helio|thermal_index|warpage`
+across the **entire suite** at `main` returns nothing, which means the cases name no Helio
+identifier but says nothing about which code they *execute*; and #135 compiling no C++ clears
+**#135's** diff only, not any other PR's.
+
+**And the identical-failure-set argument cannot close this gap either.** Matching sets across
+#126 and #140 show a *common* cause — but a Helio hunk already merged on
+`orca-latest-parity-bambu` would be common to every PR too, and would produce exactly the same
+identical sets. So there are **three** candidate causes, not two: inherited upstream behaviour,
+a Helio hunk already merged on the release branch, and the PR under test. PR builds alone
+separate none of them.
+
+The measurement that separates them is a run of the suite against the **unmodified release
+branch**, and **it has never been taken.** `build_all.yml`'s scheduled trigger is gated
+`github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer'` (`:79`), so
+the daily cron skips on this fork — every scheduled run since has `conclusion: skipped`. The
+last `build_linux` that actually executed on the release branch was **28 Aug 2026**, eleven
+days *before* the CLI suite merged to `orca-test-repo` on 8 Sep. So **all 25 failures have only
+ever been observed in PR builds**, and no baseline exists to compare them against.
+
+A **`workflow_dispatch` on `orca-latest-parity-bambu`** gets the first separation and needs no
+divergence or permission. Verified against the job conditions rather than assumed — for
+`workflow_dispatch`, `github.event_name != 'schedule'` is true so the fork gate passes, and
+**both label-gate clauses are `pull_request`-scoped** (`github.event_name != 'pull_request'`
+short-circuits them), so `ready-to-build` is irrelevant. `build-deps-only` defaults to `false`,
+so `build_linux` runs with the regression step included. Generally useful beyond this entry:
+**a manual dispatch bypasses the `ready-to-build` gate entirely**, which is the escape hatch
+when the `paths:` filter has excluded a PR (how #109 was built).
+
+**But that dispatch builds the release branch, so it carries the merged Helio hunks too — it
+separates the PR from the other two and cannot tell upstream behaviour from a merged Helio
+regression.** Do not read a reproducing baseline as "not ours".
+
+### Rule 15's own test answers it for the 10 crashes, and costs nothing
+
+The prescribed ownership test — `git diff <upstream baseline> HEAD -- <file>` — settles this
+without building anything. Against **upstream `refs/tags/v2.4.2`** (fetchable: `git fetch
+--depth 1 https://github.com/OrcaSlicer/OrcaSlicer.git refs/tags/v2.4.2:refs/tags/v2.4.2`),
+every entry point the 10 crashes exercise is **byte-identical to upstream**:
+
+| file | role for these crashes | vs upstream v2.4.2 |
+|---|---|---|
+| `src/OrcaSlicer.cpp` | CLI entry: `--scale`, `--rotate-*`, `--datadir`, `--outputdir`, and the handler that should catch instead of abort | **identical** |
+| `src/libslic3r/Config.cpp` / `.hpp` | option deserialization, throws `ConfigurationError` | **identical** |
+| `src/libslic3r/Model.cpp`, `Geometry.cpp` | transform application | **identical** |
+| `src/libslic3r/PrintConfig.hpp` | option definitions | **identical** |
+| `src/libslic3r/PrintConfig.cpp` | option definitions | `+21/−0` — **purely additive**: three new `helio_*` option defs (`helio_printer_id`, `helio_initial_room_air_temp`, `helio_layer_threshold`). No existing option or deserialization path touched |
+
+So the segfaults on long-standing transform options and the unhandled-exception aborts are in
+**implementations this fork has not modified**. That is what the test shows, and it is worth
+having — but it is **half** of the ownership question, not the answer.
+
+**Attribution is unresolved. Do not record these as upstream's on the strength of the table
+above.** Scope covers a defect *sitting inside* a Helio hunk **or caused by one**, and the diff
+only disposes of the first. The fork changes `GCodeProcessor.cpp` (`+70/−1`), `AppConfig.cpp`,
+`PlaceholderParser.cpp` and much of the GUI, and a CLI run links all of it — so unchanged entry
+points do not establish that nothing Helio changed makes them fail. An earlier revision of this
+paragraph asserted *"by Rule 15 they are upstream's"* while stating this same limit two
+sentences later; that was the conclusion outrunning its evidence, and it is the sixth instance
+of this entry doing so in the same direction.
+
+What would actually resolve it, either one:
+
+- a **per-case causal trace** from the crash to the code that produces it, checked against the
+  Helio hunks that code links; or
+- a reproduction on **unmodified upstream v2.4.2** with the same inputs and the same suite
+  revision. Note a reproduction on *the fork* distinguishes nothing — it is consistent with
+  both causes.
+
+Until one of those exists: not patching upstream code remains right under Rule 15, but **that
+is not a licence to exclude a fix to a Helio hunk** if a trace finds one responsible. "We did
+not touch `OrcaSlicer.cpp`" is not an answer to "did our change break it".
+
+### Attribution: what the 25 actually report (29 Oct run)
+
+**10 of the 25 are our own binary crashing. That is not version skew and must not be filed as
+it.** Read from the job log, `[no_crash] process was killed by signal N`:
+
+| cases | signal | what the log shows |
+|---|---|---|
+| `transform-rotate-x`, `transform-rotate-y`, `transform-rotate-z`, `transform-scale` | **11 (SIGSEGV)** | segfault, `expected exit code 0, got -11` |
+| `datadir-missing-parent-directory`, `outputdir-missing-parent-directory` | **6 (SIGABRT)** | `terminate called after throwing an instance of 'boost::filesystem::filesystem_error'` |
+| `nil-value-for-vector-option`, `nil-value-for-scalar-vector-option`, `nil-value-for-machine-axis-array-option`, `load-filaments-count-exceeds-project` | **6 (SIGABRT)** | `terminate called after throwing an instance of 'Slic3r::ConfigurationError'` |
+
+**`--rotate-x`, `--rotate-y`, `--rotate-z` and `--scale` are long-standing CLI options, not
+2.5.0 additions.** A segfault there cannot be explained by a newer test or a refreshed
+snapshot — it is a defect in the binary this fork ships. The six aborts are unhandled
+exceptions where the case asserts a clean error exit instead. Whether upstream `main` has since
+fixed any of them is **unchecked**; that would make them skew *symptoms*, but it is not known.
+
+The rest, for completeness:
+
+| group | count | reading |
+|---|---|---|
+| `mixed-filament-*` | 5 | **skew, established** — `Invalid option --filament-is-mixed`, absent in this tree |
+| `test_settings_import.py` | 4 | see the carve-out below — 1 skew, 1 test-repo-internal, 2 our binary disagreeing with itself |
+| missing-key / behavioural (`partial-load-filaments-variant-key-zero-filled`, `variant-key-zero-filled-on-full-filament-load`, `vector-override-single-value-multi-filament`, `filament-override-with-support-disabled`, `invalid-boolean-option-value`, `boolean-flag-help-shows-no-argument`) | 6 | **untraced individually.** Some report absent config keys (skew-shaped); `invalid-boolean-option-value` reports our binary accepting an invalid value (`expected exit code 254, got 0`), which is not |
+
+So: **skew established for 6, refuted for 10, open for 9.** Anyone citing this section to
+dismiss a `build_linux` red must say *which* case, and the 10 crashes are not available for
+that argument — nor, absent the baseline run above, is any of it available as a blanket
+clearance for a PR that compiles code. This matters for the option choice too — "accept as advisory" is accepting a
+step that is currently reporting four segfaults.
+
+**Carve-out: the 4 `test_settings_import.py` failures are NOT explained by the above, and one
+of them may be a real defect in our binary.** That module reads **no snapshot** — `grep`
+for `cli_surface` in it returns nothing. It derives probe expectations *"from the fixture
+preset files themselves"* and checks that the artifacts our binary exports agree with each
+other. So the bot-refresh argument does not reach it, and "the test is newer than v2.4.2"
+does not establish that the behaviour it checks is. Taking them one at a time, from the
+29 Oct log:
+
+| case | what it reports | reading |
+|---|---|---|
+| `multi-filament:4-ordered` | `Invalid option --filament-is-mixed` → setup params error | skew: the flag does not exist in this tree |
+| `test_reference_gcode_only_3mf_is_self_consistent` | `filament_mixed_*` / `filament_dev_ams_drying_*`: `'""'` vs `['']` | compares two **checked-in fixtures** and never invokes our binary — a test-repo-internal inconsistency |
+| `multi-filament:partial-2-of-4` | `filament_cooling_before_tower`: gcode `['10','0','0','0']` vs json `['10']` | **our binary disagreeing with itself**; not a Helio key, not a snapshot artifact |
+| `3mf+uptodate` | same `filament_cooling_before_tower` disagreement | as above |
+
+The last two are the point. A v2.4.2 binary emitting a 4-element vector into the G-code
+config block and a 1-element one through `--export-settings` is an internal inconsistency in
+the build we ship. It may well be fixed in upstream `main` — that would make it a skew
+*symptom* rather than a Helio defect — but **that has not been checked**, and nothing above
+licenses waving it away. This is exactly the hazard this section's point (3) predicts: a
+step known-red for explainable reasons swallowing one that is not yet explained. Do not cite
+the bot-refresh mechanism at a `test_settings_import.py` failure.
+
+**The observed drift over this window, kept for the dates rather than for the argument:**
+
+| date | result |
+|---|---|
+| 8 Sep | ✅ passed |
+| 14 Sep | 13 failed / 61 passed / 10 xfailed |
+| 26 + 30 Sep | 24 failed / 58 passed / 7 xfailed |
+| 10 Oct | 25 failed / 58 passed / 6 xfailed |
+
+Failures roughly doubled in a month while `xfailed` *fell* — cases arrived faster than they
+were marked, and some marks were removed.
+
+**That option is now closed, and not on the strength of this table.** The table is four
+observations and never could have settled it. What settles it is the mechanism above: the
+failures are not a backlog of cases awaiting `XFAIL` markers, they are a conformance diff
+against a baseline a bot regenerates from upstream `main`. Marking them would not help — the
+next refresh re-derives them. And **upstream will not pin the clone for us**: checked
+directly, `OrcaSlicer/OrcaSlicer`'s `build_orca.yml` on `main` still runs
+`git clone --depth 1 … orca-test-repo.git` with no ref, identical to `v2.4.2`. Upstream has
+no reason to change it — it builds `main`, so a main-tracking suite is correct *for upstream*.
+The unpinned clone is a defect only for a **release-pinned fork**, which is us. Do not
+re-open "wait for upstream" on #133 without new evidence about upstream's own CI.
+
+**Do not patch `build_orca.yml`.** `grep -c -i helio` on it returns **0** and the manifest
+marks it `owner: upstream`, so pinning the clone there would be the first Helio divergence
+in a clean upstream file — the exact reasoning that produced the closed #116. See Scope /
+Rule 15 above.
+
+**A re-run means something only if both runs provably used the same suite — and today
+nothing records that.** The step clones a default branch with no ref and logs no SHA, so two
+attempts may or may not have fetched the same revision, and **there is currently no sound way
+to find out after the fact.** Commit timestamps do not answer it: they are authoring dates,
+not the moment a commit became the default-branch tip, and they cannot reveal a force-push.
+So an interval that *looks* commit-free does not establish that two runs ran identical code,
+and a changed outcome across it cannot be called real flake on that basis.
+
+What that means in practice:
+
+- **Before** comparing two runs, make the revision recordable — have the step print
+  `git -C "$test_repo_dir" rev-parse HEAD`. That is a one-line change to upstream-owned
+  `build_orca.yml`, so it is **not ours** under Rule 15; it is noted on #133 as one more
+  thing the relocate-into-a-Helio-workflow option would buy.
+- **Until then**, treat any revision claim as an inference and say so, rather than
+  presenting it as measured.
+- For the failures recorded here the runs completed in ~150s with their test bodies executed
+  and no checkout/install/runner error. Those observations establish that **the suite ran
+  without infrastructure errors** — they do **not** rule out nondeterministic assertions,
+  which look exactly like that. So flakiness was never excluded on these runs, and they do
+  not establish that a re-run was unnecessary: with no recorded revision and no repeated run
+  against a known identical one, the honest position is that it is unknown. (The table
+  above also rules out a single body count for the window: failed + passed + xfailed is
+  84 on 14 Sep and 89 on 26/30 Sep and 10 Oct.)
+
+**What to know before choosing an option.** Both points below are measured against the
+external repository as of **2 Nov 2026**, which is still moving, so re-check rather than
+re-derive.
+
+- **`orca-test-repo` has no tags.** `git ls-remote --tags` returns nothing — only `main` and
+  four `hanif/*` branches. So a pin can only ever be a raw SHA, re-picked by hand each sync.
+  (Those branch names track the cases we see red: `hanif/load-filaments-count-fixed`,
+  `hanif/ams-drying-ledger`, `hanif/refresh-golden-baseline`.)
+- **`0dfd8df` (5 May 2026) is the one defensible SHA, and it keeps the step working.** It is
+  the last commit before the CLI suite. Its `run_test.py` is a standalone gcode validator
+  — *"Slice every .3mf in `test_projects/` and check output size"* against `baseline.json` —
+  so `python3 run_test.py <binary>`, the exact invocation at `:411`, still runs. At `main` the
+  same filename is only a wrapper that shells out to `pytest .`, so the two are drop-in
+  compatible and a pin does not strand the step.
+
+  **Price the pin against the whole suite, not just its reds.** This was first recorded as
+  *"trading away nearly all of the suite's coverage"*, which overstated the cost; a correction
+  then called the lost content *"not coverage, just 25 guaranteed reds"*, which understated it
+  by the same move in reverse. Neither is right. On the 29 Oct run the suite reported
+  **25 failed / 58 passed / 4 skipped / 6 xfailed**, so a pin to `0dfd8df` drops the 58
+  passing assertions along with the 25 reds, and those 58 are real coverage of CLI behaviour
+  this fork does share with upstream. The cost of the pin is therefore *both* that loss *and*
+  the Rule 12 divergence; the benefit is a readable Linux check. That is the trade-off to put
+  in front of the decision — do not hand #133 either of the one-sided versions.
+
+  Stated as an observation rather than a prediction: the suite **as inspected on 2 Nov 2026**
+  reports 25 failing cases against this v2.4.2 tree. It is cloned unpinned, so a later run can
+  report a different count in either direction — and per the attribution table above those 25
+  are **not** all incompatibility: 10 are our binary crashing and 9 are untraced. **A pin would
+  silence the four segfaults rather than fix them**, which is an argument against option 1 that
+  neither of the earlier pricings contained.
+
+  Two things a pin would rest on that are **not** established: that `0dfd8df` is *the revision
+  the last green run used* (an inference from clock times — no run records its suite SHA), and
+  so that pinning restores a state known to have been green here. The case-dating argument
+  above is revision-independent and does not depend on either.
+
+#133 carries the full option list and the evidence. Picking one is a CI-ownership
+decision and has been open since 14 Sep; the automated sweep records data points there
+rather than choosing. **A reviewer should not read a red `build_linux` as "this PR does
+not build"** — the compile and the artifact upload both succeed before the failing step,
+so the build status has to be read from the job log, not the check mark. That ambiguity
+is itself the risk: every reviewer here is now trained to ignore a red `build_linux`,
+which is the state in which a genuine regression gets waved through.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
@@ -157,6 +489,11 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 - `tests/libnest2d/` - 2D nesting algorithm tests
 - `tests/slic3rutils/` - Utility function tests
 - `tests/sandboxes/` - Experimental/sandbox test code
+
+**Run these locally — CI currently does not.** While the external regression suite is red
+(see *External slicer regression tests* above), `unit_tests` skips on every PR, so a local
+`ctest` run is the only place these assertions are evaluated. If you add or change a test,
+say in the PR that you ran it; the green check mark does not cover it.
 
 Run all tests after building:
 ```bash
