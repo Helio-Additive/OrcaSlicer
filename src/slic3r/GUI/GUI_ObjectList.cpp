@@ -347,11 +347,13 @@ ObjectList::ObjectList(wxWindow* parent) :
     //Bind(wxCUSTOMEVT_LAST_VOLUME_IS_DELETED, [this](wxCommandEvent& e)   { last_volume_is_deleted(e.GetInt()); });
 
     Bind(wxEVT_SIZE, ([this](wxSizeEvent &e) {
-             if (m_last_size == this->GetSize()) {
+             // ORCA: compare client size instead window size
+             // Name column stays wide that shows horizontal scrollbar when vertical scrollbar (dis)appears
+             if (m_last_size == this->GetClientSize()) {
                  e.Skip();
                  return;
              } else {
-                 m_last_size = this->GetSize();
+                 m_last_size = this->GetClientSize();
              }
 
         update_name_column_width();
@@ -361,7 +363,7 @@ ObjectList::ObjectList(wxWindow* parent) :
 
         e.Skip();
     }));
-    m_last_size = this->GetSize();
+    m_last_size = this->GetClientSize();
 }
 
 ObjectList::~ObjectList()
@@ -697,12 +699,14 @@ void ObjectList::set_tooltip_for_item(const wxPoint& pt)
             tooltip = _(L("Click the icon to reset all settings of the object"));
 #endif //__WXMSW__
     }
-    else if (col->GetModelColumn() == (unsigned int)colPrint)
+    else if (col->GetModelColumn() == (unsigned int)colPrint) {
+        if (node->IsPrintable() != piUndef)
 #ifdef __WXOSX__
-        tooltip = _(L("Right click the icon to drop the object printable property"));
+            tooltip = _(L("Right click the icon to drop the object printable property"));
 #else
-        tooltip = _(L("Click the icon to toggle printable properties of the object"));
+            tooltip = _(L("Click the icon to toggle printable properties of the object"));
 #endif //__WXMSW__
+    }
     // BBS
     else if (col->GetModelColumn() == (unsigned int)colSupportPaint) {
         if (node->HasSupportPainting())
@@ -1891,6 +1895,11 @@ bool ObjectList::dispatch_shortcut(Shortcut shortcut)
     case Shortcut::RemoveInstance:  decrease_instances(); break;
     case Shortcut::TogglePrintable: toggle_printable_state(); break;
     case Shortcut::ToggleAutoDrop:  toggle_auto_drop(); break;
+    case Shortcut::ReloadFromDisk:
+        // An open gizmo keeps references to the meshes a reload replaces.
+        if (!wxGetApp().plater()->get_view3D_canvas3D()->get_gizmos_manager().is_running() && wxGetApp().plater()->can_reload_from_disk())
+            wxGetApp().plater()->reload_from_disk();
+        break;
     default: return false;
     }
     return true;
