@@ -163,6 +163,11 @@ jobs:
           bridge_release=""
           for t in $published_stable; do
             [[ "$t" == helio-v* ]] || continue
+            # The bridge has to be offered to installed builds itself, so its
+            # whole tag must survive *their* matcher, build metadata included
+            # (Codex, #130: `helio-v2.5.1+bridge.1` is valid semver and a valid
+            # tag, but released builds reject the dot and never see it).
+            python3 scripts/helio/version_channel.py deployed-readable --version "${t#helio-v}" || continue
             v=${t#helio-v}; v=${v%%+*}
             [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
             if git grep -q 'HELIO_EXPERIMENTAL_TAG_PREFIX' "$t" -- src/slic3r/GUI/GUI_App.cpp; then

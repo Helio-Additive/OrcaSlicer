@@ -1289,6 +1289,11 @@ looks for one whose own tagged `src/slic3r/GUI/GUI_App.cpp` references
 `HELIO_EXPERIMENTAL_TAG_PREFIX`. That tag is passed as `--bridge-release`, and
 `version_channel.py` refuses an experimental release when there is none.
 
+- **Readable by installed builds.** The bridge is itself an update those builds
+  must be offered, so its whole tag, build metadata included, must pass the
+  matcher they shipped with (`version_channel.py deployed-readable`).
+  `helio-v2.5.1+bridge.1` is valid semver and a valid tag, but released builds
+  reject the dot, so it does not count (Codex, #130).
 - **Releases, not tags.** A tag proves nothing about what users could
   download: it can be pushed before its release, or outlive a release that was
   deleted or turned back into a draft (Codex, #130).

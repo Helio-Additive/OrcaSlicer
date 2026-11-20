@@ -304,12 +304,23 @@ def main(argv=None):
                        help="check the tree and branch rules only, skipping rules about what "
                             "has been published; for CI, never for a release")
 
+    readable = sub.add_parser(
+        "deployed-readable",
+        help="exit 0 if released builds' update check can parse this prefix-stripped version")
+    readable.add_argument("--version", required=True)
+
     tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
     tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
     tagp.add_argument("--channel", required=True, choices=sorted(CHANNELS))
     tagp.add_argument("--version", required=True, help="version from version.inc")
 
     args = ap.parse_args(argv)
+
+    if args.mode == "deployed-readable":
+        # The whole string, as released builds match it (std::regex_match): build
+        # metadata included, which is where a hand-made tag such as
+        # `+bridge.1` goes wrong while still being valid semver.
+        return 0 if DEPLOYED_MATCHER.fullmatch(args.version) else 1
 
     if args.mode == "check-tag":
         validate_tag(args.tag, args.channel, args.version)

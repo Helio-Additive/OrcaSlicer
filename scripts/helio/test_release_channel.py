@@ -483,6 +483,19 @@ def main():
         r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", prereleases=("helio-v2.4.3",)))
         check("step: prerelease is not a bridge", r.returncode != 0 and NONE in r.stdout,
               "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # Codex, #130: the bridge must itself be readable by installed builds.
+        # `+bridge.1` is valid semver and a valid tag, but released builds'
+        # whole-string matcher rejects the dot, so nobody is offered the bridge.
+        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3+bridge.1"], check=True)
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v2.4.3+bridge.1"))
+        check("step: bridge tag unreadable by installed builds", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # ... while alphanumeric metadata, which they do read, still counts.
+        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3+rebuild1"], check=True)
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v2.4.3+rebuild1"))
+        check("step: readable metadata tag is a bridge",
+              r.returncode == 0 and "can see previews: helio-v2.4.3+rebuild1" in r.stdout,
+              "rc=%d out=%s err=%s" % (r.returncode, r.stdout[:300], r.stderr[:200]))
         # A published release whose tag is absent locally cannot be inspected,
         # so it does not count either (fail closed).
         r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", "helio-v9.9.9"))
