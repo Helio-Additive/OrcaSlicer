@@ -216,9 +216,18 @@ void BackgroundSlicingProcess::process_fff()
 		}
 		else {
             if (m_upload_job.empty()) {
-                m_fff_print->export_gcode_from_previous_file(m_temp_output_path, m_gcode_result, [this](const ThumbnailsParams &params) {
-                    return this->render_thumbnails(params);
-                });
+                const std::string preview_path = m_current_plate->get_preview_gcode_filename();
+                bool preview_loaded = false;
+                if (!preview_path.empty()) {
+                    try {
+                        m_fff_print->export_gcode_from_previous_file(preview_path, m_gcode_result);
+                        preview_loaded = m_gcode_result->moves.size() > 1; // The first move is a placeholder.
+                    } catch (const Slic3r::RuntimeError& e) {
+                        BOOST_LOG_TRIVIAL(warning) << e.what();
+                    }
+                }
+                if (!preview_loaded)
+                    m_fff_print->export_gcode_from_previous_file(m_temp_output_path, m_gcode_result);
             }
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: export_gcode_from_previous_file from %2% finished")%__LINE__ % m_temp_output_path;
 		}
@@ -228,6 +237,7 @@ void BackgroundSlicingProcess::process_fff()
 		//FIX the gcode rename failed issue
 		BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: will start slicing, reset gcode_result %2% firstly")%__LINE__%m_gcode_result;
 		m_gcode_result->reset();
+        m_current_plate->clear_imported_preview_gcode();
 
 		BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: gcode_result reseted, will start print::process")%__LINE__;
 		m_print->process();

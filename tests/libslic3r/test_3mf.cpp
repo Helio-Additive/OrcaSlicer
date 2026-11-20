@@ -1,6 +1,8 @@
 
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Format/3mf.hpp"
+#include "libslic3r/Format/bbs_3mf.hpp"
+#include "libslic3r/Utils.hpp"
 #include "libslic3r/Format/STL.hpp"
 
 #include <boost/filesystem/operations.hpp>
@@ -130,6 +132,72 @@ SCENARIO("Export+Import geometry to/from 3mf file cycle", "[3mf]") {
                 REQUIRE(res);
             }
         }
+    }
+}
+
+TEST_CASE("Sliced 3MF keeps preview G-code separate from printable G-code", "[3mf]")
+{
+    const auto temp_dir = boost::filesystem::temp_directory_path();
+    Model model;
+    model.set_backup_path((temp_dir / boost::filesystem::unique_path("orca-3mf-%%%%-%%%%")).string());
+    const std::string dir = model.get_backup_path("Metadata");
+    const std::string archive = dir + "/sliced.gcode.3mf";
+    const std::string printable = "G1 X10 Y10 E1\n";
+    const std::string preview = "G1 X20 Y20 E2\n";
+
+    PlateData first_plate, second_plate;
+    first_plate.plate_index = 0;
+    first_plate.is_sliced_valid = true;
+    first_plate.gcode_file = dir + "/print.gcode";
+    first_plate.preview_gcode_file = dir + "/preview.gcode";
+    save_string_file(first_plate.gcode_file, printable);
+    save_string_file(first_plate.preview_gcode_file, preview);
+
+    second_plate.plate_index = 1;
+    second_plate.is_sliced_valid = true;
+    second_plate.gcode_file = first_plate.gcode_file;
+
+    auto config = DynamicPrintConfig::full_print_config();
+    StoreParams params;
+    params.path = archive.c_str();
+    params.model = &model;
+    params.config = &config;
+    params.plate_data_list = { &first_plate, &second_plate };
+    params.strategy = SaveStrategy::WithGcode | SaveStrategy::SkipModel | SaveStrategy::Silence;
+    const bool printer_bundle = GENERATE(false, true);
+    if (printer_bundle)
+        params.strategy = params.strategy | SaveStrategy::SkipPreviewGcode;
+    REQUIRE(store_bbs_3mf(params));
+
+    Model imported;
+    imported.set_backup_path((temp_dir / boost::filesystem::unique_path("orca-3mf-%%%%-%%%%")).string());
+    DynamicPrintConfig imported_config;
+    ConfigSubstitutionContext context{ ForwardCompatibilitySubstitutionRule::Disable };
+    std::vector<Preset*> presets;
+    Semver version;
+    PlateDataPtrs plates;
+    const auto strategy = LoadStrategy::LoadModel | LoadStrategy::LoadConfig;
+    const bool loaded = load_bbs_3mf(archive.c_str(), &imported_config, &context, &imported, &plates, &presets,
+                                    nullptr, nullptr, &version, nullptr, strategy);
+    std::vector<std::unique_ptr<PlateData>> imported_plates;
+    for (PlateData* plate : plates)
+        imported_plates.emplace_back(plate);
+    REQUIRE(loaded);
+    REQUIRE(imported_plates.size() == 2);
+
+    std::string bytes;
+    for (const auto& plate : imported_plates) {
+        REQUIRE(boost::filesystem::path(plate->gcode_file).extension() == ".gcode");
+        load_string_file(plate->gcode_file, bytes);
+        CHECK(bytes == printable);
+    }
+    CHECK(imported_plates[1]->preview_gcode_file.empty());
+    if (printer_bundle) {
+        CHECK(imported_plates[0]->preview_gcode_file.empty());
+    } else {
+        REQUIRE_FALSE(imported_plates[0]->preview_gcode_file.empty());
+        load_string_file(imported_plates[0]->preview_gcode_file, bytes);
+        CHECK(bytes == preview);
     }
 }
 

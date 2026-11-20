@@ -2525,12 +2525,23 @@ void PartPlate::set_print(PrintBase* print, GCodeResult* result, int index)
 
 std::string PartPlate::get_gcode_filename()
 {
-	if (is_slice_result_valid() && get_slice_result()) {
-		if (m_helio_result && m_helio_result->is_valid && !m_helio_result->printable_gcode_path.empty())
-			return m_helio_result->printable_gcode_path;
-		return m_gcode_result->filename;
-	}
-	return "";
+    if (!is_slice_result_valid() || !get_slice_result())
+        return {};
+    if (m_helio_result && m_helio_result->is_valid && !m_helio_result->printable_gcode_path.empty())
+        return m_helio_result->printable_gcode_path;
+    // Standalone G-code can be loaded directly into the result without a temporary file.
+    if (!m_tmp_gcode_path.empty())
+        return m_tmp_gcode_path;
+    if (m_gcode_result->filename == get_preview_gcode_filename())
+        return {};
+    return m_gcode_result->filename;
+}
+
+std::string PartPlate::get_preview_gcode_filename() const
+{
+    if (m_helio_result && m_helio_result->is_valid && !m_helio_result->preview_gcode_path.empty())
+        return m_helio_result->preview_gcode_path;
+    return m_preview_gcode_path_from_3mf;
 }
 
 bool PartPlate::is_valid_gcode_file()
@@ -6235,7 +6246,8 @@ int PartPlateList::store_to_3mf_structure(PlateDataPtrs& plate_data_list, bool w
 					//	plate_data_item->pattern_file = "valid_pattern";
 					if (m_plate_list[i]->cali_bboxes_data.is_valid())
 						plate_data_item->pattern_bbox_file = "valid_pattern_bbox";
-					plate_data_item->gcode_file       = m_plate_list[i]->get_gcode_filename();
+                    plate_data_item->gcode_file = m_plate_list[i]->get_gcode_filename();
+                    plate_data_item->preview_gcode_file = m_plate_list[i]->get_preview_gcode_filename();
 					plate_data_item->is_sliced_valid  = true;
 					plate_data_item->gcode_prediction = std::to_string(
 						(int) m_plate_list[i]->get_slice_result()->print_statistics.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Normal)].time);
@@ -6304,9 +6316,8 @@ int PartPlateList::load_from_3mf_structure(PlateDataPtrs& plate_data_list, int f
 		//just test for file correct or not, we will rebuild later
 		/*for (std::vector<std::pair<int, int>>::iterator it = plate_data_list[i]->objects_and_instances.begin(); it != plate_data_list[i]->objects_and_instances.end(); ++it)
 			m_plate_list[index]->obj_to_instance_set.insert(std::pair(it->first, it->second));*/
-		if (!plate_data_list[i]->gcode_file.empty()) {
-			m_plate_list[index]->m_gcode_path_from_3mf = plate_data_list[i]->gcode_file;
-		}
+        m_plate_list[index]->m_gcode_path_from_3mf = plate_data_list[i]->gcode_file;
+        m_plate_list[index]->m_preview_gcode_path_from_3mf = plate_data_list[i]->preview_gcode_file;
 		GCodeResult* gcode_result = nullptr;
 		PrintBase* fff_print = nullptr;
 		m_plate_list[index]->get_print(&fff_print, &gcode_result, nullptr);

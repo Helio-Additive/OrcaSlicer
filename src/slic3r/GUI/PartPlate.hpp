@@ -119,6 +119,7 @@ private:
 
     std::string m_tmp_gcode_path;       //use a temp path to store the gcode
     std::string m_temp_config_3mf_path; //use a temp path to store the config 3mf
+    std::string m_preview_gcode_path_from_3mf;
     std::string m_gcode_path_from_3mf;  //use a path to store the gcode loaded from 3mf
 
     friend class PartPlateList;
@@ -317,6 +318,8 @@ public:
 
     //get gcode filename
     std::string get_gcode_filename();
+    std::string get_preview_gcode_filename() const;
+    void clear_imported_preview_gcode() { m_preview_gcode_path_from_3mf.clear(); }
 
     bool is_valid_gcode_file();
 

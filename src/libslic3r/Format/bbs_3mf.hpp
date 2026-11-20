@@ -74,6 +74,7 @@ struct PlateData
     std::string     printer_model_id;
     std::string     nozzle_diameters;
     std::string     gcode_file;
+    std::string     preview_gcode_file;
     std::string     gcode_file_md5;
     std::string     thumbnail_file;
     std::string     no_light_thumbnail_file;
@@ -137,6 +138,7 @@ enum class SaveStrategy
     SkipAuxiliary       = 1 << 9,
     UseLoadedId         = 1 << 10,
     ShareMesh           = 1 << 11,
+    SkipPreviewGcode    = 1 << 13,
 
     SplitModel = 0x1000 | ProductionExt,
     Encrypted  = SecureContentExt | SplitModel,

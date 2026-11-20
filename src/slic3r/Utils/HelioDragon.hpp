@@ -444,8 +444,7 @@ public:
 struct HelioPlateResult {
     int action{-1};  // -1=none, 0=simulation, 1=optimization
 
-    // The annotated preview path is owned by GCodeProcessorResult::filename;
-    // this separate path is the annotation-free file for export and upload.
+    std::string preview_gcode_path;
     std::string printable_gcode_path;
 
     // Simulation data
@@ -462,6 +461,7 @@ struct HelioPlateResult {
 
     void clear() {
         action = -1;
+        preview_gcode_path.clear();
         printable_gcode_path.clear();
         simulation_result = HelioQuery::SimulationResult();
         original_print_time_seconds = 0;

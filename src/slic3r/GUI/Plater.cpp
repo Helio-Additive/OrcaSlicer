@@ -8228,10 +8228,8 @@ bool Plater::priv::restart_background_process(unsigned int state)
             helio_background_process.reset();
             helio_processing_disabled = false;
         }
-        // Keep the Helio artifact selection for an export-only run. Clearing it here
-        // makes get_gcode_filename() fall back to the annotated preview result, so an
-        // optimization export can write the wrong G-code. A real restart still makes
-        // the artifacts stale and must discard them before slicing again.
+        // Keep the Helio artifact selection for an export-only run so that it uses
+        // the optimized printable G-code. A reslice invalidates the Helio artifacts.
         if ((state & (UPDATE_BACKGROUND_PROCESS_FORCE_RESTART | UPDATE_BACKGROUND_PROCESS_RESTART)) != 0) {
             PartPlate* plate = background_process.get_current_plate();
             if (plate) plate->clear_helio_result();
@@ -9913,6 +9911,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             const HelioPlateResult* pending_result = plate->get_helio_result();
             HelioPlateResult helio_result = a.action == 0 && pending_result ? *pending_result : HelioPlateResult();
             helio_result.action = a.action;
+            helio_result.preview_gcode_path = a.path;
             helio_result.printable_gcode_path = a.printable_path;
             helio_result.is_valid = true;
 
@@ -18478,7 +18477,7 @@ int Plater::send_gcode(int plate_idx, Export3mfProgressFn proFn)
         strategy = SaveStrategy::Silence | SaveStrategy::SplitModel | SaveStrategy::WithGcode;
 #endif
 
-    result = export_3mf(p->m_print_job_data._3mf_path, strategy, plate_idx, proFn);
+    result = export_3mf(p->m_print_job_data._3mf_path, strategy | SaveStrategy::SkipPreviewGcode, plate_idx, proFn);
 
     return result;
 }
