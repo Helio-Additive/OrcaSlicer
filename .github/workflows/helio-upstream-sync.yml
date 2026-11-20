@@ -540,6 +540,84 @@ jobs:
           SELF_NAMED=false
           CANDS=()
           CDESC=()
+
+          # Highest record preference: the `upstream-commit:` trailer written onto
+          # the sync commit itself by the squash step below.
+          #
+          # WHY THIS EXISTS, given version.inc and the tracking tag already feed
+          # this list. It is for `main` mode. There, version.inc is deliberately
+          # excluded (it names a RELEASE, and a main sync is ahead of it), so the
+          # only candidate is `helio-last-synced-main` — a tag that is mutable and,
+          # on this repository, cannot even be written: pushing it makes upstream's
+          # .github/workflows/** reachable and GITHUB_TOKEN may not introduce
+          # workflow content, so the push is refused. A main sync therefore has no
+          # durable baseline at all. A trailer on the commit has neither problem:
+          # it is immutable, it travels with the branch, and writing it needs no
+          # permission beyond committing.
+          #
+          # NOT a substitute for the checks below. This only ADDS a candidate; it
+          # is content-validated with every other one, so a record that disagrees
+          # with the tree loses to one that matches it.
+          #
+          # Read with --grep over the FULL message, not `%(trailers:...)`: git
+          # parses trailers only from the last paragraph, and GitHub appends
+          # `Co-authored-by:` in a paragraph of its own when it squash-merges a PR
+          # with more than one commit author — which silently drops the record.
+          # The two lines must be ADJACENT and the mode must match, so a message
+          # quoting an older record cannot be combined with a newer one; the LAST
+          # such pair in a message wins, because a commit's own record is written
+          # below anything it quotes.
+          SYNC_MODE=tag
+          if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
+          # --grep is a CANDIDATE FILTER, not the answer. It is satisfied when both
+          # patterns appear anywhere in a message, including non-adjacently, so
+          # taking the newest match and parsing only that one lets a single
+          # malformed or quoting commit SHADOW every valid record beneath it — the
+          # mechanism silently stops working from that commit onward.
+          #
+          # Every same-mode record becomes a candidate, newest-first — not just the
+          # newest one. Stopping at the first parseable pair shadows older records
+          # just as surely, only later in the pipeline: a syntactically fine record
+          # that then fails the content validation below takes the whole mechanism
+          # down with it, because no older record was ever offered. That is not a
+          # corner case here. Resolving a conflict means deliberately not taking
+          # some of upstream's content, so a conflict-resolved sync's tree can fail
+          # the held-content test by construction — and on this fork every sync so
+          # far has conflicted. The graft would fall back to a far older release
+          # baseline (or, in main mode where the tracking tag cannot be written at
+          # all, to nothing) and replay history that was already resolved.
+          #
+          # Offering all of them is safe because candidates are not preference-
+          # ordered: they are sorted by ancestry and each must prove its content is
+          # held, so an older record can only ever be chosen when every newer one
+          # failed on the merits.
+          CAND_COMMITS=$(git log --first-parent -E --all-match \
+            --grep="^upstream-commit: [0-9a-f]{40}\$" \
+            --grep="^upstream-sync-mode: ${SYNC_MODE}\$" \
+            --format=%H 2>/dev/null || true)
+          REC_SEEN=""
+          for cand in $CAND_COMMITS; do
+            v=$(git show -s --format=%B "$cand" | awk -v mode="$SYNC_MODE" '
+              /^upstream-commit: [0-9a-f]{40}$/ { sha = $2; next }
+              $0 == "upstream-sync-mode: " mode && sha != "" { last = sha; sha = ""; next }
+              { sha = "" }
+              END { print last }')
+            [ -n "$v" ] || continue
+            # Must be a full 40-hex object name we actually have: a short or
+            # symbolic value (`upstream-commit: HEAD`) would graft an arbitrary
+            # commit, which is worse than having no record.
+            if ! git rev-parse -q --verify "$v^{commit}" >/dev/null 2>&1; then
+              echo "::warning title=Unusable baseline record::Commit ${cand:0:12} carries \`upstream-commit: $v\`, which is not a commit this clone has. Ignoring it and continuing with older records."
+              continue
+            fi
+            if [ "$v" = "$SYNC_SHA" ]; then SELF_NAMED=true; continue; fi
+            git merge-base --is-ancestor "$v" "$SYNC_SHA" || continue
+            case " $REC_SEEN " in *" $v "*) continue ;; esac
+            REC_SEEN="$REC_SEEN $v"
+            CANDS+=("$v")
+            CDESC+=("the upstream-commit: record ($SYNC_MODE mode) on ${cand:0:12}")
+          done
+
           if [ "$TRACKING_TAG" = "helio-last-synced" ]; then
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
@@ -1019,12 +1097,16 @@ jobs:
           PREV_UPSTREAM: ${{ steps.graft.outputs.prev_upstream }}
           BRANCH_PUSHED: ${{ steps.push_branch.outputs.pushed }}
           PUSH_SKIP_REASON: ${{ steps.push_branch.outputs.skip_reason }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
         with:
           script: |
             const fs = require('fs');
             const branch = process.env.SYNC_BRANCH;
             const syncLabel = process.env.SYNC_LABEL;
             const syncSha = process.env.SYNC_SHA;
+            // Same derivation as the clean-squash step. The reader filters on
+            // mode, so recording the wrong one is equivalent to recording nothing.
+            const syncMode = process.env.TRACKING_TAG === 'helio-last-synced-main' ? 'main' : 'tag';
             const target = process.env.TARGET_BRANCH;
             const helioReport = process.env.HELIO_REPORT;
             const grafted = process.env.GRAFTED === 'true';
@@ -1144,7 +1226,16 @@ jobs:
               '   BASE=$(git rev-parse HEAD^1)             # target-branch tip (first parent)',
               '   # (placeholders below are literal — do NOT paste the raw upstream tag into a',
               '   #  double-quoted -m; git refnames may contain $()/backticks that would run)',
-              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" -m "Upstream sync: <tag> into <target-branch> (squashed)")',
+              '   # The baseline record. Both lines go in ONE -m so they land in the same',
+              '   # paragraph and stay adjacent, and it is the LAST -m so the pair terminates',
+              '   # the message — the reader in the graft step requires both, so that a record',
+              '   # quoted from an older sync cannot be spliced onto a later one.',
+              '   # Every sync on this fork so far has conflicted, so this recipe — not the',
+              '   # automatic squash step — is where the record actually gets written.',
+              `   RECORD=$(printf 'upstream-commit: %s\\nupstream-sync-mode: %s' "${syncSha}" "${syncMode}")`,
+              '   NEW=$(git commit-tree "HEAD^{tree}" -p "$BASE" \\',
+              '     -m "Upstream sync: <tag> into <target-branch> (squashed)" \\',
+              '     -m "$RECORD")',
               '   git reset --hard "$NEW"                  # branch now has exactly one commit',
               `   git push origin ${branch} --force-with-lease`,
               '   ```',
@@ -1266,13 +1357,22 @@ jobs:
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
+          TRACKING_TAG: ${{ steps.target.outputs.tracking_tag }}
         run: |
           BASE="$PRE_MERGE"                   # target-branch tip recorded before the merge
           TREE=$(git rev-parse "HEAD^{tree}") # resolved merge (or fast-forwarded) tree
+          # The baseline record. Both lines go in ONE -m so they land in the same
+          # paragraph and stay adjacent — the reader in the graft step requires
+          # adjacency so a quoted record cannot be spliced onto a later one. It is
+          # also the LAST -m so the pair terminates the message, which is what
+          # makes "the last pair wins" mean "this commit's own record".
+          SYNC_MODE=tag
+          if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
             -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
-            -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications.")
+            -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
+            -m "$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")")
           git reset --hard "$NEW"
           echo "Squashed clean merge into single commit $NEW (parent $BASE)"
 
