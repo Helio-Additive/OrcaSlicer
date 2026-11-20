@@ -138,6 +138,31 @@ generation so work started under the old credential can never land.
 | `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
+### CI/CD Workflows (upstream files carrying Helio hunks)
+
+Two inherited workflows are modified rather than Helio-only, which is why #134
+happened: a hand-resolved sync conflict took `--ours` wholesale and dropped every
+upstream change to **exactly these two files** between v2.4.0-beta and v2.4.2,
+while the five inherited `.github/` files with no Helio hunks updated cleanly.
+Rule 12 says don't edit inherited workflows; these are the standing exceptions, so
+keep the list short and the hunks small.
+
+| File | Helio hunks |
+|-|-|
+| `.github/workflows/build_all.yml` | `ready-to-build` label gate on the four build jobs (Rule 14); data-only `paths:` entries (`resources/**`, `localization/**`) added to the `pull_request` filter in PR #113 |
+| `.github/workflows/build_orca.yml` | `ENABLE_SIGNING` gate on the two macOS signing steps (`Sign app and notary`, `Create DMG without notary`) |
+
+**`Free disk space` is not a Helio hunk, and must not become one again.** Before
+v2.5.0, upstream's line kept `Xcode_15.4.app` *by name*. On `macos-15`, which has no
+15.x Xcode, that deletes the selected toolchain. #149 fixed it here when
+`helio-release.yml` moved to `macos-15` (#147). Upstream v2.5.0 then shipped the same
+fix itself: it keeps whatever `xcode-select -p` resolves to via `pwd -P`, and moved
+`build_all.yml` to `macos-15` too. So at the v2.5.0 merge into #149 the Helio hunk was
+dropped and upstream's line taken verbatim (Rule 15: don't front-run a fix upstream
+already ships). #149 also skipped the deletion when only the Command Line Tools are
+selected. Upstream's line does not, but that state does not occur on GitHub-hosted
+runners, so it is upstream's to own.
+
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
 
 #### `.github/workflows/build_orca.yml` (+2/-2) — **added to this map at the v2.5.0 sync**
@@ -1300,6 +1325,25 @@ published on a tree with the parser.
 
 The graduation step, when a feature is ready, is to delete its
 `helio_experimental_features_enabled()` call. Nothing moves between branches.
+
+## Temporary backports from upstream `main` (drop at the next sync)
+
+Three upstream build fixes were copied in **verbatim** with the v2.5.1 sync, ahead of
+the upstream release that will carry them. They fix CI jobs that were red on every PR
+(#163, #164), and the repo owner decided not to merge with red CI. This is a
+deliberate, owner-approved exception to Rule 15's "wait for the sync". It keeps
+divergence at zero by copying upstream's own text, not by writing a Helio fix.
+
+| file | fixes | upstream source |
+|---|---|---|
+| `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
+| `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
+| `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
+
+**At the next sync, take upstream's version of every row.** The two `deps/` rows
+should merge cleanly, because both sides hold identical text. The Flatpak row will not:
+upstream moved the job into `build_flatpak.yml`, so drop our volume line from
+`build_all.yml` when that restructure arrives. Then delete this section.
 
 ## Upstream Sync: squash merges & the merge-base graft
 
