@@ -1,5 +1,19 @@
 #include "HelioDragon.hpp"
 
+// Helio: this file uses the bare `json` alias in several places and has been
+// picking it up transitively. Declare it here, as HelioSupportData.cpp and the
+// rest of the GUI already do, so a future header reshuffle cannot take it away.
+#include "nlohmann/json.hpp"
+using json = nlohmann::json;
+
+// Helio: same story for `fs`. This file uses fs::exists / fs::is_regular_file /
+// fs::path and had been inheriting the alias through the GUI include chain, which
+// upstream v2.5.0 no longer provides. boost::filesystem (not std::filesystem) is
+// what `fs` means throughout src/slic3r -- see Http.cpp, PresetUpdater.cpp,
+// CalibUtils.cpp, which all alias it exactly this way.
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+
 #include <atomic>
 #include <string>
 #include <wx/string.h>
@@ -169,7 +183,7 @@ void HelioQuery::request_remaining_optimizations(const std::string & helio_api_u
 
     http.timeout_connect(20)
         .timeout_max(100)
-        .on_complete([url_copy, key_copy, func](std::string body, unsigned status) {
+        .on_complete([func](std::string body, unsigned status) {
         try {
             nlohmann::json parsed_obj = nlohmann::json::parse(body);
 
@@ -761,7 +775,7 @@ void HelioQuery::request_pat_token(std::function<void(std::string)> func)
     auto http = Http::get(url_copy);
     http.timeout_connect(20)
         .timeout_max(100)
-        .on_complete([url_copy, func](std::string body, unsigned status) {
+        .on_complete([func](std::string body, unsigned status) {
             //success
             if (status == 200) {
                 nlohmann::json parsed_obj = nlohmann::json::parse(body);
@@ -1047,7 +1061,7 @@ HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_ap
                 BOOST_LOG_TRIVIAL(error) << "Helio poll_gcode_status: unknown error";
             }
         })
-        .on_error([&result](std::string poll_body, std::string poll_error, unsigned poll_status) {
+        .on_error([](std::string poll_body, std::string poll_error, unsigned poll_status) {
             BOOST_LOG_TRIVIAL(error) << "Helio poll_gcode_status error: " << poll_error << ", status: " << poll_status;
         })
         .perform_sync();
@@ -1574,10 +1588,10 @@ std::string HelioQuery::create_optimization_default_get(const std::string helio_
         .on_header_callback([&response_headers](std::string headers) {
             response_headers += headers;
         })
-        .on_complete([&res](std::string body, unsigned status) {
+        .on_complete([](std::string body, unsigned status) {
             nlohmann::json parsed_obj = nlohmann::json::parse(body);
         })
-        .on_error([&res, &response_headers](std::string body, std::string error, unsigned status) {
+        .on_error([](std::string body, std::string error, unsigned status) {
             BOOST_LOG_TRIVIAL(error) << "Helio create_optimization_default_get error: " << error << ", status: " << status;
         })
         .perform_sync();
@@ -2124,7 +2138,7 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
     set_state(STATE_RUNNING);
 
     std::unique_lock<std::mutex> slicing_lck(slicing_mutex);
-    slicing_condition.wait(slicing_lck, [this, &slicing_state]() {
+    slicing_condition.wait(slicing_lck, [&slicing_state]() {
         return slicing_state == BackgroundSlicingProcess::STATE_FINISHED || slicing_state == BackgroundSlicingProcess::STATE_CANCELED ||
                slicing_state == BackgroundSlicingProcess::STATE_IDLE;
     });

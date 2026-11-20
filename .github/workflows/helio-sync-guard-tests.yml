@@ -13,16 +13,32 @@
 name: Helio sync guard tests
 
 on:
-  push:
-    paths:
-      - '.github/workflows/helio-upstream-sync.yml'
-      - '.github/workflows/helio-sync-guard-tests.yml'
-      - 'scripts/helio/**'
+  # Deliberately NO `paths:` filter, for the same reason helio-workflow-inventory.yml
+  # has none: GitHub evaluates path filters against only the first 300 changed
+  # files, and the changed-file list is ordered by path. `scripts/helio/**` sorts
+  # after `resources/**`, which is where a sync's bulk lives, so on a sync PR
+  # those paths are always outside the window. Measured on this branch's own
+  # sync commits — files sorting before `scripts/helio/`:
+  #
+  #   v2.4.2      (ce472ef4,   894 files)    857
+  #   v2.4.1      (eaf3cb94, 8,059 files)  7,940
+  #   v2.4.0-beta (7322afa4, 15,081 files) 14,617
+  #
+  # A sync whose conflict resolution also touches `scripts/helio/**` would
+  # therefore skip this suite on exactly the PR that rewrites the logic it
+  # guards. The suite is ~30s of Python, so running it unfiltered is the cheap
+  # side of that trade.
   pull_request:
-    paths:
-      - '.github/workflows/helio-upstream-sync.yml'
-      - '.github/workflows/helio-sync-guard-tests.yml'
-      - 'scripts/helio/**'
+  push:
+    branches:
+      - orca-latest-parity-bambu
+  schedule:
+    # Weekly, so drift surfaces when nobody is editing these files. The suite
+    # depends on the runner image, Python and PyYAML as well as on this repo, and
+    # between #121 (Aug) and #130 (Sep) nothing triggered it at all. Without this,
+    # a breakage caused from outside the repo would first appear on a sync-workflow
+    # edit — the worst moment to start debugging the harness instead of the sync.
+    - cron: '0 8 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -32,12 +48,16 @@ jobs:
   sync-guards:
     name: Upstream sync guards
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           # The suite builds its own synthetic repositories and never inspects
           # this one's history, so a shallow checkout is enough.
           fetch-depth: 1
+          # Nothing here talks to the network or to this repo's remote, so the
+          # job has no use for a credential in .git/config.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
