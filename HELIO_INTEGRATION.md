@@ -641,13 +641,53 @@ normalised one to LF, **every** line differs. Measured on the branch today:
 | `git diff` (the old command above) | 297 insertions, 269 deletions — the whole file |
 | `git diff --ignore-cr-at-eol` | 76 insertions, 48 deletions — the real Helio delta |
 
-`git blame` is unusable on such a file for the same reason and cannot be repaired
-by a flag: the normalising commit rewrote every line, so blame names that commit's
-author — a Helio author — for upstream's content. **Do not settle ownership with
-blame.** It is what produced the wrong answer on this exact file: the `macos-14`
-runner label at `:133`/`:144` blames to a Helio commit (`aa9c1e36`, #44) and is
-upstream's own line, byte-identical at `v2.4.2:.github/workflows/build_all.yml`
-`:110`/`:121`, and present in **no** Helio hunk once CRs are ignored.
+**Ordinary `git blame` fails the same way, and `-w` only half-repairs it.** The
+normalising commit rewrote every line, so plain blame names that commit's author —
+a Helio author — for upstream's content:
+
+```bash
+$ git blame    -L 133,133 .github/workflows/build_all.yml
+aa9c1e368 (Priyesh 2026-03-25 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+$ git blame -w -L 133,133 .github/workflows/build_all.yml   # -w ignores whitespace
+^d0e90c94 (Priyesh 2026-03-12 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+```
+
+`-w` does see through the normalisation — it moves off `aa9c1e36` — so "no flag can
+recover the attribution" would be wrong. **It still does not answer the ownership
+question**, for two reasons that `-w` cannot touch:
+
+- **Blame answers "which commit last touched this line", not "whose content is
+  this".** A Helio commit that moves, re-indents or re-wraps an upstream line owns
+  the line by blame and owns none of it by Rule 15.
+- **The answer depends on clone depth.** In a shallow clone blame bottoms out at the
+  graft boundary and attributes everything there — the `^` on `d0e90c94` above marks
+  exactly that, in a 51-commit shallow checkout. The same command in a full clone
+  returns something else.
+
+So blame is a lead, never the verdict. **Settle ownership with the hunk diff above.**
+Worked example, the one this caveat exists for: the `macos-14` runner label at
+`:133`/`:144` blames to a Helio commit and is upstream's own line, byte-identical at
+`v2.4.2:.github/workflows/build_all.yml` `:110`/`:121`, and present in **no** Helio
+hunk once CRs are ignored.
+
+**What `--ignore-cr-at-eol` costs: it also hides a Helio line-ending change, and that
+one *is* ours.** The flag ignores carriage returns at end of line, so empty output
+means "equivalent apart from trailing CRs" — **not** byte-identical. If the Helio
+delta in a file *is* the line endings, this command disowns it, and a line-ending
+change is squarely the "caused by a Helio hunk" half of Rule 15 rather than an
+upstream defect. It is not hypothetical damage; CRLF in a shebang is unrunnable:
+
+```bash
+$ git diff --stat                   HEAD~1 HEAD -- s.sh   # 1 file changed, 2 ins, 2 del
+$ git diff --stat --ignore-cr-at-eol HEAD~1 HEAD -- s.sh   # (empty)
+$ ./s.sh
+./s.sh: cannot execute: required file not found
+```
+
+So: `--ignore-cr-at-eol` for the ownership question, and **the unfiltered diff as
+well** whenever the symptom could be line-ending-sensitive — a shell or Python
+script, a shebang, a file some code parses line by line, a checksum or signature
+mismatch, or "works upstream, fails here" with no visible difference.
 
 Scope of the trap, measured rather than assumed: across all 104 files that differ
 from `v2.4.2`, `build_all.yml` is the **only** one where the two commands disagree,
