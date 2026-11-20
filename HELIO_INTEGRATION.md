@@ -625,9 +625,49 @@ for cand in "v$VER" "$VER"; do                  # upstream tags both forms
 done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
 
-git diff --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
-git diff        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks — that is the test
+# --ignore-cr-at-eol is load-bearing, not tidiness. See the caveat below.
+git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
+git diff --ignore-cr-at-eol        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks
 ```
+
+**Line endings defeat this test silently, and `git blame` with it.** Without
+`--ignore-cr-at-eol` the diff can report a file Helio has barely touched as
+rewritten end to end, which reads as "all of it is ours" — the precise conclusion
+Rule 15 exists to prevent. Upstream ships some files CRLF; where a Helio commit
+normalised one to LF, **every** line differs. Measured on the branch today:
+
+| `.github/workflows/build_all.yml` vs `v2.4.2` | reported delta |
+|---|---|
+| `git diff` (the old command above) | 297 insertions, 269 deletions — the whole file |
+| `git diff --ignore-cr-at-eol` | 76 insertions, 48 deletions — the real Helio delta |
+
+`git blame` is unusable on such a file for the same reason and cannot be repaired
+by a flag: the normalising commit rewrote every line, so blame names that commit's
+author — a Helio author — for upstream's content. **Do not settle ownership with
+blame.** It is what produced the wrong answer on this exact file: the `macos-14`
+runner label at `:133`/`:144` blames to a Helio commit (`aa9c1e36`, #44) and is
+upstream's own line, byte-identical at `v2.4.2:.github/workflows/build_all.yml`
+`:110`/`:121`, and present in **no** Helio hunk once CRs are ignored.
+
+Scope of the trap, measured rather than assumed: across all 104 files that differ
+from `v2.4.2`, `build_all.yml` is the **only** one where the two commands disagree,
+and no file is a pure line-ending diff. So this is a single known case today — but
+a sync can normalise another file at any time, which is why the flag belongs in the
+command and not in a footnote.
+
+**Before concluding "ours", check whether upstream has already fixed it.** Rule 15's
+cost argument is about front-running a fix upstream has written, so the cheap check
+is whether a release *newer* than our baseline already carries it:
+
+```bash
+git show "refs/tags/<newer-release>:<file>" | grep -n "<the line>"
+```
+
+Worked example, the one that prompted this caveat: `build_all.yml`'s dead `macos-14`
+label (#147) is already `macos-15` upstream in **both** `v2.5.0` and `v2.5.1`. It
+needs no patch here at all — it arrives with the sync, which is PR #151. A local fix
+would have bought a permanent divergence in an upstream-owned file to deliver a
+change already written and already waiting in the queue: #116's mistake exactly.
 
 **Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
 tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
