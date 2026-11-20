@@ -60,12 +60,39 @@ def write_header(tmp, flag, name):
     return path
 
 
-def run_channel(header, version, branch, latest_stable="", latest_experimental=""):
+# Cases about the other rules assume a bridge release exists; the bridge rule
+# itself is exercised explicitly with bridge_release="".
+BRIDGE = "helio-v2.4.2"
+
+
+def run_channel(header, version, branch, latest_stable="", latest_experimental="",
+                bridge_release=BRIDGE):
     return subprocess.run(
         [sys.executable, SCRIPT, "check", "--header", header, "--version", version,
          "--branch", branch, "--latest-stable", latest_stable,
-         "--latest-experimental", latest_experimental],
+         "--latest-experimental", latest_experimental,
+         "--bridge-release", bridge_release],
         capture_output=True, text=True)
+
+
+GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+
+
+def commit_gui_app(repo, reads_experimental_tags, msg="x"):
+    """Commit a GUI_App.cpp that does, or does not, carry the new tag parser.
+
+    The release step decides whether a stable tag is a bridge by reading that
+    tag's own source, so the fixture has to be a real committed tree."""
+    d = os.path.join(repo, "src", "slic3r", "GUI")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "GUI_App.cpp"), "w", encoding="utf-8") as fh:
+        fh.write('const std::string helio_prefix = HELIO_STABLE_TAG_PREFIX;\n')
+        if reads_experimental_tags:
+            fh.write('const std::string helio_exp_prefix = HELIO_EXPERIMENTAL_TAG_PREFIX;\n')
+    subprocess.run(["git", "-C", repo, "add", "src/slic3r/GUI/GUI_App.cpp"], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", msg],
+                   check=True, env=GIT_ENV)
 
 
 def run_check_tag(tag, channel, version):
@@ -275,6 +302,18 @@ def main():
         p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "2.4.2", "")
         check("first preview, no previous", p.returncode == 0, p.stderr)
 
+        # --- the bridge release ------------------------------------------------
+        # Builds released before the experimental channel read only `helio-v`
+        # and `v` tags, so they drop `helio-exp-v…` silently. A preview with no
+        # bridge release published would be cut, listed, and offered to nobody.
+        p = run_channel(experimental, "2.4.3-exp01", "helio-experimental", "2.4.2", "",
+                        bridge_release="")
+        check("preview refused with no bridge release", p.returncode != 0, p.stdout)
+        check("  ... and says who misses it", "reach nobody" in p.stderr, p.stderr[:300])
+        p = run_channel(stable, "2.4.3", "orca-latest-parity-bambu", "2.4.2",
+                        bridge_release="")
+        check("stable release needs no bridge", p.returncode == 0, p.stderr)
+
         # --- the real baseline step --------------------------------------------
         # The ordering guard is only as good as the baseline it is given. A
         # stable release whose only tag carries build metadata must still count
@@ -288,10 +327,7 @@ def main():
         shutil.copy2(SCRIPT, os.path.join(base, "scripts", "helio", "version_channel.py"))
         shutil.copy2(experimental, os.path.join(base, "src", "libslic3r", "HelioChannel.hpp"))
         subprocess.run(["git", "init", "-q", base], check=True)
-        subprocess.run(["git", "-C", base, "commit", "-q", "--allow-empty", "-m", "x"],
-                       check=True, env=dict(os.environ, GIT_AUTHOR_NAME="t",
-                                            GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t",
-                                            GIT_COMMITTER_EMAIL="t@e"))
+        commit_gui_app(base, reads_experimental_tags=True)
         for t in ("helio-v2.4.1", "helio-v2.4.2+rebuild1"):
             subprocess.run(["git", "-C", base, "tag", t], check=True)
 
@@ -323,10 +359,7 @@ def main():
         shutil.copy2(SCRIPT, os.path.join(first, "scripts", "helio", "version_channel.py"))
         shutil.copy2(experimental, os.path.join(first, "src", "libslic3r", "HelioChannel.hpp"))
         subprocess.run(["git", "init", "-q", first], check=True)
-        gitenv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
-                      GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
-        subprocess.run(["git", "-C", first, "commit", "-q", "--allow-empty", "-m", "x"],
-                       check=True, env=gitenv)
+        commit_gui_app(first, reads_experimental_tags=True)
         subprocess.run(["git", "-C", first, "tag", "helio-v2.4.2"], check=True)
 
         env = dict(os.environ, VERSION="2.4.3-exp01", BRANCH="helio-experimental",
@@ -350,6 +383,51 @@ def main():
         check("second experimental release accepted", r.returncode == 0, r.stderr[:200])
         check("  ... exp tag not read as stable",
               "Newest published stable release: 2.4.2" in r.stdout, r.stdout[:200])
+
+        # --- the bridge, through the real step ---------------------------------
+        # The step finds the bridge by reading each stable tag's own source, so
+        # this runs it against real tags on real trees rather than against flags.
+        nb = os.path.join(tmp, "nobridge")
+        os.makedirs(os.path.join(nb, "scripts", "helio"), exist_ok=True)
+        os.makedirs(os.path.join(nb, "src", "libslic3r"), exist_ok=True)
+        shutil.copy2(SCRIPT, os.path.join(nb, "scripts", "helio", "version_channel.py"))
+        shutil.copy2(experimental, os.path.join(nb, "src", "libslic3r", "HelioChannel.hpp"))
+        subprocess.run(["git", "init", "-q", nb], check=True)
+        commit_gui_app(nb, reads_experimental_tags=False, msg="pre-channel stable")
+        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.2"], check=True)
+
+        env = dict(os.environ, VERSION="2.4.3-exp01", BRANCH="helio-experimental",
+                   GITHUB_OUTPUT=os.path.join(tmp, "nbout"))
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
+                           capture_output=True, text=True)
+        check("step: preview refused before any bridge", r.returncode != 0,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:200]))
+        check("  ... and reports no bridge",
+              "Stable release that can see previews: <none>" in r.stdout, r.stdout[:300])
+
+        # A prerelease-shaped stable tag carrying the parser is not a bridge:
+        # it is not a final release, so the stable users this rule is about
+        # were never offered it.
+        commit_gui_app(nb, reads_experimental_tags=True, msg="parser lands")
+        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3-beta"], check=True)
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
+                           capture_output=True, text=True)
+        check("step: prerelease tag is not a bridge", r.returncode != 0,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:200]))
+        check("  ... because no bridge was found",
+              "Stable release that can see previews: <none>" in r.stdout, r.stdout[:300])
+
+        # The stable release cut from a tree with the parser is the bridge.
+        subprocess.run(["git", "-C", nb, "tag", "helio-v2.4.3"], check=True)
+        env["VERSION"] = "2.4.4-exp01"
+        open(env["GITHUB_OUTPUT"], "w").close()
+        r = subprocess.run(["bash", "-c", chan_step], cwd=nb, env=env,
+                           capture_output=True, text=True)
+        check("step: preview accepted after the bridge", r.returncode == 0, r.stderr[:300])
+        check("  ... and names it",
+              "Stable release that can see previews: helio-v2.4.3" in r.stdout, r.stdout[:300])
 
         # --- the real tag step -------------------------------------------------
         # An override that changes the channel prefix would bypass the

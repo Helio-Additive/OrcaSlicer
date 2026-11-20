@@ -1232,8 +1232,48 @@ computed tag, optionally with build metadata.
 refuses to publish otherwise; `scripts/helio/test_release_channel.py` pins the
 rules, including the silent case, and runs in `helio-sync-guard-tests.yml`.
 
+### The bridge release
+
+**No experimental release can reach anyone until a stable release containing the
+new tag parser has shipped.** The builds users already have installed decide what
+to offer, and every build released before the experimental channel existed strips
+only `helio-v` or a leading `v` from a tag. A `helio-exp-v…` tag reaches their
+version matcher unstripped, fails it, and `consider_release()` drops it silently:
+
+```cpp
+// check_new_version_sf() as compiled into helio-v2.4.2 and every earlier build
+if (tag starts with "helio-v")  tag.erase(0, 7);   // "helio-exp-v…": no match
+else if (tag.front() == 'v')    tag.erase(0, 1);   // "h…": no match
+Semver tag_version = get_version(tag, matcher);    // regex_match fails
+if (!tag_version.valid()) return;                  // release dropped, no message
+```
+
+Two fixes were possible, and **the chosen one is the bridge**:
+
+- *(rejected)* Tag previews `helio-v2.5.1-exp01`, which old builds already read.
+  It reaches them immediately, but the tag prefix stops separating the channels.
+- **(chosen)** Keep `helio-exp-v`, and ship one ordinary stable release that
+  contains the new parser first. That release is the **bridge**. Anyone who
+  installs it can see previews from then on, and anyone still on an older build
+  cannot, which is the same reach any stable release has.
+
+`helio-release.yml` enforces it. For an experimental release, the `check` job
+looks for a published **final** stable tag (`helio-v<X.Y.Z>`, with optional
+`+metadata`; prerelease-shaped tags such as `helio-v2.4.3-beta` do not count)
+whose own `src/slic3r/GUI/GUI_App.cpp` references
+`HELIO_EXPERIMENTAL_TAG_PREFIX`, and passes it as `--bridge-release`.
+`version_channel.py` refuses an experimental release when none exists. The test
+reads the tagged source rather than comparing against a version constant, so it
+cannot drift from what actually shipped. `test_release_channel.py` covers the
+refusal, the prerelease exclusion, and acceptance once a bridge is tagged.
+
+**In practice:** the first stable release cut after this lands (planned:
+`helio-v2.5.1`) is the bridge. Previews can start after it is published.
+
 ### Cutting an experimental release
 
+0. **A bridge release must already be published** (see above). The release
+   workflow refuses otherwise.
 1. Re-create the branch from the release branch:
    `git checkout -B helio-experimental orca-latest-parity-bambu`
 2. In `src/libslic3r/HelioChannel.hpp`, set `HELIO_EXPERIMENTAL_BUILD` to `1` and

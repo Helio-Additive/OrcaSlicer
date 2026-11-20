@@ -131,12 +131,31 @@ jobs:
             | tail -n1 || true)
           echo "Newest published preview: ${latest_experimental:-<none>}"
 
+          # The bridge: a published stable release whose update check can read
+          # `helio-exp-v…` tags. Every build released before the experimental
+          # channel strips only `helio-v` / `v`, so it drops a `helio-exp-v` tag
+          # as an invalid version and never mentions it. A preview published
+          # before any bridge exists reaches nobody. Detected from each stable
+          # tag's own source (the parser names HELIO_EXPERIMENTAL_TAG_PREFIX), not
+          # from a version constant, so it cannot drift from what actually shipped.
+          bridge_release=""
+          for t in $(git tag --list 'helio-v*'); do
+            v=${t#helio-v}; v=${v%%+*}
+            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            if git grep -q 'HELIO_EXPERIMENTAL_TAG_PREFIX' "$t" -- src/slic3r/GUI/GUI_App.cpp; then
+              bridge_release=$t
+              break
+            fi
+          done
+          echo "Stable release that can see previews: ${bridge_release:-<none>}"
+
           python3 scripts/helio/version_channel.py check \
             --header src/libslic3r/HelioChannel.hpp \
             --version "$VERSION" \
             --branch "$BRANCH" \
             --latest-stable "$latest_stable" \
-            --latest-experimental "$latest_experimental" >> "$GITHUB_OUTPUT"
+            --latest-experimental "$latest_experimental" \
+            --bridge-release "$bridge_release" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: Determine release tag

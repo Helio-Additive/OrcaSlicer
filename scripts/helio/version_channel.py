@@ -28,6 +28,11 @@ stable users, through the ordinary in-app update prompt:
 
     2.4.3-exp01 against a 2.4.2 stable satisfies both. 2.4.2-exp01 would be
     published, look correct, and be silently invisible to every stable user.
+
+  * No experimental release before a bridge. The installed builds that would
+    have to offer it were compiled before the `helio-exp-v` prefix existed, and
+    their update check cannot read it. So the first preview waits until a stable
+    release containing the new parser has been published (`--bridge-release`).
 """
 import argparse
 import re
@@ -148,7 +153,8 @@ def read_channel(header_path):
     return by_flag
 
 
-def validate(channel, version, branch, latest_stable, latest_experimental=""):
+def validate(channel, version, branch, latest_stable, latest_experimental="",
+             bridge_release=""):
     expected_branch = BRANCH_FOR_CHANNEL[channel]
     if branch != expected_branch:
         die("this tree is a %s build (per HelioChannel.hpp) but the release was "
@@ -176,6 +182,15 @@ def validate(channel, version, branch, latest_stable, latest_experimental=""):
                 "is rejected by it and the release is skipped in silence; an "
                 "unpadded number sorts wrongly, with 'exp9' ABOVE 'exp10'."
                 % version)
+        if not bridge_release:
+            die("no published stable release can see experimental releases yet.\n"
+                "Builds released before the experimental channel existed read only "
+                "'helio-v' and 'v' tags, so they drop every 'helio-exp-v' tag as an "
+                "invalid version, silently: this preview would publish and reach "
+                "nobody. Cut a stable release from a tree that contains the "
+                "experimental tag parser first (check_new_version_sf reading "
+                "HELIO_EXPERIMENTAL_TAG_PREFIX), then publish previews. See "
+                "HELIO_INTEGRATION.md -> 'The bridge release'.")
     if channel == "stable" and is_marked:
         die("stable version %r carries an -exp prerelease marker" % version)
 
@@ -280,6 +295,9 @@ def main(argv=None):
                        help="newest published stable version; ordering is unchecked when empty")
     check.add_argument("--latest-experimental", default="",
                        help="newest published preview version; ordering is unchecked when empty")
+    check.add_argument("--bridge-release", default="",
+                       help="a published stable tag whose update check reads helio-exp-v tags; "
+                            "an experimental release is refused when empty")
 
     tagp = sub.add_parser("check-tag", help="validate the tag that will be published")
     tagp.add_argument("--tag", required=True, help="the tag as it will be pushed")
@@ -295,7 +313,7 @@ def main(argv=None):
 
     channel = read_channel(args.header)
     validate(channel, args.version, args.branch, args.latest_stable,
-             args.latest_experimental)
+             args.latest_experimental, args.bridge_release)
 
     tag_prefix, prerelease, asset_tag, suffix = CHANNELS[channel]
     for line in (
