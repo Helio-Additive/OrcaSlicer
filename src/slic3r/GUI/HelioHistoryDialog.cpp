@@ -791,14 +791,18 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                     wxOK | wxICON_ERROR);
                 BOOST_LOG_TRIVIAL(error) << "Failed to open file for writing: " << save_path;
             } else {
-                // wxFile::Write returns the number of bytes it actually wrote, and Close() reports
-                // errors that only surface on flush. Neither throws, so the enclosing try/catch does
-                // not cover them: without these checks a disk-full or device error produced a
-                // truncated G-code file under a "downloaded successfully!" dialog.
+                // wxFile::Write returns the number of bytes it actually wrote, Flush() syncs the data
+                // to storage and reports a failed writeback, and Close() reports a failed close.
+                // Close() alone does not sync, so a delayed writeback error can surface only after a
+                // successful Close(); Flush() is what catches it. None of them throws, so the
+                // enclosing try/catch does not cover them: without these checks a disk-full or
+                // device error produced a truncated G-code file under a "downloaded successfully!"
+                // dialog. Close() runs even when Flush() fails, so the descriptor is always released.
                 const bool written = file.Write(downloaded_content.data(), downloaded_content.size()) == downloaded_content.size();
+                const bool flushed = file.Flush();
                 const bool closed  = file.Close();
 
-                if (written && closed) {
+                if (written && flushed && closed) {
                     wxMessageBox(
                         wxString::Format(_L("GCode file downloaded successfully!\n\nSaved to: %s"), wxString(save_path)),
                         _L("Download Complete"),
@@ -854,7 +858,7 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
                         wxOK | wxICON_ERROR);
 
                     BOOST_LOG_TRIVIAL(error) << "Incomplete write saving GCode file to " << save_path
-                                             << " (write ok: " << written << ", close ok: " << closed
+                                             << " (write ok: " << written << ", flush ok: " << flushed << ", close ok: " << closed
                                              << ", emptied: " << cleaned << ")";
                 }
             }
