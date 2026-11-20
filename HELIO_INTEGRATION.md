@@ -625,9 +625,91 @@ for cand in "v$VER" "$VER"; do                  # upstream tags both forms
 done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
 
-git diff --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
-git diff        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks — that is the test
+# --ignore-cr-at-eol is load-bearing, not tidiness. See the caveat below.
+git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? no Helio content*
+git diff --ignore-cr-at-eol        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks
+# * not byte identity — rerun both without the flag if the symptom could be
+#   line-ending-sensitive. See the caveat below.
 ```
+
+**Line endings defeat this test silently, and `git blame` with it.** Without
+`--ignore-cr-at-eol` the diff can report a file Helio has barely touched as
+rewritten end to end, which reads as "all of it is ours" — the precise conclusion
+Rule 15 exists to prevent. Upstream ships some files CRLF; where a Helio commit
+normalised one to LF, **every** line differs. Measured on the branch today:
+
+| `.github/workflows/build_all.yml` vs `v2.4.2` | reported delta |
+|---|---|
+| `git diff` (the old command above) | 297 insertions, 269 deletions — the whole file |
+| `git diff --ignore-cr-at-eol` | 76 insertions, 48 deletions — the real Helio delta |
+
+**Ordinary `git blame` fails the same way, and `-w` only half-repairs it.** The
+normalising commit rewrote every line, so plain blame names that commit's author —
+a Helio author — for upstream's content:
+
+```bash
+$ git blame    -L 133,133 .github/workflows/build_all.yml
+aa9c1e368 (Priyesh 2026-03-25 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+$ git blame -w -L 133,133 .github/workflows/build_all.yml   # -w ignores whitespace
+^d0e90c94 (Priyesh 2026-03-12 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+```
+
+`-w` does see through the normalisation — it moves off `aa9c1e36` — so "no flag can
+recover the attribution" would be wrong. **It still does not answer the ownership
+question**, for two reasons that `-w` cannot touch:
+
+- **Blame answers "which commit last touched this line", not "whose content is
+  this".** A Helio commit that moves, re-indents or re-wraps an upstream line owns
+  the line by blame and owns none of it by Rule 15.
+- **The answer depends on clone depth.** In a shallow clone blame bottoms out at the
+  graft boundary and attributes everything there — the `^` on `d0e90c94` above marks
+  exactly that, in a 51-commit shallow checkout. The same command in a full clone
+  returns something else.
+
+So blame is a lead, never the verdict. **Settle ownership with the hunk diff above.**
+Worked example, the one this caveat exists for: the `macos-14` runner label at
+`:133`/`:144` blames to a Helio commit and is upstream's own line, byte-identical at
+`v2.4.2:.github/workflows/build_all.yml` `:110`/`:121`, and present in **no** Helio
+hunk once CRs are ignored.
+
+**What `--ignore-cr-at-eol` costs: it also hides a Helio line-ending change, and that
+one *is* ours.** The flag ignores carriage returns at end of line, so empty output
+means "equivalent apart from trailing CRs" — **not** byte-identical. If the Helio
+delta in a file *is* the line endings, this command disowns it, and a line-ending
+change is squarely the "caused by a Helio hunk" half of Rule 15 rather than an
+upstream defect. It is not hypothetical damage; CRLF in a shebang is unrunnable:
+
+```bash
+$ git diff --stat                   HEAD~1 HEAD -- s.sh   # 1 file changed, 2 ins, 2 del
+$ git diff --stat --ignore-cr-at-eol HEAD~1 HEAD -- s.sh   # (empty)
+$ ./s.sh
+./s.sh: cannot execute: required file not found
+```
+
+So: `--ignore-cr-at-eol` for the ownership question, and **the unfiltered diff as
+well** whenever the symptom could be line-ending-sensitive — a shell or Python
+script, a shebang, a file some code parses line by line, a checksum or signature
+mismatch, or "works upstream, fails here" with no visible difference.
+
+Scope of the trap, measured rather than assumed: across all 104 files that differ
+from `v2.4.2`, `build_all.yml` is the **only** one where the two commands disagree,
+and no file is a pure line-ending diff. So this is a single known case today — but
+a sync can normalise another file at any time, which is why the flag belongs in the
+command and not in a footnote.
+
+**Before concluding "ours", check whether upstream has already fixed it.** Rule 15's
+cost argument is about front-running a fix upstream has written, so the cheap check
+is whether a release *newer* than our baseline already carries it:
+
+```bash
+git show "refs/tags/<newer-release>:<file>" | grep -n "<the line>"
+```
+
+Worked example, the one that prompted this caveat: `build_all.yml`'s dead `macos-14`
+label (#147) is already `macos-15` upstream in **both** `v2.5.0` and `v2.5.1`. It
+needs no patch here at all — it arrives with the sync, which is PR #151. A local fix
+would have bought a permanent divergence in an upstream-owned file to deliver a
+change already written and already waiting in the queue: #116's mistake exactly.
 
 **Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
 tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
@@ -692,8 +774,9 @@ answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
 
 **`--stat` answers the first question, the patch answers the real one.** A diffstat
-shows *whether* the file differs, which settles the empty case outright — byte-identical
-to upstream, not ours, stop. It cannot settle the non-empty case, because ownership
+shows *whether* the file differs, which settles the empty case for **content** — no Helio
+content in it, so a content defect is not ours, stop. (Not byte identity, and so not the
+line-ending case: see the caveat above.) It cannot settle the non-empty case, because ownership
 turns on **where** the defect sits, and a file-count tells you nothing about that. Run
 the second command and read the hunks. Treating the stat as the whole test is how
 "this file differs" quietly becomes "this file is ours", which is the exception this
@@ -714,8 +797,10 @@ a release older than the one we hold, a file we merely *inherited* from a later
 release shows a non-empty diff, reads as Helio-owned, and this rule then waves
 through exactly the patch it exists to prevent.
 
-**Empty output means the file is byte-identical to upstream's** — no Helio content
-in it, so a defect in it is not ours. Non-empty means *something* differs, which
+**Empty output means no Helio content in the file** — so a content defect in it is not
+ours. It does **not** mean byte-identical: the flag ignores trailing CRs, so a file whose
+only Helio delta is its line endings reads as empty here and is still ours (the caveat
+above has the shebang demonstration). Non-empty means *something* differs, which
 is a prompt to read the diff, **not** by itself proof of Helio ownership: check
 whether the hunks are Helio's or upstream changes made after the baseline.
 
