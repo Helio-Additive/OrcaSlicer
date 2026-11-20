@@ -5022,6 +5022,21 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     if (m_nozzle_nums > 1 && (m_viewer.get_view_type() == libvgcode::EViewType::Summary || m_viewer.get_view_type() == libvgcode::EViewType::ColorPrint)) // ORCA show only on summary and filament tab
         render_legend_color_arr_recommen(window_padding);
 
+    if (m_viewer.has_warpage_displacement()) {
+        ImGui::Separator();
+        float scale = m_viewer.get_warpage_preview_scale();
+        bool enabled = scale > 0.0f;
+        if (ImGui::Checkbox(_u8L("Experimental: Deformed toolpath preview").c_str(), &enabled))
+            m_viewer.set_warpage_preview_scale(enabled ? 1.0f : 0.0f);
+        if (enabled) {
+            scale = m_viewer.get_warpage_preview_scale();
+            if (ImGui::SliderFloat(_u8L("Deformation scale").c_str(), &scale, 1.0f, 100.0f, "%.0fx"))
+                m_viewer.set_warpage_preview_scale(scale);
+            imgui.text(_u8L("Preview only; assumes signed displacement in mm."));
+            imgui.text(_u8L("Missing displacement vectors remain undeformed."));
+        }
+    }
+
     legend_height = ImGui::GetCurrentWindow()->Size.y;
     imgui.end();
     ImGui::PopStyleColor(7);

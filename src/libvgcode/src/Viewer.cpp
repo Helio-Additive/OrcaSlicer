@@ -172,6 +172,10 @@ void Viewer::set_travels_radius(float radius)
     m_impl->set_travels_radius(radius);
 }
 
+bool Viewer::has_warpage_displacement() const { return m_impl->has_warpage_displacement(); }
+float Viewer::get_warpage_preview_scale() const { return m_impl->get_warpage_preview_scale(); }
+void Viewer::set_warpage_preview_scale(float scale) { m_impl->set_warpage_preview_scale(scale); }
+
 float Viewer::get_wipes_radius() const
 {
     return m_impl->get_wipes_radius();

@@ -212,6 +212,13 @@ public:
     // Radius is clamped to [MIN_TRAVELS_RADIUS_MM..MAX_TRAVELS_RADIUS_MM]
     //
     void set_travels_radius(float radius);
+
+    // Display only; zero disables deformation. Units/directions follow the
+    // supplied Helio displacement vector and require solver validation.
+    bool has_warpage_displacement() const;
+    float get_warpage_preview_scale() const;
+    void set_warpage_preview_scale(float scale);
+
     //
     // Get the radius, in mm, of the cylinders used to render the wipe moves.
     //
