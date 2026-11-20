@@ -785,15 +785,53 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
         try {
             wxFile file(wxString::FromUTF8(save_path), wxFile::write);
             if (file.IsOpened()) {
-                file.Write(downloaded_content.data(), downloaded_content.size());
-                file.Close();
+                // wxFile::Write returns the number of bytes actually written, and
+                // wxFile::Close reports a failed flush. Both have to be checked:
+                // discarding either reports a truncated G-code file as a successful
+                // download, and a truncated G-code loads and previews without
+                // complaint, then stops partway through the print with no heating or
+                // motion shutdown at the end. A short write is a return value, not an
+                // exception, so the surrounding try/catch does not cover it.
+                const size_t expected  = downloaded_content.size();
+                const size_t written   = file.Write(downloaded_content.data(), expected);
+                const bool   closed_ok = file.Close();
 
-                wxMessageBox(
-                    wxString::Format(_L("GCode file downloaded successfully!\n\nSaved to: %s"), wxString(save_path)),
-                    _L("Download Complete"),
-                    wxOK | wxICON_INFORMATION);
+                if (written == expected && closed_ok) {
+                    wxMessageBox(
+                        wxString::Format(_L("GCode file downloaded successfully!\n\nSaved to: %s"), wxString(save_path)),
+                        _L("Download Complete"),
+                        wxOK | wxICON_INFORMATION);
 
-                BOOST_LOG_TRIVIAL(info) << "GCode file saved successfully: " << save_path;
+                    BOOST_LOG_TRIVIAL(info) << "GCode file saved successfully: " << save_path;
+                } else {
+                    // Remove the incomplete file rather than leave it on disk. The
+                    // destination was opened with wxFile::write, so whatever it held
+                    // before was truncated when it opened and is already unrecoverable;
+                    // leaving a partial G-code beside an error dialog only invites
+                    // someone to print it anyway.
+                    const bool removed = wxRemoveFile(wxString::FromUTF8(save_path));
+
+                    const wxString detail = (written == expected)
+                        ? _L("The file could not be flushed to disk.")
+                        : wxString::Format(_L("Only %s of %s bytes could be written."),
+                              wxString(std::to_string(written)),
+                              wxString(std::to_string(expected)));
+                    const wxString disposition = removed
+                        ? _L("The incomplete file has been deleted.")
+                        : _L("The incomplete file could not be deleted - do not print it.");
+
+                    wxMessageBox(
+                        wxString::Format(_L("Failed to save the complete GCode file:\n%s\n\n%s %s"),
+                            wxString(save_path), detail, disposition),
+                        _L("Download Error"),
+                        wxOK | wxICON_ERROR);
+
+                    BOOST_LOG_TRIVIAL(error)
+                        << "GCode file not saved completely: wrote " << written << " of " << expected
+                        << " bytes to " << save_path << ", close "
+                        << (closed_ok ? "succeeded" : "failed") << ", partial file "
+                        << (removed ? "deleted" : "NOT deleted");
+                }
             } else {
                 wxMessageBox(
                     wxString::Format(_L("Failed to open file for writing:\n%s"), wxString(save_path)),
