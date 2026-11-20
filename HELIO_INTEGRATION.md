@@ -626,8 +626,10 @@ done
 [ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
 
 # --ignore-cr-at-eol is load-bearing, not tidiness. See the caveat below.
-git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? upstream's, done.
+git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? no Helio content*
 git diff --ignore-cr-at-eol        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks
+# * not byte identity — rerun both without the flag if the symptom could be
+#   line-ending-sensitive. See the caveat below.
 ```
 
 **Line endings defeat this test silently, and `git blame` with it.** Without
@@ -772,8 +774,9 @@ answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
 
 **`--stat` answers the first question, the patch answers the real one.** A diffstat
-shows *whether* the file differs, which settles the empty case outright — byte-identical
-to upstream, not ours, stop. It cannot settle the non-empty case, because ownership
+shows *whether* the file differs, which settles the empty case for **content** — no Helio
+content in it, so a content defect is not ours, stop. (Not byte identity, and so not the
+line-ending case: see the caveat above.) It cannot settle the non-empty case, because ownership
 turns on **where** the defect sits, and a file-count tells you nothing about that. Run
 the second command and read the hunks. Treating the stat as the whole test is how
 "this file differs" quietly becomes "this file is ours", which is the exception this
@@ -794,8 +797,10 @@ a release older than the one we hold, a file we merely *inherited* from a later
 release shows a non-empty diff, reads as Helio-owned, and this rule then waves
 through exactly the patch it exists to prevent.
 
-**Empty output means the file is byte-identical to upstream's** — no Helio content
-in it, so a defect in it is not ours. Non-empty means *something* differs, which
+**Empty output means no Helio content in the file** — so a content defect in it is not
+ours. It does **not** mean byte-identical: the flag ignores trailing CRs, so a file whose
+only Helio delta is its line endings reads as empty here and is still ours (the caveat
+above has the shebang demonstration). Non-empty means *something* differs, which
 is a prompt to read the diff, **not** by itself proof of Helio ownership: check
 whether the hunks are Helio's or upstream changes made after the baseline.
 
