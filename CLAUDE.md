@@ -79,6 +79,45 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - **This is the only caller of the shared build workflows outside `build_all.yml`, so it silently misses inputs upstream adds to them.** `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml` are upstream-owned and inherited wholesale; upstream only ever exercises them from `build_all.yml`, which passes a full matrix. `helio-release.yml` hand-writes each `with:` block, so an input upstream starts *depending on* — without making it `required:` — reaches our release path as an empty string and nothing fails until a release is cut. v2.5.0 is the worked example: it added `--arch ${{ inputs.arch }}` to the Windows command in **both** `build_deps.yml` and `build_orca.yml`, our `build_windows` job passed no `arch`, and the command expanded to `build_win.bat -d --arch --deps-dir <path> …`. `build_win.bat` declares `target_arch` as a plain `string` option, and its `handle_args` rejects a value starting with `-` as "looks like another option", so every uncached Windows release build exited 1 before compiling. A cache hit did not help — `build_orca.yml`'s "Build slicer Win" step passes the same empty flag — and the empty arch additionally resolved the cache key to `windows--msvc` (`build_check_cache.yml` builds `windows-<arch>-<compiler>`) and corrupted `dep-folder-name`. Fixed by passing `arch: x64` in our caller, which is not a new choice: before v2.5.0 no `--arch` was passed and `build_win.bat` defaulted to the host, x64 on `windows-latest`.
   - **The fix belongs in `helio-release.yml`, not in the upstream files.** Both offending lines are byte-identical to upstream's, and upstream never hits the bug. Giving `build_win.bat` a default, or making both commands omit an empty flag, would patch upstream-owned files for a problem only our caller has — a divergence to re-resolve at every sync. Rule 15.
   - **Worth a deliberate check each sync:** diff the `inputs:` blocks of the three shared workflows against what `helio-release.yml` passes. Note that `build_all.yml` passing an input correctly proves nothing about our release path, because the two callers are written independently. Nothing in CI catches this — no PR build exercises `helio-release.yml`.
+- **A dispatch publishes a REAL release — use `dry_run` to exercise the build instead.**
+  `draft: false`, and `prerelease` is computed from `version.inc`, **not** from
+  `tag_override`, so a throwaway tag still produces a full "latest" release. It also
+  fires `release: [released]`, which `winget_updater.yml` listens for — disabled, but
+  only at the repo level, which is not tracked in git. So "just dispatch it to check"
+  was never a safe instruction, and before the `dry_run` input there was no way to
+  exercise the macOS legs at all without publishing something. `dry_run: true` runs
+  everything including asset collection and its missing-asset checks, skips only the
+  publish, and writes the would-be tag and the collected assets to the job summary.
+- **macOS runner label: `macos-15`, and a retired label fails silently.** GitHub retired
+  `macos-14` on 2026-11-02 and this file still requested it in both macOS jobs, so the
+  next release could not have built its DMG or universal assets (#147). The reason it sat
+  unnoticed for six days is the failure mode, which is worth recognising on sight: a
+  retired label is not an error. The job is dropped **before a runner is assigned** —
+  `runner_name: ""`, zero steps, `completed_at` ~1s after `started_at` — and reports
+  `cancelled`, not `failure`. Everything downstream of it then reports `skipped` via
+  `needs:`, which on this fork looks exactly like the deliberate `ready-to-build` label
+  gate, and a `cancelled` run reads as "someone stopped it". Scheduled `Build all` runs on
+  the release branch all conclude `skipped` anyway, so nothing scheduled would have
+  surfaced it either. **`macos-15` rather than `macos-latest`**: `macos-latest` now tracks
+  macOS 26, while `build_orca.yml` passes `-t 10.15` and the deps cache key
+  (`build_check_cache.yml`) is keyed on **arch only, not on the runner image** — so a cache
+  built on one image is silently consumed on another. Pinning to `macos-15` keeps the SDK
+  close to what that target and that cache were built against — and since v2.5.0 moved
+  `build_all.yml` to `macos-15` too, both callers of the shared workflows now request the
+  same image, which is what makes that image-independent cache key safe rather than merely
+  untested. Keep the two in step for that reason. Both `macos-14` and
+  `macos-15` are arm64, so the `x86_64` leg is cross-compiled exactly as it was before.
+  **The Xcode cleanup in `build_orca.yml` is upstream's again.** Before v2.5.0, its
+  `Free disk space` step kept `Xcode_15.4.app` by name. That deletes the whole toolchain
+  on `macos-15`, which has only 16.x and 26.x. #149 patched it, and upstream v2.5.0 then
+  shipped the same fix: it keeps whatever `xcode-select -p` resolves to. The Helio hunk
+  was dropped at the v2.5.0 merge, so don't re-add one. See `HELIO_INTEGRATION.md` → CI/CD
+  Workflows.
+- **`build_all.yml` is on `macos-15` as of v2.5.0**, so macOS PR coverage is back. Before
+  the sync, its `os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}` was
+  upstream's dead label and was deliberately left for the sync to move (Rule 15).
+  `vars.SELF_HOSTED` is **not** set on this repo: run 42443681491's dropped jobs carried
+  `labels: ["macos-14"]`, the expression's fallback branch.
 
 ### Build Pipeline (reusable workflows)
 - `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`

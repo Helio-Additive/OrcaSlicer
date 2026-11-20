@@ -133,6 +133,31 @@ generation so work started under the old credential can never land.
 | `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
+### CI/CD Workflows (upstream files carrying Helio hunks)
+
+Two inherited workflows are modified rather than Helio-only, which is why #134
+happened: a hand-resolved sync conflict took `--ours` wholesale and dropped every
+upstream change to **exactly these two files** between v2.4.0-beta and v2.4.2,
+while the five inherited `.github/` files with no Helio hunks updated cleanly.
+Rule 12 says don't edit inherited workflows; these are the standing exceptions, so
+keep the list short and the hunks small.
+
+| File | Helio hunks |
+|-|-|
+| `.github/workflows/build_all.yml` | `ready-to-build` label gate on the four build jobs (Rule 14); data-only `paths:` entries (`resources/**`, `localization/**`) added to the `pull_request` filter in PR #113 |
+| `.github/workflows/build_orca.yml` | `ENABLE_SIGNING` gate on the two macOS signing steps (`Sign app and notary`, `Create DMG without notary`) |
+
+**`Free disk space` is not a Helio hunk, and must not become one again.** Before
+v2.5.0, upstream's line kept `Xcode_15.4.app` *by name*. On `macos-15`, which has no
+15.x Xcode, that deletes the selected toolchain. #149 fixed it here when
+`helio-release.yml` moved to `macos-15` (#147). Upstream v2.5.0 then shipped the same
+fix itself: it keeps whatever `xcode-select -p` resolves to via `pwd -P`, and moved
+`build_all.yml` to `macos-15` too. So at the v2.5.0 merge into #149 the Helio hunk was
+dropped and upstream's line taken verbatim (Rule 15: don't front-run a fix upstream
+already ships). #149 also skipped the deletion when only the Command Line Tools are
+selected. Upstream's line does not, but that state does not occur on GitHub-hosted
+runners, so it is upstream's to own.
+
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
 
 #### `.github/workflows/build_orca.yml` (+2/-2) — **added to this map at the v2.5.0 sync**
