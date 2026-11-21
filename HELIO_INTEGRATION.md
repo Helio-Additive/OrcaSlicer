@@ -1152,6 +1152,19 @@ divergence at zero by copying upstream's own text, not by writing a Helio fix.
 | `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
 | `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
 
+**Also temporary, and *not* from upstream** (upstream had no fix yet): on
+2026-11-20 `OrcaSlicer/Orca-deps-wxWidgets` moved branch `v3.3.2` past the pinned
+commit `b44c39c1` (to `89844cb1`). That broke every uncached dependency build, here
+and upstream alike, because the pinned commit stopped being the branch tip:
+
+| file | change | why |
+|---|---|---|
+| `deps/wxWidgets/wxWidgets.cmake` | `GIT_SHALLOW ON` → `OFF` | a shallow clone fetches only the tip, so checkout of `b44c39c1` fails with `unable to read tree` |
+| `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | drop `branch: v3.3.2`, keep `commit:` | flatpak-builder refuses when the branch tip ≠ `commit` |
+
+Both still build exactly `b44c39c1`. When upstream fixes this, by bumping the pin or
+in another way, take upstream's version of both files.
+
 **At the next sync, take upstream's version of every row.** The two `deps/` rows
 should merge cleanly, because both sides hold identical text. The Flatpak row will not:
 upstream moved the job into `build_flatpak.yml`, so drop our volume line from

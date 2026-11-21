@@ -45,7 +45,11 @@ orcaslicer_add_cmake_project(
     wxWidgets
     GIT_REPOSITORY "https://github.com/OrcaSlicer/Orca-deps-wxWidgets"
     GIT_TAG b44c39c100975a0ac0e46f937aa3f3eae5e18631
-    GIT_SHALLOW ON
+    # Helio (temporary): a shallow clone fetches only the branch tip, so this
+    # pinned commit stops being reachable as soon as the branch moves past it.
+    # It did on 2026-11-20 (89844cb1). Full clone, same commit. Drop when
+    # upstream changes this; see HELIO_INTEGRATION.md -> Temporary backports.
+    GIT_SHALLOW OFF
     GIT_SUBMODULES 3rdparty/catch 3rdparty/pcre 3rdparty/libwebp
     DEPENDS ${PNG_PKG} ${ZLIB_PKG} ${EXPAT_PKG} ${JPEG_PKG}
     CMAKE_ARGS
