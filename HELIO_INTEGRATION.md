@@ -1140,22 +1140,40 @@ in-class initialiser, which also may appear only once.
 
 ## Temporary backports from upstream `main` (drop at the next sync)
 
-Three upstream build fixes were copied in **verbatim** with the v2.5.1 sync, ahead of
-the upstream release that will carry them. They fix CI jobs that were red on every PR
-(#163, #164), and the repo owner decided not to merge with red CI. This is a
-deliberate, owner-approved exception to Rule 15's "wait for the sync". It keeps
-divergence at zero by copying upstream's own text, not by writing a Helio fix.
+Upstream build fixes copied in **verbatim**, ahead of the upstream release that will
+carry them. They fix CI jobs that were red on every PR, and the repo owner decided not
+to merge with red CI. This is a deliberate, owner-approved exception to Rule 15's "wait
+for the sync". It keeps divergence at zero by copying upstream's own text, not by
+writing a Helio fix.
+
+The first three rows arrived with the v2.5.1 sync itself (#163, #164). The two
+`wxWidgets` rows were added afterwards, when the first post-sync dependency build went
+red on **every** platform at once.
 
 | file | fixes | upstream source |
 |---|---|---|
 | `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
 | `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
 | `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
+| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path — our copy is now **byte-identical** to it |
+| no `branch:` + `disable-shallow-clone: true` on the `wxWidgets` git source in `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | Both Flatpak jobs: `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…` | `main`, same path |
 
-**At the next sync, take upstream's version of every row.** The two `deps/` rows
-should merge cleanly, because both sides hold identical text. The Flatpak row will not:
-upstream moved the job into `build_flatpak.yml`, so drop our volume line from
-`build_all.yml` when that restructure arrives. Then delete this section.
+**At the next sync, take upstream's version of every row.** The two `deps/` rows and
+`deps/wxWidgets/wxWidgets.cmake` should merge cleanly, because both sides hold identical
+text — `wxWidgets.cmake` is byte-identical to upstream `main`, so it merges as a no-op.
+The `build_all.yml` Flatpak row will not: upstream moved the job into
+`build_flatpak.yml`, so drop our volume line from `build_all.yml` when that restructure
+arrives.
+
+`scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` needs one caution. Only the `wxWidgets`
+git source was backported; upstream `main` additionally bumps gstreamer, OpenSSL (1.1.1w
+→ 3.5.9), CURL (7.75.0 → 8.23.0) and comments out the OpenVDB-only sources **in the same
+file**. Those are deliberately *not* here — they are ordinary upstream dependency changes
+that must arrive with a sync and be built, not hand-carried. So expect a conflict in that
+file and take upstream's whole version; do not read our smaller diff as the only change
+the file needs.
+
+Then delete this section.
 
 ## Upstream Sync: squash merges & the merge-base graft
 

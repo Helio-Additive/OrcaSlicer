@@ -124,6 +124,38 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - macOS signing/notarization gated by `ENABLE_SIGNING` repo variable
 - Dependency caching per OS/arch with hash of `deps/**`
 
+#### A dependency pinned to a commit that is no longer a branch tip breaks every platform at once
+
+Worth recognising on sight, because the symptom looks like a fork problem and is not.
+On 2026-11-20 **all six `Build Deps` legs and both Flatpak jobs went red at the same
+time**, on PRs *and* on the release branch's own post-merge run
+([44819525351](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44819525351)) —
+the first build after the v2.5.1 sync, whose `deps/**` changes invalidated every cache
+and so forced a real dependency build for the first time in weeks.
+
+The cause was outside this repository. `deps/wxWidgets/wxWidgets.cmake` pins
+`OrcaSlicer/Orca-deps-wxWidgets` at commit `b44c39c1`, and that repo's `v3.3.2` branch
+has since **moved past it** (tip is now `89844cb1`; `b44c39c1` survives only as the tag
+`orca-3.3.2-1`). A shallow clone fetches only branch tips, so the pinned commit's tree is
+simply absent:
+
+- CMake (`GIT_SHALLOW ON`) → `fatal: unable to read tree (b44c39c1…)`, `Failed to checkout tag`
+- flatpak-builder (`branch: v3.3.2` + `commit:`) is explicit about it →
+  `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…`
+
+**The tell is the shape:** when a dependency Helio has never touched fails identically on
+every platform, suspect the pin or its remote, not the fork. Both files are byte-identical
+to upstream v2.5.1 (`git diff --ignore-cr-at-eol refs/tags/v2.5.1 HEAD -- <file>` is
+empty, and neither contains the string `helio`), so under Rule 15 this is upstream's.
+**Upstream had already written the fix on `main`** — `GIT_SHALLOW OFF`, and on the Flatpak
+side dropping the branch name plus `disable-shallow-clone: true`. Per the Scope rule the
+answer was to take upstream's text, not to write one; it is backported verbatim and listed
+in `HELIO_INTEGRATION.md` → "Temporary backports from upstream `main`", to be dropped at
+the next sync.
+
+Note a cache hit hides this completely, so "CI was green yesterday" says nothing about
+the pin — only that nothing had to clone it.
+
 ### Build All (`build_all.yml`)
 - Triggers on push/PR to `main`, `release/*` and `orca-latest-parity-bambu`
 - Runs full build matrix + unit tests + Flatpak builds
