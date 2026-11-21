@@ -150,13 +150,14 @@ jobs:
           # Candidates come from *published* GitHub releases, not from tags: a tag
           # proves nothing about whether users could download a build (it can be
           # pushed before its release, or outlive a release that was deleted or
-          # turned back into a draft). Drafts and prereleases are excluded. If
+          # turned back into a draft). Drafts, prereleases and releases with no
+          # assets (nothing for the update prompt to offer) are excluded. If
           # the API call fails there is no bridge, which refuses an experimental
           # release and leaves a stable one unaffected: closed in the direction
           # that matters.
           published_stable=""
           if ! published_stable=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-                --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'); then
+                --jq '.[] | select(.draft == false and .prerelease == false and (.assets | length) > 0) | .tag_name'); then
             echo "::warning::could not list published releases; treating as no bridge release" >&2
             published_stable=""
           fi

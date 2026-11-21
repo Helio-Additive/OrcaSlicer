@@ -1283,7 +1283,7 @@ Two fixes were possible, and **the chosen one is the bridge**:
   cannot, which is the same reach any stable release has.
 
 `helio-release.yml` enforces it. For an experimental release, the `check` job
-lists **published** GitHub releases (not drafts, not prereleases) through the
+lists **published** GitHub releases (not drafts, not prereleases, not ones with no assets) through the
 API, keeps the final-shaped ones (`helio-v<X.Y.Z>`, optional `+metadata`), and
 looks for one whose own tagged `src/slic3r/GUI/GUI_App.cpp` references
 `HELIO_EXPERIMENTAL_TAG_PREFIX`. That tag is passed as `--bridge-release`, and
@@ -1308,7 +1308,7 @@ looks for one whose own tagged `src/slic3r/GUI/GUI_App.cpp` references
 
 `test_release_channel.py` runs the real step against real tags, with the
 release list served through the step's own `--jq` filter. It covers: refused
-before any bridge; an unpublished tag, a draft, a prerelease, an uninspectable
+before any bridge; an unpublished tag, a draft, a prerelease, a release with no assets, an uninspectable
 release and an API failure all refused; accepted once a final release is
 published on a tree with the parser.
 

@@ -104,12 +104,15 @@ def install_fake_gh(tmp):
     os.environ["GITHUB_REPOSITORY"] = "test/test"
 
 
-def releases(*published, drafts=(), prereleases=()):
-    """JSON for FAKE_RELEASES: published finals, plus drafts and prereleases."""
+def releases(*published, drafts=(), prereleases=(), empty=()):
+    """JSON for FAKE_RELEASES: published finals, plus drafts, prereleases and
+    published finals with no assets."""
     import json
-    rows = [{"tag_name": t, "draft": False, "prerelease": False} for t in published]
-    rows += [{"tag_name": t, "draft": True, "prerelease": False} for t in drafts]
-    rows += [{"tag_name": t, "draft": False, "prerelease": True} for t in prereleases]
+    a = [{"name": "Helio_OrcaSlicer.AppImage"}]
+    rows = [{"tag_name": t, "draft": False, "prerelease": False, "assets": a} for t in published]
+    rows += [{"tag_name": t, "draft": True, "prerelease": False, "assets": a} for t in drafts]
+    rows += [{"tag_name": t, "draft": False, "prerelease": True, "assets": a} for t in prereleases]
+    rows += [{"tag_name": t, "draft": False, "prerelease": False, "assets": []} for t in empty]
     return json.dumps(rows)
 
 
@@ -482,6 +485,11 @@ def main():
         # ... nor when published as a prerelease, which stable users never see.
         r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", prereleases=("helio-v2.4.3",)))
         check("step: prerelease is not a bridge", r.returncode != 0 and NONE in r.stdout,
+              "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
+        # ... nor when published with no assets: the update prompt has nothing
+        # to offer, so installed builds are never moved onto it (Codex, #130).
+        r = run_nb("2.4.4-exp01", releases("helio-v2.4.2", empty=("helio-v2.4.3",)))
+        check("step: release without assets is not a bridge", r.returncode != 0 and NONE in r.stdout,
               "rc=%d out=%s" % (r.returncode, r.stdout[:300]))
         # Codex, #130: the bridge must itself be readable by installed builds.
         # `+bridge.1` is valid semver and a valid tag, but released builds'
