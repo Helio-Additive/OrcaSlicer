@@ -1,20 +1,28 @@
-# Runs the Helio upstream-automation guard regression suites.
+# Runs the Helio workflow regression suites.
 #
-# `scripts/helio/test_sync_noop_guards.py` extracts the real `check` and `graft`
-# step bodies out of helio-upstream-sync.yml and runs them against synthetic
-# repositories. Until this workflow existed, nothing executed it: a ~700-line
+# Each suite extracts the real step bodies out of the workflow it covers and
+# runs them, so it tests the shipped code rather than a transcription of it:
+#
+#   * test_sync_noop_guards.py   — the `check` and `graft` steps of
+#     helio-upstream-sync.yml, against synthetic repositories.
+#   * test_upstream_watch_tags.py — the new-tag selection of
+#     helio-upstream-watch.yml, which answered "None" for every upstream release
+#     for as long as it existed (#157).
+#   * test_release_channel.py    — the release-channel rules and the tag step of
+#     helio-release.yml. Its central case is a build that publishes cleanly and
+#     is then offered to nobody, which no other check would catch.
+#
+# Until this workflow existed, nothing executed the first of these: a ~700-line
 # suite pinning the workflow's most failure-prone logic ran only when someone
 # remembered to, which is precisely the rot the workflow inventory (#106) exists
 # to prevent.
 #
-# `scripts/helio/test_upstream_watch_tags.py` does the same for
-# helio-upstream-watch.yml's new-tag selection, which answered "None" for every
-# upstream release for as long as it existed. Both suites test code lifted out
-# of a workflow, so both belong to the same trigger set. The trigger is
-# unfiltered (see the comment on `on:` below), so an edit to
-# helio-upstream-watch.yml runs both suites with no path list to keep in
-# sync. The job name stays
-# "Upstream sync guards" so no branch-protection rule has to be re-pointed.
+# Because every suite here extracts from a workflow, each one has to run when
+# the workflow it covers changes. The trigger is deliberately unfiltered (see
+# the comment on `on:` below), which satisfies that for all of them with no path
+# list to keep in step — a filter that missed one would silently stop testing
+# it. The job name stays "Upstream sync guards" even as the suites broaden, so
+# no branch-protection rule has to be re-pointed.
 #
 # It is a separate Helio-owned workflow rather than a job bolted onto the
 # upstream-owned shellcheck.yml, so it is not a new conflict site on every
@@ -90,6 +98,32 @@ jobs:
         run: python3 scripts/helio/test_sync_noop_guards.py
 
       - name: Run upstream-watch tag-selection suite
-        # Separate step rather than appended to the suite above, so a failure
-        # names which workflow's logic broke without reading the log.
+        # A step of its own rather than appended to the suite above, so a
+        # failure names which workflow's logic broke without reading the log.
         run: python3 scripts/helio/test_upstream_watch_tags.py
+
+      - name: Run release channel suite
+        run: python3 scripts/helio/test_release_channel.py
+
+      - name: Check this tree's own channel
+        # Runs the real rules against the real HelioChannel.hpp, so a release
+        # branch that has drifted into the wrong channel is caught here rather
+        # than at publish time. Only meaningful on the two release branches: the
+        # branch/channel rule rejects anything else by design, so on a feature
+        # branch this step would fail for a reason that is not a defect.
+        env:
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$BRANCH" in
+            orca-latest-parity-bambu|helio-experimental) ;;
+            *) echo "Branch '$BRANCH' is not a release branch — channel check not applicable."; exit 0 ;;
+          esac
+          # --tree-only: this checks the branch's own consistency. Whether a
+          # bridge release has been published is a release-time question, and
+          # helio-release.yml enforces it there (fail-closed by default).
+          python3 scripts/helio/version_channel.py check \
+            --header src/libslic3r/HelioChannel.hpp \
+            --version "$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)" \
+            --branch "$BRANCH" \
+            --tree-only

@@ -1345,6 +1345,27 @@ bool GLCanvas3D::CenterOfMass::details_hovered() const
     return m_picked && hovered != nullptr && hovered == ImGui::FindWindowByName(details_window);
 }
 
+bool GLCanvas3D::CenterOfMass::details_contain(const Vec2d& point) const
+{
+    const ImGuiWindow* window = ImGui::FindWindowByName(details_window);
+    return m_picked && window != nullptr && window->Rect().Contains(ImVec2(float(point.x()), float(point.y())));
+}
+
+bool GLCanvas3D::CenterOfMass::details_pressed() const
+{
+    if (!details_hovered())
+        return false;
+    const ImGuiContext& g      = *ImGui::GetCurrentContext();
+    const ImGuiWindow*  window = g.HoveredWindow;
+    // The close button is active after a press on it, the window's move id after a press elsewhere on the window.
+    if (g.ActiveIdWindow == window && g.ActiveId != window->MoveId)
+        return false;
+    for (int button = 0; button < IM_ARRAYSIZE(g.IO.MouseDown); ++button)
+        if (g.IO.MouseDown[button] && window->Rect().Contains(g.IO.MouseClickedPos[button]))
+            return true;
+    return false;
+}
+
 bool GLCanvas3D::CenterOfMass::hide_details(GLCanvas3D& canvas)
 {
     if (!m_picked)
@@ -4229,6 +4250,11 @@ bool GLCanvas3D::handle_shortcut(const KeyChord& chord)
     case Shortcut::AddInstance:    post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, +1)); break;
     case Shortcut::RemoveInstance: post_event(Event<int>(EVT_GLCANVAS_INCREASE_INSTANCES, -1)); break;
     case Shortcut::TogglePrintable: post_event(SimpleEvent(EVT_GLCANVAS_PRINTABLE)); break;
+    case Shortcut::ReloadFromDisk:
+        // Only where the context menu offers it: the 3D view's selection, with no gizmo open.
+        if (m_canvas_type == CanvasView3D && !m_gizmos.is_running() && wxGetApp().plater()->can_reload_from_disk())
+            wxGetApp().plater()->reload_from_disk();
+        break;
     case Shortcut::Arrange:
         if (!m_gizmos.is_running())
             post_event(SimpleEvent(EVT_GLCANVAS_ARRANGE));
@@ -4819,7 +4845,21 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     // that incorrectly suppresses the active drag's tooltip and can interrupt its processing. The active drag always takes priority.
     const bool other_drag_active = m_gizmos.is_dragging() || m_mouse.dragging || m_rectangle_selection.is_dragging() || m_layers_editing.state == LayersEditing::Editing;
 
-    if (imgui->update_mouse_data(evt) && !other_drag_active) {
+    // A drag that starts on a marker's details moves the view, as over empty space. Checked on the first drag event only,
+    // while ImGui still hovers what was under the press. After that, m_mouse.dragging keeps the drag on the canvas.
+    const bool camera_drag = evt.Dragging() && !other_drag_active && m_center_of_mass.details_pressed();
+    if (camera_drag) {
+        // Else the object under the details keeps a left drag from turning the view.
+        m_hover_volume_idxs.clear();
+        // From the press, as the canvas does, which went to the ImGui branch below and left its position in m_mouse.position.
+        m_mouse.drag.start_position_2D = Point(m_mouse.position.x(), m_mouse.position.y());
+        // Its release is no right click on the canvas, also when the view has not turned yet, as that takes a second drag event.
+        m_mouse.ignore_right_up = true;
+    }
+    // A click that closes a context menu has no move before it, so ImGui may not yet hover the details.
+    const bool click_on_details = (evt.ButtonDown() || evt.ButtonUp()) && m_center_of_mass.details_contain(pos.cast<double>());
+
+    if ((imgui->update_mouse_data(evt) || click_on_details) && !other_drag_active && !camera_drag) {
         if ((evt.LeftDown() || (evt.Moving() && (evt.AltDown() || evt.ShiftDown()))) && m_canvas != nullptr)
             m_canvas->SetFocus();
         m_mouse.position = evt.Leaving() ? Vec2d(-1.0, -1.0) : pos.cast<double>();
@@ -5015,6 +5055,9 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         m_mouse.ignore_left_up = true;
         return;
     }
+    // A right click off the details hides them, as a left one does.
+    if (evt.RightDown() && !mouse_in_layer_editing)
+        m_center_of_mass.hide_details(*this);
 
     bool any_gizmo_active = m_gizmos.get_current() != nullptr;
 
@@ -6408,8 +6451,8 @@ void GLCanvas3D::update_compacted_wipe_tower_clearance()
     // the moment that object goes over its limit - which is what makes the pair worth drawing at all.
     // The tier is per object, so a short object gets the narrow nozzle outline rather than the wide
     // body one it is not subject to; without that, a 3 mm object parked beside the tower would be drawn
-    // deep inside the keep-out ring while passing the check. Only the instances that already exceed
-    // allowed_rise also get a height limit plane.
+    // deep inside the keep-out ring while passing the check. Only the instances the validation refuses,
+    // next to the nozzle or within the toolhead radius, also get a height limit plane.
     Polygons                               outlines;
     std::vector<std::pair<Polygon, float>> height_polygons;
     bool                                   body_tier_used = false;
@@ -6424,15 +6467,17 @@ void GLCanvas3D::update_compacted_wipe_tower_clearance()
                 continue;
 
             // Same tiers and the same rise measured from the plate as
-            // Print::compacted_wipe_tower_clearance_valid(), so that the preview and the validation
-            // that follows it never contradict each other.
+            // Print::compacted_wipe_tower_clearance_valid(), so that the preview shows a height limit on
+            // the very objects the validation that follows refuses. Orca: like it, the preview leaves an
+            // object away from the toolhead to the check after slicing, which measures its rise from the
+            // tower as printed, so such an object gets no height limit plane.
             const double                  object_top = model_object->get_instance_max_z(i);
             const CompactedTowerClearance clearance  = compacted_wipe_tower_clearance(config, zone, inst_hull, object_top);
             body_tier_used                           = body_tier_used || compacted_tower_body_tier(clearance);
 
             const Polygon outline = compacted_wipe_tower_offender_outline(inst_hull, clearance.body_clearance);
             outlines.emplace_back(outline);
-            if (object_top <= clearance.allowed_rise + EPSILON)
+            if (! clearance.near_nozzle && ! clearance.near_body)
                 continue;
             height_polygons.emplace_back(outline, float(clearance.allowed_rise));
         }
@@ -9076,7 +9121,10 @@ bool GLCanvas3D::_update_inactive_plates_visibility()
     if (plate != nullptr)
         for (const GLVolume* volume : m_volumes.volumes) {
             Instance& instance = instances[{ volume->object_idx(), volume->instance_idx() }];
-            instance.box.merge(volume->transformed_convex_hull_bounding_box());
+            // The footprint counts the same volumes plate membership does, the parts: a modifier
+            // or negative volume reaching over another plate does not put the object on it.
+            if (!volume->is_modifier)
+                instance.box.merge(volume->transformed_convex_hull_bounding_box());
             instance.selected |= volume->selected;
         }
 
