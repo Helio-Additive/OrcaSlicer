@@ -1152,13 +1152,31 @@ row.**
 - **Rows 4–5** (the two `wxWidgets` rows) were added afterwards, when the first
   post-sync dependency build went red on **every** platform at once — all six
   `Build Deps` legs and both Flatpak jobs, on PRs and on the release branch's own
-  post-merge run. They follow the same reasoning and the same verbatim-copy discipline,
-  but they were **not** covered by that decision and are **awaiting a separate owner
-  decision** (#167). Do not cite rows 1–3's approval for them.
+  post-merge run. They were **not** covered by rows 1–3's decision, so #167 asked for
+  a separate one and did not assume it. The owner **granted it by merging #167**
+  (2026-11-21), so rows 4–5 are now owner-approved on the same footing as rows 1–3 —
+  but by their own decision, not by inheriting the earlier one.
 
-If the owner declines rows 4–5, the alternative is not "no fix" but "no build
-verification": while the pin is broken, no PR in this repo can exercise the build
-matrix at all.
+**Verified before merge, on the merged content — which is the part that matters for the
+next sync.** The evidence is #167's own pre-merge build,
+[run 44850225808](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44850225808)
+on head `8a9feda3`. That matters for a reason worth stating: a `pull_request` build
+compiles `refs/pull/167/merge`, the merge of the change into the then-current release
+branch, so it exercised the same tree the merge produced rather than the branch in
+isolation. It was green on all six `Build Deps` legs, both Flatpak jobs and every
+`Build OrcaSlicer` leg, from a genuine cache miss (`Build on Ubuntu` ran 40 minutes),
+so the backport is known to work rather than merely believed to.
+
+The release branch's own post-merge run on `aef80af9` is a **separate** run and is not
+what the line above cites; do not read this paragraph as reporting it.
+
+Two further effects were observed in that same pre-merge run and are **not** claims
+about future runs: the external regression suite reported `84 passed, 0 failed` where
+29 Oct recorded 25 failures, and `unit_tests` ran for the first time since 14 Sep
+(**3,023 tests**, 21,010 runs, 0 failures — the report's own units; a Catch2 test case
+can hold many assertions, so this is not an assertion count). Both are recorded with
+their caveats on #133; neither is a reason to treat that issue as closed, because the
+unpinned-clone mechanism behind it is untouched.
 
 | file | fixes | upstream source |
 |---|---|---|
