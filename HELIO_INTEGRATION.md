@@ -1141,14 +1141,24 @@ in-class initialiser, which also may appear only once.
 ## Temporary backports from upstream `main` (drop at the next sync)
 
 Upstream build fixes copied in **verbatim**, ahead of the upstream release that will
-carry them. They fix CI jobs that were red on every PR, and the repo owner decided not
-to merge with red CI. This is a deliberate, owner-approved exception to Rule 15's "wait
-for the sync". It keeps divergence at zero by copying upstream's own text, not by
-writing a Helio fix.
+carry them. Each fixes CI that was red on every PR. The mechanism keeps divergence at
+zero by copying upstream's own text rather than writing a Helio fix — but **the rows do
+not share one approval, and this section is the decision record, so read the status per
+row.**
 
-The first three rows arrived with the v2.5.1 sync itself (#163, #164). The two
-`wxWidgets` rows were added afterwards, when the first post-sync dependency build went
-red on **every** platform at once.
+- **Rows 1–3** arrived with the v2.5.1 sync itself (#163, #164). The repo owner decided
+  not to merge with red CI, making these a deliberate, **owner-approved** exception to
+  Rule 15's "wait for the sync".
+- **Rows 4–5** (the two `wxWidgets` rows) were added afterwards, when the first
+  post-sync dependency build went red on **every** platform at once — all six
+  `Build Deps` legs and both Flatpak jobs, on PRs and on the release branch's own
+  post-merge run. They follow the same reasoning and the same verbatim-copy discipline,
+  but they were **not** covered by that decision and are **awaiting a separate owner
+  decision** (#167). Do not cite rows 1–3's approval for them.
+
+If the owner declines rows 4–5, the alternative is not "no fix" but "no build
+verification": while the pin is broken, no PR in this repo can exercise the build
+matrix at all.
 
 | file | fixes | upstream source |
 |---|---|---|
