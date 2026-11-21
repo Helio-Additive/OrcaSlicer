@@ -1165,12 +1165,19 @@ matrix at all.
 | `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
 | `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
 | `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
-| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path — our copy is now **byte-identical** to it |
+| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path. Our copy is **byte-identical**, pinned to an immutable reference rather than to a moving branch: blob `2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, which is what both `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` and the same path at upstream `main` `ced396fedc05842467f147ec67e926e4eb577faf` resolve to (checked 2026-11-21) |
 | no `branch:` + `disable-shallow-clone: true` on the `wxWidgets` git source in `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | Both Flatpak jobs: `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…` | `main`, same path |
 
 **At the next sync, take upstream's version of every row.** The two `deps/` rows and
 `deps/wxWidgets/wxWidgets.cmake` should merge cleanly, because both sides hold identical
-text — `wxWidgets.cmake` is byte-identical to upstream `main`, so it merges as a no-op.
+text. For `wxWidgets.cmake` that is checkable against a fixed revision rather than against
+whatever `main` says today — `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` is blob
+`2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, and so was upstream `main` at
+`ced396fedc05842467f147ec67e926e4eb577faf`. While that holds the merge is a no-op; if
+upstream has since changed the file, the blob will differ and the row stops claiming
+identity, which is the point of naming it. **Do not check this against the `v2.5.1` tag** —
+the release predates the fix and still carries `GIT_SHALLOW ON`, so comparing there shows a
+difference and invites the wrong conclusion that the backport diverges from upstream.
 The `build_all.yml` Flatpak row will not: upstream moved the job into
 `build_flatpak.yml`, so drop our volume line from `build_all.yml` when that restructure
 arrives.
