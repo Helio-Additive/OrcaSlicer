@@ -1308,6 +1308,10 @@ std::vector<int> get_min_flush_volumes(const DynamicPrintConfig &full_config, si
         filament_long_retractions_when_cut = filament_long_retractions_when_cut_opt->values;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": get filament_long_retractions_when_cut from config, size=%1%, values=%2%")%filament_long_retractions_when_cut.size() %filament_long_retractions_when_cut_opt->serialize();
     }
+    // A standalone preset that omits either key leaves it shorter than the filament list; the rest follow
+    // the first filament, as get_at() reads them when slicing.
+    filament_retraction_distance_when_cut.resize(filament_size, filament_retraction_distance_when_cut.empty() ? 18.0 : filament_retraction_distance_when_cut.front());
+    filament_long_retractions_when_cut.resize(filament_size, filament_long_retractions_when_cut.empty() ? 0 : filament_long_retractions_when_cut.front());
 
     for (size_t idx = 0; idx < filament_size; ++idx) {
         int extra_flush_volume = nozzle_volume_val;
@@ -16825,8 +16829,11 @@ bool Plater::priv::has_assemble_view() const
 bool Plater::priv::can_scale_to_print_volume() const
 {
     const BuildVolume_Type type = this->bed.build_volume().type();
+    const Selection& selection = get_selection();
+    // Selection::scale_to_fit_print_volume() does nothing for a selection of parts, so don't offer it
     return !sidebar->obj_list()->has_selected_cut_object()
-        && !view3D->get_canvas3d()->get_selection().is_empty()
+        && !selection.is_empty()
+        && selection.get_mode() != Selection::Volume
         && (type == BuildVolume_Type::Rectangle || type == BuildVolume_Type::Circle);
 }
 #endif // ENABLE_ENHANCED_PRINT_VOLUME_FIT
@@ -24486,6 +24493,8 @@ void Plater::changed_objects(const std::vector<size_t>& object_idxs)
         p->view3D->reload_scene(false);
         p->view3D->get_canvas3d()->update_instance_printable_state_for_objects(object_idxs);
     }
+
+    mark_plate_toolbar_image_dirty();
 
     // update print
     this->p->schedule_background_process();

@@ -1,8 +1,15 @@
-# Runs the upstream-sync guard regression suite.
+# Runs the Helio workflow regression suites.
 #
-# `scripts/helio/test_sync_noop_guards.py` extracts the real `check` and `graft`
-# step bodies out of helio-upstream-sync.yml and runs them against synthetic
-# repositories. Until this workflow existed, nothing executed it: a ~700-line
+# Each suite extracts the real step bodies out of the workflow it covers and
+# runs them, so it tests the shipped code rather than a transcription of it:
+#
+#   * test_sync_noop_guards.py   — the `check` and `graft` steps of
+#     helio-upstream-sync.yml, against synthetic repositories.
+#   * test_release_channel.py    — the release-channel rules and the tag step of
+#     helio-release.yml. Its central case is a build that publishes cleanly and
+#     is then offered to nobody, which no other check would catch.
+#
+# Until this workflow existed, nothing executed the first of these: a ~700-line
 # suite pinning the workflow's most failure-prone logic ran only when someone
 # remembered to, which is precisely the rot the workflow inventory (#106) exists
 # to prevent.
@@ -13,16 +20,32 @@
 name: Helio sync guard tests
 
 on:
-  push:
-    paths:
-      - '.github/workflows/helio-upstream-sync.yml'
-      - '.github/workflows/helio-sync-guard-tests.yml'
-      - 'scripts/helio/**'
+  # Deliberately NO `paths:` filter, for the same reason helio-workflow-inventory.yml
+  # has none: GitHub evaluates path filters against only the first 300 changed
+  # files, and the changed-file list is ordered by path. `scripts/helio/**` sorts
+  # after `resources/**`, which is where a sync's bulk lives, so on a sync PR
+  # those paths are always outside the window. Measured on this branch's own
+  # sync commits — files sorting before `scripts/helio/`:
+  #
+  #   v2.4.2      (ce472ef4,   894 files)    857
+  #   v2.4.1      (eaf3cb94, 8,059 files)  7,940
+  #   v2.4.0-beta (7322afa4, 15,081 files) 14,617
+  #
+  # A sync whose conflict resolution also touches `scripts/helio/**` would
+  # therefore skip this suite on exactly the PR that rewrites the logic it
+  # guards. The suite is ~30s of Python, so running it unfiltered is the cheap
+  # side of that trade.
   pull_request:
-    paths:
-      - '.github/workflows/helio-upstream-sync.yml'
-      - '.github/workflows/helio-sync-guard-tests.yml'
-      - 'scripts/helio/**'
+  push:
+    branches:
+      - orca-latest-parity-bambu
+  schedule:
+    # Weekly, so drift surfaces when nobody is editing these files. The suite
+    # depends on the runner image, Python and PyYAML as well as on this repo, and
+    # between #121 (Aug) and #130 (Sep) nothing triggered it at all. Without this,
+    # a breakage caused from outside the repo would first appear on a sync-workflow
+    # edit — the worst moment to start debugging the harness instead of the sync.
+    - cron: '0 8 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -32,12 +55,16 @@ jobs:
   sync-guards:
     name: Upstream sync guards
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           # The suite builds its own synthetic repositories and never inspects
           # this one's history, so a shallow checkout is enough.
           fetch-depth: 1
+          # Nothing here talks to the network or to this repo's remote, so the
+          # job has no use for a credential in .git/config.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -58,3 +85,29 @@ jobs:
 
       - name: Run guard suite
         run: python3 scripts/helio/test_sync_noop_guards.py
+
+      - name: Run release channel suite
+        run: python3 scripts/helio/test_release_channel.py
+
+      - name: Check this tree's own channel
+        # Runs the real rules against the real HelioChannel.hpp, so a release
+        # branch that has drifted into the wrong channel is caught here rather
+        # than at publish time. Only meaningful on the two release branches: the
+        # branch/channel rule rejects anything else by design, so on a feature
+        # branch this step would fail for a reason that is not a defect.
+        env:
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$BRANCH" in
+            orca-latest-parity-bambu|helio-experimental) ;;
+            *) echo "Branch '$BRANCH' is not a release branch — channel check not applicable."; exit 0 ;;
+          esac
+          # --tree-only: this checks the branch's own consistency. Whether a
+          # bridge release has been published is a release-time question, and
+          # helio-release.yml enforces it there (fail-closed by default).
+          python3 scripts/helio/version_channel.py check \
+            --header src/libslic3r/HelioChannel.hpp \
+            --version "$(grep 'set(SoftFever_VERSION' version.inc | cut -d '"' -f2)" \
+            --branch "$BRANCH" \
+            --tree-only

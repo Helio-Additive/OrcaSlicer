@@ -71,19 +71,108 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Monitors upstream for new tags/releases and creates tracking issues
 
 ### Release (`helio-release.yml`)
-- Triggers on: merged PR with `release` label on `orca-latest-parity-bambu`, or manual `workflow_dispatch`
+- Triggers on: merged PR with `release` label on `orca-latest-parity-bambu` or `helio-experimental`, or manual `workflow_dispatch` from either branch
 - Builds all platforms (Linux, Windows, macOS universal) via reusable workflows
 - Creates GitHub Release with `Helio`-prefixed assets (DMG, AppImage, installer, portable zip)
-- Tag format: `helio-v{version}` (from `version.inc`)
-- Manual dispatch restricted to `orca-latest-parity-bambu` branch only
+- Tag format: `helio-v{version}` (from `version.inc`), or `helio-exp-v{version}` on the experimental channel
+- **No experimental release before a bridge.** Builds released before the experimental channel cannot read `helio-exp-v` tags and drop them silently, so `helio-release.yml` refuses an experimental release until a **published** (not draft, not prerelease, with assets) final `helio-v` release's tagged source contains the new parser (`HELIO_EXPERIMENTAL_TAG_PREFIX` in `GUI_App.cpp`). Release list comes from the API; a failed lookup means no bridge. The guard-tests CI step passes `--tree-only` to skip this publication rule. The first stable release after #130 is that bridge. See `HELIO_INTEGRATION.md` → "The bridge release"
+- **Two channels, and the channel is a property of the tree, not of the request.** `src/libslic3r/HelioChannel.hpp` is the only file that names the channel, and it is what the binary compiles with. `scripts/helio/version_channel.py` reads it, cross-checks it against the branch, and refuses to publish on disagreement — so a build cannot go out under the other channel's tag. Experimental releases are always GitHub prereleases, and their assets carry `Helio_EXPERIMENTAL`
 - **This is the only caller of the shared build workflows outside `build_all.yml`, so it silently misses inputs upstream adds to them.** `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml` are upstream-owned and inherited wholesale; upstream only ever exercises them from `build_all.yml`, which passes a full matrix. `helio-release.yml` hand-writes each `with:` block, so an input upstream starts *depending on* — without making it `required:` — reaches our release path as an empty string and nothing fails until a release is cut. v2.5.0 is the worked example: it added `--arch ${{ inputs.arch }}` to the Windows command in **both** `build_deps.yml` and `build_orca.yml`, our `build_windows` job passed no `arch`, and the command expanded to `build_win.bat -d --arch --deps-dir <path> …`. `build_win.bat` declares `target_arch` as a plain `string` option, and its `handle_args` rejects a value starting with `-` as "looks like another option", so every uncached Windows release build exited 1 before compiling. A cache hit did not help — `build_orca.yml`'s "Build slicer Win" step passes the same empty flag — and the empty arch additionally resolved the cache key to `windows--msvc` (`build_check_cache.yml` builds `windows-<arch>-<compiler>`) and corrupted `dep-folder-name`. Fixed by passing `arch: x64` in our caller, which is not a new choice: before v2.5.0 no `--arch` was passed and `build_win.bat` defaulted to the host, x64 on `windows-latest`.
   - **The fix belongs in `helio-release.yml`, not in the upstream files.** Both offending lines are byte-identical to upstream's, and upstream never hits the bug. Giving `build_win.bat` a default, or making both commands omit an empty flag, would patch upstream-owned files for a problem only our caller has — a divergence to re-resolve at every sync. Rule 15.
   - **Worth a deliberate check each sync:** diff the `inputs:` blocks of the three shared workflows against what `helio-release.yml` passes. Note that `build_all.yml` passing an input correctly proves nothing about our release path, because the two callers are written independently. Nothing in CI catches this — no PR build exercises `helio-release.yml`.
+- **A dispatch publishes a REAL release — use `dry_run` to exercise the build instead.**
+  `draft: false`, and `prerelease` is computed from `version.inc`, **not** from
+  `tag_override`, so a throwaway tag still produces a full "latest" release. It also
+  fires `release: [released]`, which `winget_updater.yml` listens for — disabled, but
+  only at the repo level, which is not tracked in git. So "just dispatch it to check"
+  was never a safe instruction, and before the `dry_run` input there was no way to
+  exercise the macOS legs at all without publishing something. `dry_run: true` runs
+  everything including asset collection and its missing-asset checks, skips only the
+  publish, and writes the would-be tag and the collected assets to the job summary.
+- **macOS runner label: `macos-15`, and a retired label fails silently.** GitHub retired
+  `macos-14` on 2026-11-02 and this file still requested it in both macOS jobs, so the
+  next release could not have built its DMG or universal assets (#147). The reason it sat
+  unnoticed for six days is the failure mode, which is worth recognising on sight: a
+  retired label is not an error. The job is dropped **before a runner is assigned** —
+  `runner_name: ""`, zero steps, `completed_at` ~1s after `started_at` — and reports
+  `cancelled`, not `failure`. Everything downstream of it then reports `skipped` via
+  `needs:`, which on this fork looks exactly like the deliberate `ready-to-build` label
+  gate, and a `cancelled` run reads as "someone stopped it". Scheduled `Build all` runs on
+  the release branch all conclude `skipped` anyway, so nothing scheduled would have
+  surfaced it either. **`macos-15` rather than `macos-latest`**: `macos-latest` now tracks
+  macOS 26, while `build_orca.yml` passes `-t 10.15` and the deps cache key
+  (`build_check_cache.yml`) is keyed on **arch only, not on the runner image** — so a cache
+  built on one image is silently consumed on another. Pinning to `macos-15` keeps the SDK
+  close to what that target and that cache were built against — and since v2.5.0 moved
+  `build_all.yml` to `macos-15` too, both callers of the shared workflows now request the
+  same image, which is what makes that image-independent cache key safe rather than merely
+  untested. Keep the two in step for that reason. Both `macos-14` and
+  `macos-15` are arm64, so the `x86_64` leg is cross-compiled exactly as it was before.
+  **The Xcode cleanup in `build_orca.yml` is upstream's again.** Before v2.5.0, its
+  `Free disk space` step kept `Xcode_15.4.app` by name. That deletes the whole toolchain
+  on `macos-15`, which has only 16.x and 26.x. #149 patched it, and upstream v2.5.0 then
+  shipped the same fix: it keeps whatever `xcode-select -p` resolves to. The Helio hunk
+  was dropped at the v2.5.0 merge, so don't re-add one. See `HELIO_INTEGRATION.md` → CI/CD
+  Workflows.
+- **`build_all.yml` is on `macos-15` as of v2.5.0**, so macOS PR coverage is back. Before
+  the sync, its `os: ${{ vars.SELF_HOSTED && 'orca-macos-arm64' || 'macos-14' }}` was
+  upstream's dead label and was deliberately left for the sync to move (Rule 15).
+  `vars.SELF_HOSTED` is **not** set on this repo: run 42443681491's dropped jobs carried
+  `labels: ["macos-14"]`, the expression's fallback branch.
+
+### Experimental channel
+- **Experimental code lives on the release branch, not on a branch of its own**, behind `helio_experimental_features_enabled()`. `helio-experimental` is a *two-line* branch — the channel header and the version in `version.inc` — re-cut from the release branch whenever a build is wanted. So there is no long-lived divergence to reconcile, and a feature graduates by deleting its gate rather than by porting it: what stable ships is the same code the experimental testers ran
+- The channel has to come from checked-out content because the compile is done by upstream-owned `build_orca.yml`, which builds the ref as-is. Giving it a "build feature X" input would be an upstream file edit, and so a conflict on every sync
+- **Experimental builds are deliberately offered to stable users** through the ordinary in-app update prompt. That is a product decision, not an accident: the update check reads this fork's own releases (`AppConfig.cpp` `VERSION_CHECK_URL`) and `check_stable_update_only` **defaults to false**, so a prerelease reaches everyone who has not ticked that box. The dialog carries the checkbox next to Skip/Cancel, and the release body — which the dialog renders verbatim — leads with what the build is
+- **The version rule is what makes it work, and it is easy to get backwards.** An experimental version must sort *above* the newest stable release and *below* the stable release it anticipates: `2.4.3-exp01` against a `2.4.2` stable. Too low (`2.4.2-exp01`) and the update check skips it — the build publishes, looks healthy, and is offered to nobody. Too high, or missing the marker, and testers are never moved back onto stable when it ships. `version_channel.py` enforces both, and `scripts/helio/test_release_channel.py` pins the rules
+- **The format is `X.Y.Z-expNN`, and neither the dot nor the padding is cosmetic.** `get_version()` applies its regex with `std::regex_match` — whole-string — and the prerelease group is `(-[A-Za-z0-9]+)?`, so `2.4.3-exp.1` parses as **invalid** and that release is skipped in silence. **This cannot be fixed in the C++**: the clients that must read an experimental tag are the stable builds already installed, whose copy of that regex was fixed when they were compiled, so the published format is what has to comply. The zero-padding is the second half — prerelease identifiers that are not purely numeric compare as strings, so `exp9` sorts *above* `exp10` and the tenth build of a version would look older than the ninth. Both verified against the shipped matcher and the `semver` library the app links
+- Cutting one: re-create `helio-experimental` from the release branch, flip `HELIO_EXPERIMENTAL_BUILD` to `1` and `HELIO_RELEASE_CHANNEL` to `"experimental"`, set `version.inc` to the next patch with an `-expNN` marker, push, then dispatch `helio-release.yml` from that branch
+- **Before cutting a *stable* release, check that no unfinished feature is sitting on the branch ungated.** The gate is what keeps experimental work out of a stable build, so a feature that merges before its gate does is, for that window, shipping to everyone. Nothing enforces this — `grep` for the feature's entry points and confirm each is behind `helio_experimental_features_enabled()`. **Current instance: the #126 warpage views.** They merge ungated and a follow-up adds the gate; until that follow-up lands, a stable release cut from this branch ships nine unfinished visualisation modes to every user
 
 ### Build Pipeline (reusable workflows)
 - `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`
 - macOS signing/notarization gated by `ENABLE_SIGNING` repo variable
 - Dependency caching per OS/arch with hash of `deps/**`
+
+#### A dependency pinned to a commit that is no longer a branch tip breaks every platform at once
+
+Worth recognising on sight, because the symptom looks like a fork problem and is not.
+On 2026-11-20 **all six `Build Deps` legs and both Flatpak jobs went red at the same
+time**, on PRs *and* on the release branch's own post-merge run
+([44819525351](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44819525351)) —
+the first build after the v2.5.1 sync, whose `deps/**` changes invalidated every cache
+and so forced a real dependency build for the first time in weeks.
+
+The cause was outside this repository. `deps/wxWidgets/wxWidgets.cmake` pins
+`OrcaSlicer/Orca-deps-wxWidgets` at commit `b44c39c1`, and that repo's `v3.3.2` branch
+has since **moved past it** (tip is now `89844cb1`; `b44c39c1` survives only as the tag
+`orca-3.3.2-1`). A shallow clone fetches only branch tips, so the pinned commit's tree is
+simply absent:
+
+- CMake (`GIT_SHALLOW ON`) → `fatal: unable to read tree (b44c39c1…)`, `Failed to checkout tag`
+- flatpak-builder (`branch: v3.3.2` + `commit:`) is explicit about it →
+  `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…`
+
+**The tell is the shape:** when a dependency Helio has never touched fails identically on
+every platform, suspect the pin or its remote, not the fork.
+
+Ownership was settled **before** the fix below was applied: at that point both files were
+byte-identical to upstream v2.5.1 — `git diff --ignore-cr-at-eol refs/tags/v2.5.1 <ref> --
+<file>` was empty against the then-current branch, and neither file contains the string
+`helio`. That is a statement about the pre-backport tree, so do not expect it to hold now:
+running it against today's branch returns the backport itself (~15 lines per file). The
+check that *does* survive, and the more useful one, is that
+`deps/wxWidgets/wxWidgets.cmake` is byte-identical to upstream `main` — which is what makes
+the next sync a no-op for that file.
+
+So under Rule 15 this is upstream's, and **upstream had already written the fix on `main`**
+— `GIT_SHALLOW OFF`, and on the Flatpak side dropping the branch name plus
+`disable-shallow-clone: true`. Per the Scope rule the answer was to take upstream's text,
+not to write one; it is backported verbatim and listed in `HELIO_INTEGRATION.md` →
+"Temporary backports from upstream `main`", to be dropped at the next sync.
+
+Note a cache hit hides this completely, so "CI was green yesterday" says nothing about
+the pin — only that nothing had to clone it.
 
 ### Build All (`build_all.yml`)
 - Triggers on push/PR to `main`, `release/*` and `orca-latest-parity-bambu`
