@@ -32,20 +32,54 @@ jobs:
         run: |
           RELEASE_BRANCH="${{ vars.HELIO_RELEASE_BRANCH || 'orca-latest-parity-bambu' }}"
 
-          # Find last-synced baseline
-          if git rev-parse "helio-last-synced" >/dev/null 2>&1; then
-            BASELINE_COMMIT=$(git rev-parse "helio-last-synced")
-            BASELINE_TAG=$(git tag -l 'v*' --points-at "$BASELINE_COMMIT" | head -1)
-            if [ -z "$BASELINE_TAG" ]; then
-              BASELINE_TAG="helio-last-synced"
-            fi
-          else
-            BASELINE_TAG="v2.3.2-rc2"
+          # Baseline: the upstream release this branch actually holds.
+          #
+          # This used to read the `helio-last-synced` tag. That tag points at an
+          # UPSTREAM commit, and GitHub refuses to let any App token create or
+          # update a ref that makes upstream's `.github/workflows/**` newly
+          # reachable without the `workflows` permission — which a workflow
+          # cannot grant itself. So the tag has never been movable from CI and
+          # sat at v2.3.2-rc2 across three releases, which meant this digest
+          # reported long-synced releases as new. `version.inc` records the same
+          # fact, is written by the sync merge itself, and needs no permission.
+          # `|| true` and the readability test matter: this step runs under
+          # `bash -e -o pipefail`, so an unreadable version.inc would abort here
+          # and the fallback below — the whole reason it exists — would never
+          # run. `head -1` keeps a second matching line from splicing a newline
+          # into the ref name.
+          BASELINE_VER=""
+          if [ -r version.inc ]; then
+            BASELINE_VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1 || true)
           fi
+          BASELINE_TAG="v$BASELINE_VER"
+          BASELINE_SOURCE="version.inc"
+
+          # Verify through refs/tags/ explicitly. A bare name resolves branches
+          # too, and while git's disambiguation happens to prefer tags over
+          # heads, "happens to" is not what a baseline should rest on — upstream
+          # ships release/* branches alongside these tags.
+          if [ -z "$BASELINE_VER" ] || ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+            echo "::warning title=Digest baseline unresolved::version.inc yielded '$BASELINE_TAG', which is not an upstream tag. Falling back to v2.3.2-rc2, so this digest will over-report releases as new."
+            BASELINE_TAG="v2.3.2-rc2"
+            BASELINE_SOURCE="hardcoded fallback"
+            # If even the fallback is absent, stop. Handing an unresolved ref to
+            # the merge-base loop below silently yields a wrong digest, and a
+            # wrong digest is worse than none: it is read as "nothing to sync".
+            if ! git rev-parse -q --verify "refs/tags/$BASELINE_TAG^{commit}" >/dev/null; then
+              echo "::error title=No usable digest baseline::Neither version.inc nor the v2.3.2-rc2 fallback resolves to an upstream tag. Refusing to compute a digest from an unresolved baseline."
+              exit 1
+            fi
+          fi
+          # Every git operation consuming the baseline goes through this, so
+          # what was verified above is what gets used. BASELINE_TAG stays bare
+          # for the string compare below (it matches `git tag -l` output) and
+          # for display.
+          BASELINE_REF="refs/tags/$BASELINE_TAG"
+          echo "Digest baseline: $BASELINE_TAG (source: $BASELINE_SOURCE)"
 
           # New tags since baseline
           NEW_TAGS=$(git tag -l 'v*' --sort=-version:refname | while read tag; do
-            if git merge-base --is-ancestor "$BASELINE_TAG" "$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
+            if git merge-base --is-ancestor "$BASELINE_REF" "refs/tags/$tag" 2>/dev/null && [ "$tag" != "$BASELINE_TAG" ]; then
               COMMIT_DATE=$(git log -1 --format='%ci' "$tag" | cut -d' ' -f1)
               echo "- \`$tag\` ($COMMIT_DATE)"
             fi

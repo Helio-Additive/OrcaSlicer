@@ -1,7 +1,13 @@
 # Helio Integration Map
 
-> Auto-generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2`
-> This is the authoritative reference for AI agents resolving merge conflicts or build fixes.
+> Generated from diff: `orca-latest-parity-bambu` vs `v2.3.2-rc2` — the baseline at the
+> time of generation, which is **older than the release this branch now holds**. Treat the
+> file counts and line totals below as a snapshot of that moment, not a current measurement.
+> **Git is authoritative, not this map.** This is the starting point for AI agents resolving
+> merge conflicts or build fixes — it records what each touchpoint is *for*, which git cannot
+> tell you. But it is hand-maintained and it drifts, so where the map and the tree disagree,
+> the tree wins — provided the command is run against a verified baseline. See
+> **Rule 15** for that command and for the cases where its baseline cannot be trusted.
 > Updated for the v2.4.0-beta upstream sync: upstream added `acceleration` and `jerk`
 > visualization fields that sit **between** `pressure_advance` and the Helio
 > `thermal_index_*` fields in `PathVertex` (libvgcode) and `MoveVertex` (GCodeProcessor).
@@ -13,7 +19,14 @@
 > `render_position_window()` — the Helio TI rows/cases live there now.
 
 ## Stats
-- **70 files changed**: 36 new, 34 modified, 0 deleted
+- **73 files changed**: 39 new, 34 modified, 0 deleted
+  (the release-channel work adds `HelioChannel.hpp`, `version_channel.py` and
+  `test_release_channel.py` — see "Experimental channel")
+- These counts were last recomputed before the v2.5.0 sync and are approximate.
+  v2.5.0 removed one modified file from the set (`GLCanvas3D.hpp`, now
+  byte-identical to upstream) and added one that had never been listed
+  (`.github/workflows/build_orca.yml`). Always confirm with
+  `git diff <baseline> HEAD -- <file>` rather than trusting this list (Rule 15).
 - **+13,363 lines added, -195 lines removed** — measured at the v2.4.0-beta sync.
   The support-data catalog work (#95) adds ~1,000 further lines in the four new
   `HelioSupportData` / `HelioRetryPolicy` files, plus the region-change hook in
@@ -48,7 +61,7 @@ Key data flow:
   the annotation-free optimized G-code is the export/upload source, and the annotated optimized
   G-code is used only by the preview
 
-## Helio-Only Files (36 files — NEVER exist upstream, always preserve)
+## Helio-Only Files (39 files — NEVER exist upstream, always preserve)
 
 ### Core API Client
 
@@ -122,14 +135,59 @@ generation so work started under the old credential can never land.
 
 | File | Purpose |
 |-|-|
-| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (restricted to `orca-latest-parity-bambu`) |
+| `src/libslic3r/HelioChannel.hpp` | The release channel (`stable` / `experimental`) and the gate for unfinished features. The only file that differs between the release branch and `helio-experimental` — see "Experimental channel" below |
+| `scripts/helio/version_channel.py` | Reads that header, cross-checks it against the branch, and enforces the experimental version rules at release time |
+| `scripts/helio/test_release_channel.py` | Regression suite for those rules and for `helio-release.yml`'s tag step |
+| `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (from `orca-latest-parity-bambu` or `helio-experimental`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
 | `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
 | `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
 | `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
 
+### CI/CD Workflows (upstream files carrying Helio hunks)
+
+Two inherited workflows are modified rather than Helio-only, which is why #134
+happened: a hand-resolved sync conflict took `--ours` wholesale and dropped every
+upstream change to **exactly these two files** between v2.4.0-beta and v2.4.2,
+while the five inherited `.github/` files with no Helio hunks updated cleanly.
+Rule 12 says don't edit inherited workflows; these are the standing exceptions, so
+keep the list short and the hunks small.
+
+| File | Helio hunks |
+|-|-|
+| `.github/workflows/build_all.yml` | `ready-to-build` label gate on the four build jobs (Rule 14); data-only `paths:` entries (`resources/**`, `localization/**`) added to the `pull_request` filter in PR #113 |
+| `.github/workflows/build_orca.yml` | `ENABLE_SIGNING` gate on the two macOS signing steps (`Sign app and notary`, `Create DMG without notary`) |
+
+**`Free disk space` is not a Helio hunk, and must not become one again.** Before
+v2.5.0, upstream's line kept `Xcode_15.4.app` *by name*. On `macos-15`, which has no
+15.x Xcode, that deletes the selected toolchain. #149 fixed it here when
+`helio-release.yml` moved to `macos-15` (#147). Upstream v2.5.0 then shipped the same
+fix itself: it keeps whatever `xcode-select -p` resolves to via `pwd -P`, and moved
+`build_all.yml` to `macos-15` too. So at the v2.5.0 merge into #149 the Helio hunk was
+dropped and upstream's line taken verbatim (Rule 15: don't front-run a fix upstream
+already ships). #149 also skipped the deletion when only the Command Line Tools are
+selected. Upstream's line does not, but that state does not occur on GitHub-hosted
+runners, so it is upstream's to own.
+
 ## Modified Files (34 files — conflict risk, detailed per-file guide)
+
+#### `.github/workflows/build_orca.yml` (+2/-2) — **added to this map at the v2.5.0 sync**
+Upstream only signs and notarises macOS builds for its own repository:
+`github.repository == 'OrcaSlicer/OrcaSlicer' && (main || release/*)`. That is false
+on this fork, so without a change here Helio could never ship a signed macOS build.
+Helio widens the condition on **two** steps:
+
+- `Sign app and notary` — adds
+  `|| (vars.ENABLE_SIGNING == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.merged == true))`
+- `Create DMG without notary` — must be the **exact negation** of the above, or a
+  signed Helio build also gets an unsigned DMG written over the top of it.
+
+Keep those two conditions in lockstep. `CLAUDE.md` has always referred to
+"macOS signing/notarization gated by `ENABLE_SIGNING`", but the file was absent from
+this map, so the v2.5.0 resolution had to rediscover it from `git diff`. That is the
+drift Rule 15 warns about: **the map is a faster first look, not the qualifier — git
+settles ownership.**
 
 ### CRITICAL RISK
 
@@ -231,14 +289,24 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 - **Region combobox**: both region-write paths call `HelioQuery::invalidate_support_data_for_endpoint_change()` — region selects both the Helio endpoint and which regional PAT key is read, so the previous endpoint's catalogs must be dropped
 
 #### `src/slic3r/GUI/GUI_App.cpp` (+28)
-- Added `#include "../Utils/HelioDragon.hpp"`
+- Added `#include "../Utils/HelioDragon.hpp"` and `#include "libslic3r/HelioChannel.hpp"`
 - The startup block always requests the Helio supported-data catalogs (no "already loaded" guard)
-- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
+- New methods: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`,
+  `show_helio_experimental_notice()`
 - `OnExit()` calls `HelioQuery::shutdown_background_requests()` so support-data
   workers are torn down cleanly — keep this line when upstream reworks `OnExit()`
+- **`check_new_version_sf()` — the tag-prefix strip is Helio's and is load-bearing.**
+  It turns `helio-v1.2.3` and `helio-exp-v1.2.3-exp01` into versions the update
+  check can compare. `VERSION_CHECK_URL` in `AppConfig.cpp` points at *this
+  fork's* releases, so dropping this in a merge does not fall back to something
+  harmless: every release stops parsing and users are silently never told about
+  an update. See "Experimental channel" below
+- `show_helio_experimental_notice()` is called immediately after
+  `mainframe->Show(true)`. It is a no-op on the stable channel — guarded by a
+  `constexpr`, not `#if`, so the stable build still compiles it
 
 #### `src/slic3r/GUI/GUI_App.hpp` (+4)
-- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`
+- 4 method declarations: `is_helio_enable()`, `request_helio_pat()`, `request_helio_supported_data(bool force_refresh = false)`, `show_helio_experimental_notice()`
 
 #### `src/slic3r/GUI/PartPlate.cpp` (+27)
 - Added `#include "../Utils/HelioDragon.hpp"`
@@ -334,20 +402,36 @@ The heaviest modification. Contains the entire Helio processing pipeline.
   when the region actually changed — otherwise catalogs from the previous endpoint
   survive a wizard-driven region switch
 
-#### `src/slic3r/GUI/GLCanvas3D.cpp` (+4/-1)
-- Null-guard fix: added `get_notification_manager()` null check in existing condition
-- `_update_imgui_select_plate_toolbar()` takes a `force` flag. `IMToolbar::is_render_finish`
-  is set at the end of every plate-toolbar render and is only cleared by
-  `set_enabled(false)` (i.e. when the preview panel is left), so any refresh
-  requested while the preview is already showing was silently dropped. The Helio
-  completion path never leaves the preview panel — `select_tab_silent()` uses
-  `ChangeSelection` and `set_current_panel(preview, true)` re-enables the toolbar
-  without resetting the flag — so the plate items stayed stuck with whatever
-  textures they had when `on_idle` first built them (none, if that happened before
-  the thumbnails were rendered) and the plate preview rendered black forever.
-  The explicit refresh entry points (`update_plate_thumbnails()`, `on_set_focus()`
-  on the preview canvas) now pass `force = true`; the idle path still uses the
-  cache, so textures are not regenerated every frame.
+#### `src/slic3r/GUI/GLCanvas3D.cpp` (+2/-2)
+- Null-guard fix: added `get_notification_manager()` null check in existing condition.
+  This is now the **only** Helio content in this file.
+- **The `force`-flag plate-toolbar workaround was removed at the v2.5.0 sync, because
+  upstream wrote a real fix for the same bug.** Kept here as the worked example of
+  Rule 15 in the other direction — retiring a Helio patch once upstream supersedes it.
+
+  The bug: `IMToolbar::is_render_finish` is set at the end of every plate-toolbar
+  render and was only cleared by `set_enabled(false)` (i.e. when the preview panel is
+  left), so a refresh requested while the preview was already showing got dropped.
+  The Helio completion path never leaves the preview panel (`select_tab_silent()`
+  uses `ChangeSelection`), so plate items stayed stuck with whatever textures they
+  had when `on_idle` first built them — none, if that happened before the thumbnails
+  were rendered — and the plate preview rendered black forever. Helio's fix added a
+  `force` parameter and passed `force = true` from the explicit refresh entry points.
+
+  Upstream v2.5.0 replaced that with a dirty-flag mechanism:
+  `Plater::{mark,clear,is}_plate_toolbar_image_dirty()`, marked from `PartPlate.cpp`
+  and `Jobs/FillBedJob.cpp` and consumed inside
+  `_update_imgui_select_plate_toolbar()`, which now re-renders the thumbnails itself
+  when the flag is set. It also deleted both of Helio's call sites —
+  `GLCanvas3D::update_plate_thumbnails()` (whose only caller was already commented
+  out) and the plate-toolbar block in `on_set_focus()`. Keeping the `force` flag on
+  top would have been a divergence front-running a fix upstream already shipped, so
+  the sync took upstream's and dropped the parameter.
+
+  Net effect: **`GLCanvas3D.hpp` is now byte-identical to upstream and is no longer a
+  touchpoint at all** (it is kept in the list below only as a pointer to this note).
+  If the black-plate-preview symptom ever returns, the thing to check is whether the
+  Helio completion path marks the toolbar image dirty — not to reinstate `force`.
 
 #### `src/slic3r/GUI/GLToolbar.cpp` (+1)
 - Added `wxDEFINE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
@@ -355,8 +439,11 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 #### `src/slic3r/GUI/GLToolbar.hpp` (+1)
 - Added `wxDECLARE_EVENT(EVT_GLTOOLBAR_ACTION_HELIO, SimpleEvent)`
 
-#### `src/slic3r/GUI/Selection.cpp` (+4/-1)
-- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks
+#### `src/slic3r/GUI/Selection.cpp` (+3/-1)
+- Shutdown guard: wrapped `handle_sidebar_focus_event` call in `is_closing()` + null checks.
+- v2.5.0: upstream added its own `is_closing()` early return for the same
+  use-after-free. The sync took upstream's shape and kept only the extra pointer
+  guard, which still covers `plater()` / `canvas3D()` being null outside shutdown.
 
 #### `src/slic3r/GUI/Widgets/SwitchButton.cpp` (+469)
 - **Appended** entire `CustomToggleButton` class + `ExpandButtonHolder` class (no upstream entanglement)
@@ -385,6 +472,11 @@ Files where Helio code is inserted within upstream functions: `Plater.cpp`, `Mai
 - The large handler block goes after `on_slicing_completed()` — find that function and insert after it
 - If upstream renamed `get_slice_result()`, update Helio calls to match
 - If upstream added parameters to functions Helio calls, add defaults
+- `Plater::~Plater` is Helio's and must stay **below** the complete `Plater::priv`
+  definition — it stops the Helio background thread and resets `p` before
+  `~wxWindow()` runs `DestroyChildren()`. v2.5.0 added an upstream
+  `Plater::~Plater() = default;` high up in the file, and the merge kept both with
+  no conflict. See Rule 16; `= default` there reintroduces a use-after-free
 
 **MainFrame.cpp rules:**
 - `ExpandButtonHolder` creation goes in `create_side_tools()`
@@ -578,6 +670,778 @@ branch there, and it now appears in the conflict list of **8 of 13** sync issues
 Both still have `workflow_dispatch`, so either can be run by hand against a sync
 branch if a specific sync warrants it.
 
+**A second, independent reason not to flip that branch filter.** Rule 13's argument
+is about *cost* — editing an upstream-owned file buys a conflict on every future
+sync. But `check_profiles.yml` would also simply **fail today** if it were wired up,
+on data nobody here wrote. It downloads the **nightly** validator built from upstream
+`main`, while this fork is pinned to the v2.4.2 release, so the validator rejects keys
+that were valid at v2.4.2 and removed later. Run against the parity branch:
+
+```
+error: resources/profiles/Qidi/process/fdm_process_n_common.json contains incorrect keys:
+       machine_prepare_compensation_time, which were removed
+error: resources/profiles/Qidi/machine/fdm_qidi_x3_common.json contains incorrect keys:
+       filament_dev_ams_drying_*, ... which were removed
+Validation failed
+```
+
+Both key families are absent from this fork's own `PrintConfig.cpp`, and `git log` on
+both files shows only upstream-sync commits — this is inherited version skew, not
+Helio drift. So enabling it unchanged would red-light every profile PR on day one, on
+top of the conflict cost. Pinning the validator to the matching release, or scoping
+validation to changed vendors, would have to come first.
+
+`scripts/orca_extra_profile_check.py` **does** pass on the parity branch today
+(0 errors, exit 0), so that half could be enabled independently of the validator.
+
+### Rule 14: Inherited CI Trigger Filters (branch & path)
+
+The *reachability* complement to Rule 12: the manifest records whether an inherited
+workflow **should** run here, this rule covers whether it **can**.
+
+Upstream workflows are written for **upstream's** branch layout: they gate on
+`branches: [main]` (plus `release/*`). This fork's release branch is
+`orca-latest-parity-bambu`, so an inherited workflow is **silently inert here**
+unless someone adds that branch to its filter. Nothing fails — the workflow simply
+never starts, which is far harder to notice than a red check. Rule 13's
+`check_profiles.yml` / `check_locale.yml` / `check_profiles_comment.yml` are the
+worked example; that inertness was discovered, not chosen.
+
+When a sync adds or edits a workflow with a `pull_request` / `push` trigger, check
+both filters:
+
+| filter | failure mode if wrong |
+| --- | --- |
+| `branches:` | workflow never runs on this fork's PRs at all |
+| `paths:` | workflow never runs for the file types you care about |
+
+**`paths:` is evaluated before any job-level `if:`.** This matters for the
+`ready-to-build` opt-in on `build_all.yml`: a label cannot start a workflow that the
+path filter excluded, so a profile-only PR carrying `ready-to-build` produced no build
+at all until `resources/**` and `localization/**` were added to the `pull_request`
+`paths:` list (they were already in the `push` list — the asymmetry was the bug).
+
+Note the two rules pull in opposite directions on the same question, and the
+difference is **who owns the file**. Rule 12 says don't edit an upstream-owned
+workflow to make it reachable, because the edit conflicts on every sync. Rule 14 says
+an unreachable workflow is a silent hole. Where both apply, the reachability fix is
+worth its conflict cost only when the workflow does something no Helio-owned file
+could do instead — `build_all.yml` qualifies (it is the build), `check_profiles.yml`
+does not (Rule 13 already guarantees profile parity by construction).
+
+### Rule 15: Upstream code defects are upstream's (do not patch them here)
+
+Rules 11, 12 and 13 each say "upstream owns this, do not diverge" about one asset
+class — branding docs, workflows, profiles. **The same answer applies to upstream
+source code, and this rule says so explicitly**, because its absence is what let
+PR #116 get opened: a two-line patch to `src/libslic3r/Print.hpp`, which is
+upstream code carrying an upstream bug that upstream had *already fixed*.
+
+**This fork maintains Helio code.** A defect in a file Helio has never touched is
+not ours to fix, however well diagnosed and however small the patch looks.
+
+**The cost is not the two lines, it is the divergence.** Rule 12's argument
+applies verbatim: a local edit to an upstream-owned file has to be reconciled at
+every future sync, forever. It also silently adds a Helio touchpoint to the map
+below that nobody decided to take on. Paying that indefinitely to front-run a fix
+upstream has already written — and will deliver on its own with the next sync — is
+a bad trade even when the patch is correct.
+
+**The test — ask git, not the map.** The touchpoint map below is a hand-maintained
+snapshot and it drifts; treating it as the authority fails in both directions,
+and one of them is dangerous (a file Helio has since changed, missing from the
+map, gets disowned as upstream's). Ask the tree instead, against the upstream
+release this branch is synced to (`version.inc` names it):
+
+```bash
+# SoftFever/OrcaSlicer. --force, or a retagged release leaves a stale local tag.
+git fetch upstream --tags --force || { echo "tag fetch failed — baseline may be stale" >&2; exit 1; }
+VER=$(sed -n 's/.*SoftFever_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' version.inc | head -1)
+SYNCED=""
+for cand in "v$VER" "$VER"; do                  # upstream tags both forms
+  # Must exist upstream *now*: --force updates a moved tag but never removes one
+  # upstream deleted, so a local leftover would otherwise answer the question.
+  git ls-remote --exit-code --tags upstream "refs/tags/$cand" >/dev/null 2>&1 || continue
+  if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null; then
+    SYNCED="refs/tags/$cand"; break          # carry the verified ref, not the name
+  fi
+done
+[ -n "$SYNCED" ] || { echo "no upstream tag for $VER — see the baseline caveats below" >&2; exit 1; }
+
+# --ignore-cr-at-eol is load-bearing, not tidiness. See the caveat below.
+git diff --ignore-cr-at-eol --stat "$SYNCED" HEAD -- <file>   # empty? no Helio content*
+git diff --ignore-cr-at-eol        "$SYNCED" HEAD -- <file>   # non-empty? read the hunks
+# * not byte identity — rerun both without the flag if the symptom could be
+#   line-ending-sensitive. See the caveat below.
+```
+
+**Line endings defeat this test silently, and `git blame` with it.** Without
+`--ignore-cr-at-eol` the diff can report a file Helio has barely touched as
+rewritten end to end, which reads as "all of it is ours" — the precise conclusion
+Rule 15 exists to prevent. Upstream ships some files CRLF; where a Helio commit
+normalised one to LF, **every** line differs. Measured on the branch today:
+
+| `.github/workflows/build_all.yml` vs `v2.4.2` | reported delta |
+|---|---|
+| `git diff` (the old command above) | 297 insertions, 269 deletions — the whole file |
+| `git diff --ignore-cr-at-eol` | 76 insertions, 48 deletions — the real Helio delta |
+
+**Ordinary `git blame` fails the same way, and `-w` only half-repairs it.** The
+normalising commit rewrote every line, so plain blame names that commit's author —
+a Helio author — for upstream's content:
+
+```bash
+$ git blame    -L 133,133 .github/workflows/build_all.yml
+aa9c1e368 (Priyesh 2026-03-25 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+$ git blame -w -L 133,133 .github/workflows/build_all.yml   # -w ignores whitespace
+^d0e90c94 (Priyesh 2026-03-12 133)   os: ${{ vars.SELF_HOSTED && ... || 'macos-14' }}
+```
+
+`-w` does see through the normalisation — it moves off `aa9c1e36` — so "no flag can
+recover the attribution" would be wrong. **It still does not answer the ownership
+question**, for two reasons that `-w` cannot touch:
+
+- **Blame answers "which commit last touched this line", not "whose content is
+  this".** A Helio commit that moves, re-indents or re-wraps an upstream line owns
+  the line by blame and owns none of it by Rule 15.
+- **The answer depends on clone depth.** In a shallow clone blame bottoms out at the
+  graft boundary and attributes everything there — the `^` on `d0e90c94` above marks
+  exactly that, in a 51-commit shallow checkout. The same command in a full clone
+  returns something else.
+
+So blame is a lead, never the verdict. **Settle ownership with the hunk diff above.**
+Worked example, the one this caveat exists for: the `macos-14` runner label at
+`:133`/`:144` blames to a Helio commit and is upstream's own line, byte-identical at
+`v2.4.2:.github/workflows/build_all.yml` `:110`/`:121`, and present in **no** Helio
+hunk once CRs are ignored.
+
+**What `--ignore-cr-at-eol` costs: it also hides a Helio line-ending change, and that
+one *is* ours.** The flag ignores carriage returns at end of line, so empty output
+means "equivalent apart from trailing CRs" — **not** byte-identical. If the Helio
+delta in a file *is* the line endings, this command disowns it, and a line-ending
+change is squarely the "caused by a Helio hunk" half of Rule 15 rather than an
+upstream defect. It is not hypothetical damage; CRLF in a shebang is unrunnable:
+
+```bash
+$ git diff --stat                   HEAD~1 HEAD -- s.sh   # 1 file changed, 2 ins, 2 del
+$ git diff --stat --ignore-cr-at-eol HEAD~1 HEAD -- s.sh   # (empty)
+$ ./s.sh
+./s.sh: cannot execute: required file not found
+```
+
+So: `--ignore-cr-at-eol` for the ownership question, and **the unfiltered diff as
+well** whenever the symptom could be line-ending-sensitive — a shell or Python
+script, a shebang, a file some code parses line by line, a checksum or signature
+mismatch, or "works upstream, fails here" with no visible difference.
+
+Scope of the trap, measured rather than assumed: across all 104 files that differ
+from `v2.4.2`, `build_all.yml` is the **only** one where the two commands disagree,
+and no file is a pure line-ending diff. So this is a single known case today — but
+a sync can normalise another file at any time, which is why the flag belongs in the
+command and not in a footnote.
+
+**Before concluding "ours", check whether upstream has already fixed it.** Rule 15's
+cost argument is about front-running a fix upstream has written, so the cheap check
+is whether a release *newer* than our baseline already carries it:
+
+```bash
+git show "refs/tags/<newer-release>:<file>" | grep -n "<the line>"
+```
+
+Worked example, the one that prompted this caveat: `build_all.yml`'s dead `macos-14`
+label (#147) is already `macos-15` upstream in **both** `v2.5.0` and `v2.5.1`. It
+needs no patch here at all — it arrives with the sync, which is PR #151. A local fix
+would have bought a permanent divergence in an upstream-owned file to deliver a
+change already written and already waiting in the queue: #116's mistake exactly.
+
+**Try both tag forms, and verify the tag resolves.** Upstream does not prefix its
+tags consistently, so `helio-upstream-sync.yml` resolves its own baseline with a
+`for cand in "v$VER" "$VER"` loop — this command mirrors that. Assuming
+the `v` prefix makes the check die on an unprefixed release. Bailing out when
+neither form exists is the point: a baseline that does not resolve must stop the
+check, not silently downgrade it to "everything differs, therefore ours".
+
+**A tag that resolves is still only an expectation.** Tags are mutable pointers,
+so `version.inc` naming a release says what we *expect* to hold, never what we *do*
+hold. If upstream retags that release onto a commit we never synced, the lookup
+succeeds and every upstream change between the two commits reads as a Helio
+difference — the rule would authorise exactly the divergence it exists to prevent.
+Demonstrated on a synthetic upstream: before a retag the diff reports the one Helio
+file; after, two, the extra one purely upstream's. **A retagged release is listed
+below with the other cases where the tag is the wrong baseline**, along with the two
+records that do preserve the sha the tag has moved away from.
+
+There is no ancestry check available to catch this automatically here, and it is
+worth saying why, because the obvious guard looks correct and is not.
+`helio-upstream-sync.yml` validates its own candidates with
+`git merge-base --is-ancestor`, but it runs that against the *upstream* commit it
+is about to merge, not against our branch. Our branch cannot answer it: sync PRs
+are squash-merged, which discards upstream ancestry — the very reason the
+merge-base graft exists. Measured on `orca-latest-parity-bambu` today: the tree holds
+v2.4.2's content, `git merge-base --is-ancestor refs/tags/v2.4.2 HEAD` is **false**,
+and an `--is-ancestor` gate would therefore reject every baseline and the check would
+never run. Content matches; ancestry does not. Do not add that guard.
+
+A merge base does still **exist** — the two are different claims and conflating them
+misleads anyone diagnosing an inflated conflict set. `git merge-base v2.4.2 HEAD`
+returns `d6761fedc6` (2026-03-06), an upstream commit from the v2.3.2-rc2 era: the
+squash discards the *recent* shared ancestry, so the base falls back past it to the
+last commit both sides still agree on. That is the same fallback the graft section
+below describes as the cause of the 7,876-file explosion, and it is why the graft is
+needed rather than evidence that ancestry is unavailable.
+
+**Beware measuring this in a shallow clone.** A truncated history makes
+`git merge-base` return empty, which reads as "no common ancestor" and is an artifact
+of the clone, not a property of the repository. Check `git rev-parse
+--is-shallow-repository` before trusting a negative answer here; this file previously
+asserted "no merge-base" on exactly that mistake.
+
+**Never add `--prune-tags` here.** It is the obvious companion to `--force` — the
+flag that *does* remove local tags upstream has deleted — and it would destroy
+this fork's own state. `helio-last-synced` and `helio-last-synced-main` exist only
+here, never upstream, so a prune deletes them: verified on a synthetic clone where
+`--tags --force --prune --prune-tags` left `v1.0` alone and took **both** Helio
+tracking tags with it. That is why the deletion case is handled with a read-only
+`git ls-remote` check per candidate instead. Same shape as the ancestry guard
+above — the reasonable-looking fix is the destructive one.
+
+**Fetch with `--force`, and stop if the fetch fails.** Plain `git fetch --tags`
+refuses to move a tag that already exists locally — it reports
+`! [rejected] … (would clobber existing tag)` and leaves the old commit in place.
+So if upstream retags a release, a repo that fetched the earlier tag keeps
+diffing against it, and the ownership verdict is computed from a baseline that no
+longer exists upstream. Both `helio-upstream-sync.yml` and `helio-upstream-watch.yml`
+already fetch `--tags --force`; this command matches them. The rejection does exit
+non-zero, so the guard catches it — without one the script runs on regardless and
+answers from whatever stale tags happen to be local, which is the wrong-baseline
+failure this rule exists to prevent.
+
+**`--stat` answers the first question, the patch answers the real one.** A diffstat
+shows *whether* the file differs, which settles the empty case for **content** — no Helio
+content in it, so a content defect is not ours, stop. (Not byte identity, and so not the
+line-ending case: see the caveat above.) It cannot settle the non-empty case, because ownership
+turns on **where** the defect sits, and a file-count tells you nothing about that. Run
+the second command and read the hunks. Treating the stat as the whole test is how
+"this file differs" quietly becomes "this file is ours", which is the exception this
+rule spends a section closing.
+
+**`$SYNCED` carries the verified `refs/tags/` ref, not the bare tag name**, so the
+ref that was checked is the ref the diff uses. Verifying `refs/tags/$cand` and then
+handing a bare `$cand` to `git diff` makes the verification decorative: git resolves
+`refs/` before `refs/tags/`, so a stray `refs/<tag>` answers the ownership question
+from a different commit. A same-named *branch* is not the hazard — `refs/tags/`
+outranks `refs/heads/` — which is exactly why the bare form looks safe until it
+isn't. Same defect as the one fixed in `helio-upstream-watch.yml` (#118).
+
+**Derive the tag, never hardcode it.** `version.inc` names the release this branch
+holds, so the command above follows the branch as it advances. A literal tag rots
+the moment a sync lands, and it rots in the dangerous direction: compared against
+a release older than the one we hold, a file we merely *inherited* from a later
+release shows a non-empty diff, reads as Helio-owned, and this rule then waves
+through exactly the patch it exists to prevent.
+
+**Empty output means no Helio content in the file** — so a content defect in it is not
+ours. It does **not** mean byte-identical: the flag ignores trailing CRs, so a file whose
+only Helio delta is its line endings reads as empty here and is still ours (the caveat
+above has the shebang demonstration). Non-empty means *something* differs, which
+is a prompt to read the diff, **not** by itself proof of Helio ownership: check
+whether the hunks are Helio's or upstream changes made after the baseline.
+
+**`version.inc` names a tagged release, so it is the right baseline only for a
+tag-mode sync.** Three cases break it, all in the dangerous direction — content we
+merely inherited shows as a difference and reads as Helio-owned:
+
+- After a **`main`-mode sync** (`sync_target: main`) the tree holds upstream commits
+  newer than any tag, while `version.inc` may still name the last release.
+- A **local version bump** landing before the content it names — a case the sync
+  workflow already guards against for its own baseline.
+- A **retagged release**: upstream moves the tag we synced onto a different commit.
+  The name still resolves, so nothing looks wrong, and the whole delta between the
+  commit we took and the one the tag now names is attributed to Helio.
+
+When any of these applies, compare against the upstream **commit** the branch
+actually holds rather than the tag. Two records may carry that sha — **neither is
+immutable**, so check them in this order and treat what you find as evidence rather
+than proof:
+
+- **The auto-created `upstream-sync` issue**, whose resolution steps embed the
+  literal sha as `git merge <sync_sha>` — and, when a graft was needed, the previous
+  upstream commit as well. Issue #98 is the worked example: it names
+  `8500fcdccaa10b5099ac20d252af3a7c560046f1` for v2.4.2 (verified to match what
+  `refs/tags/v2.4.2` resolves to) and `19db9aa9c…` as that sync's graft base. **The
+  best route available today — but conditional, not durable.** The issue is deduped
+  by a title built from the tag (`Upstream sync failed: <tag> (merge conflicts)`) and
+  a later run that matches that title **overwrites the body** with its own sha. The
+  key is the tag, which is precisely what a retag moves: sync `v2.4.2` from A and the
+  issue holds A; upstream retags `v2.4.2` to B; the next conflicting run for `v2.4.2`
+  finds that same open issue and replaces A with B. In the one scenario this fallback
+  exists for, it can erase the answer it was holding. Read it **before** re-running a
+  sync for that tag, and copy the sha somewhere immutable if it matters.
+- **A clean sync's own commit** — with two caveats that currently make it the weaker
+  route. The workflow squashes the sync branch with
+  `-m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})."`, so grep
+  with `git log --grep='Squashed single-commit sync'`. But:
+
+  **The sha may not be there.** No sync has yet taken the clean path — every one so
+  far hit conflicts and was squashed by hand via step 4 below, whose template carries
+  the tag only, and those commits reproduce the same opening sentence *without* the
+  sha. `ce472ef4` (v2.4.2) and `eaf3cb948e` (v2.4.1) both match the grep and contain
+  no sha at all. A matching subject line is not the record; the sha is.
+
+  **And that commit is not on the release branch.** The workflow's commit lives on
+  the sync branch, which is then *squash-merged* — mandated, for the verified-
+  signatures rule — producing a fresh commit with the release-branch tip as its only
+  parent. `ce472ef4` has exactly one parent for this reason. GitHub's squash normally
+  copies a single commit's message into the new one, but the merger can edit it
+  freely, so survival is a default rather than a guarantee. Once the sync branch is
+  deleted, whatever the squash did not copy is gone. Grep the release branch, and if
+  the sha is not in the commit you find, go back to the issue.
+
+Two things do **not** answer this, and both look like they should:
+
+- **The resolver's squash commit.** Step 4 of those same issue instructions squashes
+  with `-m "Upstream sync: <tag> into <target-branch> (squashed)"` — tag only. So a
+  conflict-resolved sync loses the sha at exactly the step where the clean path keeps
+  it, and `ce472ef4` (v2.4.2, conflict-resolved) has no sha in its body. The issue is
+  the record there, not the commit.
+- **The tracking tags.** `helio-last-synced` points at `v2.3.2-rc2` (2026-03-06)
+  while the branch holds v2.4.2 — five months and two releases behind, because the
+  workflow's token cannot update it. `helio-last-synced-main` is stale the same way.
+  Historical markers, never the current baseline.
+
+**Nothing here is immutable**, which is the honest summary: the issue can be
+overwritten or deleted, the release-branch commit carries the sha only if a squash
+happened to copy it, and the tracking tags are stale. Recording the sha somewhere
+that cannot be rewritten is tracked in #120. Until that lands, if the sync predates
+these records or they no longer agree, and you cannot establish the baseline
+confidently, treat ownership as unresolved and ask — an unresolved answer is
+recoverable, a wrong "this is ours" becomes a permanent divergence.
+
+Use the map as a quick first look and for the *why* (it records what each
+touchpoint is for), but let the git comparison settle disagreements — **provided its
+baseline is sound.** The comparison cannot drift the way a hand-maintained list does:
+nobody forgets to update it. But it is only ever as good as the commit it is run
+against, and the cases above — a retagged release, a `main`-mode sync, a version bump
+landing early — all produce a *confidently wrong* answer rather than an obviously
+broken one. Verify the baseline first; where it cannot be established, neither source
+settles anything and ownership stays unresolved.
+
+For #116 both agreed: `Print.hpp` appears zero times in the map, and its
+blob is byte-identical to `v2.4.2`. The question was answered before the PR was
+opened; nothing had told anyone to ask it.
+
+**"But it is breaking our CI" is not an exception.** That was exactly #116's
+reasoning: an upstream defect made a test fail intermittently, the red check
+blocked a Helio PR, and fixing upstream's code looked like the direct route to
+green. The blocker was real; the conclusion did not follow. When an upstream
+defect costs us something:
+
+1. Confirm our diff did not cause it. From the PR's branch:
+
+   ```bash
+   git fetch helio refs/heads/orca-latest-parity-bambu || { echo "fetch failed — base unknown" >&2; exit 1; }
+   git diff --stat FETCH_HEAD...HEAD          # what this fetch just brought, nothing else
+   ```
+
+   **Fail closed, and diff `FETCH_HEAD` — not a named ref.** Both hazards here point
+   at "nothing of ours changed", which files a regression we caused as inherited and
+   then step 3 says not to fix it, so this step must never answer from anything the
+   fetch did not just produce.
+
+   Naming the branch is wrong twice over. `helio/orca-latest-parity-bambu` is a
+   shorthand git resolves as `refs/<name>` → `refs/tags/<name>` → `refs/heads/<name>`
+   → `refs/remotes/<name>`, so a stray `refs/helio/orca-latest-parity-bambu` outranks
+   the remote-tracking ref. Spelling out `refs/remotes/helio/…` fixes that and still
+   fails, because **the fetch may never write that ref**: if `remote.helio.fetch` is
+   restricted — a clone made with `git remote add -t <branch>`, for instance — then
+   `git fetch helio orca-latest-parity-bambu` updates only `FETCH_HEAD` and **exits
+   0**, so the guard does not fire and a remote-tracking ref left over from some
+   earlier, broader fetch quietly supplies the baseline. Verified: with
+   `+refs/heads/feature:refs/remotes/helio/feature` configured, that fetch returned 0
+   and `refs/remotes/helio/orca-latest-parity-bambu` did not exist afterwards.
+
+   `FETCH_HEAD` is written by the fetch on the line above, so it is neither
+   shadowable nor stale. Simpler than the pinned ref, and correct in cases the
+   pinned ref is not.
+
+   **Fetch `refs/heads/…`, not the bare branch name.** `FETCH_HEAD` fixes which ref
+   answers *locally*; the fetch's **source** argument is a refspec resolved against
+   the remote and is separately ambiguous. Give it a bare name and a same-named tag
+   on `helio` wins — so `FETCH_HEAD` holds the tag, and the three-dot diff below
+   compares against it. Verified on a synthetic remote carrying both:
+
+   ```
+   fetch 'orca-latest-parity-bambu'            -> 7b7daf44c6   (the tag)
+   fetch 'refs/heads/orca-latest-parity-bambu' -> 2605974be6   (the branch)
+   ```
+
+   Both fetches exit 0, so the guard catches neither. Every ref this rule consumes is
+   now fully qualified — `refs/tags/` for the ownership baseline, `refs/heads/` here.
+
+   **List everything the branch changed and read it — do not filter by a path
+   list.** An allowlist of "build inputs" is the wrong shape here: miss one entry
+   and the command prints nothing, the failure is filed as inherited, and step 3
+   then says not to fix it — so a regression we actually caused goes unowned. The
+   surface is wider than it looks: `src/`, `tests/`, `deps/`, `deps_src/`,
+   `resources/`, `cmake/`, `CMakeLists.txt`, `version.inc`, the `build_*.sh` /
+   `build_*.bat` scripts, `.github/workflows/build_*.yml`, and `scripts/` all
+   reach the built or tested artifact.
+
+   Inherited means the changed files **cannot** affect the artifact — documentation
+   and repo metadata that no build or test step reads. Anything else, assume ours
+   until shown otherwise.
+
+   "Assume ours" means **look before concluding inherited**, not block or escalate.
+   The look is bounded: does the failing job read any of the changed paths? For a
+   PR that touched only an unrelated workflow, answering that takes a minute and
+   the answer is usually no. Spending that minute unnecessarily is the cost this
+   default deliberately accepts, because the opposite error — filing our own
+   regression as upstream's, where step 3 then tells everyone not to fix it — is
+   the one that leaves a real bug unowned.
+
+   Use the three-dot form: it diffs from the **merge base**, so a release branch
+   that moved on after the branch was cut does not show up as changes this PR
+   made. Two-dot answers a different question and can implicate a PR that touched
+   nothing.
+2. Record it as an issue so the next person does not re-investigate it (#115 is
+   the worked example), including the upstream commit that fixes it if there is one.
+3. Rebuild, or wait for the sync that carries the fix. Do not patch, and do not
+   quarantine a test to make it quiet either.
+
+**Do not report it upstream on Helio's behalf** unless doing so serves Helio.
+Filing issues or PRs upstream is a maintenance commitment — follow-up, review
+rounds, defending the change — and this fork has not taken that on.
+
+**Where this genuinely is ours:** the defect is in Helio code, the defect is in
+Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/**`), or **the
+defect sits in a Helio hunk of a shared file — or is caused by one.**
+
+That last one is deliberately about the *hunk*, not the file, and the distinction
+does real work. A Helio touchpoint is usually a handful of lines inside a mostly
+upstream file: `src/slic3r/GUI/Plater.cpp` is our heaviest at +2319/-182, and it is
+still overwhelmingly upstream code. "The file carries Helio changes, therefore the
+defect in it is ours" would hand us every upstream bug in every file we have ever
+touched — which is the patch this rule exists to prevent, arriving through its own
+exception. It would also contradict the diff test above, which says outright that a
+non-empty diff is a prompt to read the hunks, not proof of ownership.
+
+So read the hunks and ask where the defect lives. Inside Helio's lines, or produced
+by them (an upstream function misbehaving *because* of what we changed) — ours. In a
+region byte-identical to upstream, in a file that happens to carry Helio changes
+elsewhere — upstream's, and the fact that we edited another part of the same file
+does not alter that.
+
+For the hunk test, **map membership is not the qualifier — the diff above
+is.** A file can sit in the map having lost its Helio content, because the change
+was reverted or upstream absorbed an equivalent one, and the map is not updated
+when that happens. Taking the listing as proof would have someone patching
+upstream-identical code on the strength of a stale line in a document, which is
+the divergence this rule exists to stop. The map says *where to look and what the
+touchpoint was for*; `git diff` against the synced baseline says whether it is
+still there.
+
+### Rule 16: A clean merge can still duplicate a definition
+
+Every other rule here is about resolving a conflict. This one is about the
+opposite: a merge git reports as **clean** that is nevertheless broken, because
+git compares *text at locations*, not *symbols*.
+
+**The shape.** Neither side has a definition at the merge base. Upstream adds
+one. Helio independently adds one, in a different place in the same file. Both
+additions are insertions into unrelated regions, so there is no textual overlap,
+no conflict, and no marker — and the merged file now defines the same symbol
+twice.
+
+**The worked example (v2.5.0, `Plater.cpp`).** `Plater::~Plater` was undefined at
+`v2.4.2`. Upstream v2.5.0 added `Plater::~Plater() = default;` immediately after
+the `Plater::priv` class body. Helio had added a real destructor ~5,700 lines
+further down. The merge took both, and the build failed with
+`redefinition of '~Plater'`.
+
+Helio's had to win, and that part is not a judgement call — it is load-bearing:
+
+```cpp
+Plater::~Plater()
+{
+    if (p) {                                  // stop the Helio background thread
+        p->helio_background_process.stop();
+        if (p->helio_background_process.m_thread.joinable())
+            p->helio_background_process.m_thread.join();
+    }
+    p.reset();   // BEFORE base ~wxWindow() runs DestroyChildren()
+}
+```
+
+`= default` destroys members in declaration order, which reintroduces exactly the
+use-after-free the comment guards against: `DestroyChildren()` →
+`GLCanvas3D::~GLCanvas3D()` → `Selection::clear()` → `canvas3D()` dereferencing an
+already-destroyed `priv`. Note it must also stay *below* the complete `Plater::priv`
+definition, so "move it up to where upstream put theirs" is not an option. Leave a
+comment at upstream's location saying why nothing lives there, or the next sync
+restores it.
+
+**Why none of the usual post-merge checks catch it.** There is no conflict marker
+to grep for. No Helio identifier went missing, so the `helio|Helio|thermal_index|
+EVT_HELIO` sweep passes. The diff reads as two unrelated additions, which is why
+three Codex passes over it said nothing. **Only a compile finds this** — which is
+the concrete reason the build-verification step is not optional on a sync.
+
+**How to look for it without a compiler.** `scripts/helio/find_merge_doubled_defs.py`:
+
+```bash
+# --ours is the Helio tip as it was BEFORE the merge, not the merge result
+scripts/helio/find_merge_doubled_defs.py --upstream v2.5.0 --ours <pre-merge-tip>
+```
+
+For each file the sync touched it lists every symbol defined more than once in the
+merged tree, then drops any already defined more than once in *either* parent —
+those are ordinary overload sets, and they are the overwhelming majority (on
+v2.5.0, 466 raw duplicates reduced to 1). Exit status is 1 when it finds
+something, so it can gate a sync.
+
+**Validate it before trusting a zero.** Re-run with `--merged` set to a commit you
+know carries the bug and check it reports it; a scan that finds nothing is
+worthless until you have watched it find something. For v2.5.0, `--merged 71930bc`
+returns exactly `Plater::~Plater` and nothing else.
+
+The same shape applies to any one-definition-per-program entity, not just
+destructors: a non-inline free function, a static data member's definition, an
+explicit template specialisation. It cannot happen for a *declaration* in a
+header, which merely re-declares, but it can for a default argument or an
+in-class initialiser, which also may appear only once.
+
+## Experimental channel
+
+Helio ships unfinished features on a second release channel. The design goal is
+that an experimental build is **impossible to mistake for a finished one**, and
+that graduating a feature to stable costs nothing.
+
+### The shape
+
+**Experimental code lives on the release branch**, behind
+`helio_experimental_features_enabled()` in `src/libslic3r/HelioChannel.hpp`. It
+is present in the source and absent from a stable build. `helio-experimental` is
+a **two-line branch** — that header and the version in `version.inc` — re-cut
+from the release branch whenever a build is wanted.
+
+That is the opposite of the obvious arrangement (feature branch holds the code),
+and the reason is graduation. Code on a branch has to be *ported* to stable: a
+merge, a re-review, a re-test of something that has already been tested. Code on
+the release branch graduates by deleting its gate, and what stable ships is
+byte-identical to what the testers ran.
+
+The channel comes from checked-out content rather than a build flag because the
+compile is done by upstream-owned `build_orca.yml`, which builds the ref as-is.
+Teaching it a "build with feature X" input means editing an upstream file, and so
+a conflict on every future sync. A two-line branch costs nothing and cannot
+disagree with what was actually compiled.
+
+Gates are `constexpr`, never `#if`, so both sides of every channel-dependent path
+are compiled on both channels. A typo in experimental-only code then fails the
+stable build instead of surviving until an experimental release is cut.
+
+### Experimental builds are offered to stable users on purpose
+
+This is a product decision and it is easy to mistake for a bug, so it is written
+down here. The in-app update check reads **this fork's own releases**
+(`VERSION_CHECK_URL` in `AppConfig.cpp`), and `check_stable_update_only`
+**defaults to false**. A GitHub prerelease is therefore offered to every user who
+has not ticked that box — which is the intended behaviour: users should know the
+experimental build exists and be able to try it.
+
+What keeps it honest:
+
+- the release is a **prerelease**, so it is not "Latest release" and a user who
+  has ticked *Check for stable updates only* is never shown it;
+- the update dialog carries that checkbox next to Skip / Cancel, so the opt-out
+  is one click away at the moment it matters;
+- the dialog renders the **release body verbatim**, and `helio-release.yml`
+  makes that body lead with what the build is, that it replaces the existing
+  install, and how to stop being offered them;
+- the app says it again on first launch of each experimental version, and marks
+  experimental features where they appear.
+
+### The version rule (the part that is easy to get backwards)
+
+An experimental version must be exactly `X.Y.Z-expNN`, must sort **above the
+newest stable release**, and must sort **below the stable release it
+anticipates**: `2.4.3-exp01` against a `2.4.2` stable.
+
+| version | result |
+|-|-|
+| `2.4.3-exp01` | correct — offered to 2.4.2 users, superseded when 2.4.3 ships |
+| `2.4.2-exp01` | **publishes, looks healthy, is offered to nobody** — the update check skips any release not newer than what the user runs |
+| `2.4.3` (no marker) | replaces the stable release in the prompt instead of being a preview; testers are never moved back onto stable |
+| `2.4.3-exp.1` | **invalid to every released build** — see below |
+| `2.4.3-exp1` | parses, but `exp9` sorts *above* `exp10`, so the tenth build of a version looks older than the ninth |
+
+**Why the format is this rigid — and why the C++ cannot fix it.** `get_version()`
+applies its regex with `std::regex_match`, so the *whole* version string must
+match, and the prerelease group is `(-[A-Za-z0-9]+)?` — no dot. A dotted
+prerelease parses as invalid, and `consider_release()` drops that release
+without a word: published, listed on the Releases page, offered to nobody.
+
+The instinct is to widen the parser. It does not work. The clients that have to
+read an experimental release are the **stable builds already installed on users'
+machines**, and their copy of that regex was fixed when they were compiled.
+Widening it today would only help builds that do not exist yet, so the published
+*version format* is the only side of this that can be changed. `version_channel.py`
+therefore carries the deployed regex verbatim as `DEPLOYED_MATCHER` and refuses
+anything it would reject — for both channels.
+
+The zero-padding is the other half: prerelease identifiers that are not purely
+numeric compare as strings. Both facts were verified against the shipped matcher
+and against `deps_src/semver`, the library the app actually links.
+
+**The same constraint governs the tag, not just the version** — and that is the
+easier half to forget, because `consider_release()` takes the offered version
+from the **tag**, never from the binary's own `SoftFever_VERSION`. A tag can
+therefore misrepresent the build it points at, so `version_channel.py check-tag`
+validates the final tag on every path that can produce one:
+
+| tag | why it fails |
+|-|-|
+| `helio-exp-v2.4.3-exp01-<sha>` | a second `-` component; the deployed matcher rejects it and the rebuild reaches nobody |
+| `helio-v2.4.2-<sha>` | parses, but sorts *below* the 2.4.2 it re-cuts, so it is offered to nobody |
+| `helio-exp-v9.9.9` | right prefix, wrong version: a 2.4.3-exp01 binary would advertise itself as 9.9.9 for ever, and no later stable release would supersede it |
+
+So a collision is disambiguated with semver **build metadata** (`+<sha>`), which
+the matcher accepts and which has equal precedence — the right meaning for
+re-cutting a version that already shipped. A `tag_override` must likewise be the
+computed tag, optionally with build metadata.
+
+`scripts/helio/version_channel.py` enforces all of this at release time and
+refuses to publish otherwise; `scripts/helio/test_release_channel.py` pins the
+rules, including the silent case, and runs in `helio-sync-guard-tests.yml`.
+
+### The bridge release
+
+**No experimental release can reach anyone until a stable release containing the
+new tag parser has shipped.** The builds users already have installed decide what
+to offer, and every build released before the experimental channel existed strips
+only `helio-v` or a leading `v` from a tag. A `helio-exp-v…` tag reaches their
+version matcher unstripped, fails it, and `consider_release()` drops it silently:
+
+```cpp
+// check_new_version_sf() as compiled into helio-v2.4.2 and every earlier build
+if (tag starts with "helio-v")  tag.erase(0, 7);   // "helio-exp-v…": no match
+else if (tag.front() == 'v')    tag.erase(0, 1);   // "h…": no match
+Semver tag_version = get_version(tag, matcher);    // regex_match fails
+if (!tag_version.valid()) return;                  // release dropped, no message
+```
+
+Two fixes were possible, and **the chosen one is the bridge**:
+
+- *(rejected)* Tag previews `helio-v2.5.1-exp01`, which old builds already read.
+  It reaches them immediately, but the tag prefix stops separating the channels.
+- **(chosen)** Keep `helio-exp-v`, and ship one ordinary stable release that
+  contains the new parser first. That release is the **bridge**. Anyone who
+  installs it can see previews from then on, and anyone still on an older build
+  cannot, which is the same reach any stable release has.
+
+`helio-release.yml` enforces it. For an experimental release, the `check` job
+lists **published** GitHub releases (not drafts, not prereleases, not ones with no assets) through the
+API, keeps the final-shaped ones (`helio-v<X.Y.Z>`, optional `+metadata`), and
+looks for one whose own tagged `src/slic3r/GUI/GUI_App.cpp` references
+`HELIO_EXPERIMENTAL_TAG_PREFIX`. That tag is passed as `--bridge-release`, and
+`version_channel.py` refuses an experimental release when there is none.
+
+- **Readable by installed builds.** The bridge is itself an update those builds
+  must be offered, so its whole tag, build metadata included, must pass the
+  matcher they shipped with (`version_channel.py deployed-readable`).
+  `helio-v2.5.1+bridge.1` is valid semver and a valid tag, but released builds
+  reject the dot, so it does not count (Codex, #130).
+- **Releases, not tags.** A tag proves nothing about what users could
+  download: it can be pushed before its release, or outlive a release that was
+  deleted or turned back into a draft (Codex, #130).
+- **Source, not a version number.** Reading the tagged tree means the check
+  cannot drift from what actually shipped.
+- **Fails closed.** If the API call fails, or a published release's tag cannot
+  be inspected, there is no bridge. An experimental release is then refused,
+  and a stable release is unaffected.
+- **CI uses `--tree-only`.** `helio-sync-guard-tests.yml`'s "Check this tree's
+  own channel" step checks a branch's consistency, not what has been published,
+  so it skips this rule. The flag is opt-in, and a release never passes it.
+
+`test_release_channel.py` runs the real step against real tags, with the
+release list served through the step's own `--jq` filter. It covers: refused
+before any bridge; an unpublished tag, a draft, a prerelease, a release with no assets, an uninspectable
+release and an API failure all refused; accepted once a final release is
+published on a tree with the parser.
+
+**In practice:** the first stable release cut after this lands (planned:
+`helio-v2.5.1`) is the bridge. Previews can start after it is published.
+
+### Cutting an experimental release
+
+0. **A bridge release must already be published** (see above). The release
+   workflow refuses otherwise.
+1. Re-create the branch from the release branch:
+   `git checkout -B helio-experimental orca-latest-parity-bambu`
+2. In `src/libslic3r/HelioChannel.hpp`, set `HELIO_EXPERIMENTAL_BUILD` to `1` and
+   `HELIO_RELEASE_CHANNEL` to `"experimental"`. **Both lines** — the release
+   workflow refuses a header that contradicts itself.
+3. In `version.inc`, set `SoftFever_VERSION` to the next patch with an `-expNN`
+   marker (`2.4.3-exp01`) — two digits, zero-padded, no dot.
+4. Push, then dispatch `helio-release.yml` from that branch.
+
+The graduation step, when a feature is ready, is to delete its
+`helio_experimental_features_enabled()` call. Nothing moves between branches.
+
+## Temporary backports from upstream `main` (drop at the next sync)
+
+Upstream build fixes copied in **verbatim**, ahead of the upstream release that will
+carry them. Each fixes CI that was red on every PR. The mechanism keeps divergence at
+zero by copying upstream's own text rather than writing a Helio fix — but **the rows do
+not share one approval, and this section is the decision record, so read the status per
+row.**
+
+- **Rows 1–3** arrived with the v2.5.1 sync itself (#163, #164). The repo owner decided
+  not to merge with red CI, making these a deliberate, **owner-approved** exception to
+  Rule 15's "wait for the sync".
+- **Rows 4–5** (the two `wxWidgets` rows) were added afterwards, when the first
+  post-sync dependency build went red on **every** platform at once — all six
+  `Build Deps` legs and both Flatpak jobs, on PRs and on the release branch's own
+  post-merge run. They follow the same reasoning and the same verbatim-copy discipline,
+  but they were **not** covered by that decision and are **awaiting a separate owner
+  decision** (#167). Do not cite rows 1–3's approval for them.
+
+If the owner declines rows 4–5, the alternative is not "no fix" but "no build
+verification": while the pin is broken, no PR in this repo can exercise the build
+matrix at all.
+
+| file | fixes | upstream source |
+|---|---|---|
+| `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
+| `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
+| `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
+| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path. Our copy is **byte-identical**, pinned to an immutable reference rather than to a moving branch: blob `2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, which is what both `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` and the same path at upstream `main` `ced396fedc05842467f147ec67e926e4eb577faf` resolve to (checked 2026-11-21) |
+| no `branch:` + `disable-shallow-clone: true` on the `wxWidgets` git source in `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | Both Flatpak jobs: `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…` | `main`, same path |
+
+**At the next sync, take upstream's version of every row.** The two `deps/` rows and
+`deps/wxWidgets/wxWidgets.cmake` should merge cleanly, because both sides hold identical
+text. For `wxWidgets.cmake` that is checkable against a fixed revision rather than against
+whatever `main` says today — `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` is blob
+`2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, and so was upstream `main` at
+`ced396fedc05842467f147ec67e926e4eb577faf`. While that holds the merge is a no-op; if
+upstream has since changed the file, the blob will differ and the row stops claiming
+identity, which is the point of naming it. **Do not check this against the `v2.5.1` tag** —
+the release predates the fix and still carries `GIT_SHALLOW ON`, so comparing there shows a
+difference and invites the wrong conclusion that the backport diverges from upstream.
+The `build_all.yml` Flatpak row will not: upstream moved the job into
+`build_flatpak.yml`, so drop our volume line from `build_all.yml` when that restructure
+arrives.
+
+`scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` needs one caution. Only the `wxWidgets`
+git source was backported; upstream `main` additionally bumps gstreamer, OpenSSL (1.1.1w
+→ 3.5.9), CURL (7.75.0 → 8.23.0) and comments out the OpenVDB-only sources **in the same
+file**. Those are deliberately *not* here — they are ordinary upstream dependency changes
+that must arrive with a sync and be built, not hand-carried. So expect a conflict in that
+file and take upstream's whole version; do not read our smaller diff as the only change
+the file needs.
+
+Then delete this section.
+
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a
@@ -596,8 +1460,10 @@ to **7,876** because the base fell back to `v2.3.2`.
 
 **The fix (automated in `helio-upstream-sync.yml`).** Before merging, the
 workflow ephemerally grafts the upstream commit our content is based on onto the
-branch tip. For tag-release syncs that commit is derived from `version.inc`
-(authoritative — it names the synced release); for `main` syncs it comes from the
+branch tip. For tag-release syncs that commit is derived from `version.inc` (it
+names the synced release) provided it is a **strict** ancestor of the sync target —
+see the rules below for why that qualifier matters; for `main` syncs it comes from
+the `upstream-commit:` record on the previous sync commit, falling back to the
 `helio-last-synced-main` tracking tag (`version.inc` would name an older release
 there and must not be used):
 
@@ -615,6 +1481,403 @@ first, or you will face the full (inflated) conflict set instead of the real del
 
 **Never** merge an upstream-sync PR with "Create a merge commit" — it both
 violates the signature rule and re-flattens on the following sync. Always squash.
+
+**The other side effect: "already synced" becomes hard to detect.** Every cheap
+test for "have we got this release already?" reasons about **ancestry** — is the
+target an ancestor of `HEAD`, does a trial merge apply cleanly — and ancestry is
+precisely what the squash destroyed. In August 2026 that produced #107: an empty
+PR re-proposing `v2.4.2` three and a half hours after #96 merged it, which would
+have recurred every Monday (#110). The workflow now answers the question with
+**four** guards, cheapest first. Two of them still reason about ancestry and are
+kept only as cheap early exits; the authoritative one does not:
+
+| guard | when | basis | can it skip on its own? |
+| --- | --- | --- | --- |
+| `version.inc` equals the target | before any merge | a version *string* — sets an expectation only | **no** |
+| tracking tag equals the target | before any merge | a commit id, only ever written after content was validated | yes |
+| ancestor check / trial merge | before the graft | **ancestry-dependent** — only meaningful when history was not flattened, which after a squash it always is | yes |
+| **merged tree == target-branch tree** | after the grafted merge | content: "did this change anything?" | yes — **this is the authority** |
+
+The last one is the backstop and cannot be fooled: if the merge produces a tree
+identical to the release branch's, there is nothing to propose, whatever the
+history says. It skips the PR, records why in the job summary, and advances the
+tracking tag.
+
+**`version.inc` deliberately cannot skip a run by itself.** It is a version string
+in a file, and the release it names can stop describing the tree without the file
+changing — upstream force-retagging a release we already synced, or a local version
+bump landing before the content. Either way the string equals the sync target while
+the target's content is absent, and skipping there would **silently drop upstream
+work**, with every later run reaching the same wrong conclusion. That failure is
+invisible; the empty PR of #107 was merely noisy. So `version.inc` selects the
+baseline and sets an expectation, and the merged-tree comparison decides.
+
+### The `upstream-commit:` baseline record
+
+The squash step writes two lines as the **final paragraph** of every sync commit:
+
+```text
+upstream-commit: <40-hex upstream sha>
+upstream-sync-mode: tag|main
+```
+
+**Why it exists, given `version.inc` and the tracking tag.** It is for `main` mode.
+There `version.inc` is deliberately excluded — it names a *release*, and a `main`
+sync is ahead of it — so the only other candidate is `helio-last-synced-main`, a tag
+that is mutable and, **with the workflow's current `GITHUB_TOKEN`, cannot be
+written**: pushing it makes upstream's `.github/workflows/**` reachable, and a
+GitHub App token may not introduce workflow content without the `workflows`
+permission — which a workflow's `permissions:` block cannot grant. That is a
+property of the credential, not of the repository: a PAT with `workflows` scope
+could write it, at the cost of a long-lived credential able to rewrite workflow
+files. See "Why the push is refused" below for the full diagnosis and the three
+options, none of which has been chosen. So as things stand a `main` sync has no
+durable baseline. A trailer on the commit is immutable, travels with the branch,
+and needs no permission beyond committing.
+
+It only **adds a candidate**. It is content-validated alongside every other one, so
+a record that disagrees with the tree loses to one that matches it.
+
+Four properties are load-bearing; changing any of them breaks it silently:
+
+- **The two lines must be adjacent**, and the mode must match. That is what stops a
+  message quoting an older record from being spliced onto a newer one.
+- **The last such pair in a message wins** — a commit's own record is written below
+  anything it quotes.
+- **Read the full message, not `%(trailers:…)`.** Git parses trailers only from the
+  last paragraph, and GitHub appends `Co-authored-by:` in a paragraph of its own
+  when it squash-merges a PR with more than one commit author, which drops the
+  record.
+- **`git log --grep` is a candidate filter, not the answer.** It matches when both
+  patterns appear anywhere, including non-adjacently, so parsing only the newest
+  match lets one malformed commit **shadow every valid record beneath it**. Walk
+  candidates newest-first and take the first that yields an adjacent pair.
+- **The repository's squash-merge message setting must stay "PR title and commit
+  details."** The record lives in the sync commit's message, and only that setting
+  copies commit messages into the squash commit. Under *PR title and description*
+  the squash body comes from the PR description instead, and under *PR title only*
+  there is no body at all — under either, the record is dropped at merge and every
+  later sync silently falls back to `version.inc` or the tracking tag. Nothing in
+  this repository can detect that; it is a toggle in **Settings → General → Pull
+  Requests** that any admin can flip.
+
+  It is currently correct, established from merged commits rather than from the
+  settings page: `3c3dec5e` (#113, a multi-commit branch) carries GitHub's
+  `*`-bulleted concatenation of that branch's commit messages, and `ce472ef4`
+  (#96, a single-commit branch) carries its commit message verbatim. Both are
+  `COMMIT_MESSAGES` behaviour — under *PR title and description* the first would
+  have opened with that PR's `# Description` template instead. **If you ever need
+  to re-check this, that is how**: look at the shape of a recent squash commit's
+  body, not at anything in the tree.
+
+  This is also why the record is not additionally copied into the generated PR
+  body. A second copy would survive a setting change, but it can drift from the
+  first — this PR shipped exactly that bug once (`7e0d05bf`, a reused PR whose
+  body kept the previous SHA). One record plus this note beats two records that
+  can disagree.
+
+When resolving a sync by hand, carry the record into your commit — the same two
+lines, adjacent, as the final paragraph, naming **the commit you actually merged**.
+
+Three further rules keep the baseline honest, and all of them are load-bearing:
+
+1. **Every write of the tracking tag must be backed by content** — an ancestry hit,
+   a clean no-diff trial merge, the tree-level content test, a merged resolution
+   PR for the exact target commit, or an identical merged tree. That is what lets
+   the tag (unlike `version.inc`) skip a run on its own.
+
+   "A sync PR was opened" is **not** such evidence, and the workflow used to treat
+   it as if it were: the tag advanced as soon as the PR was created. That made the
+   tag a record of intent while the rest of the workflow read it as a record of
+   content, and two silent drops followed. A PR closed unmerged left the tag at a
+   release the branch never received, so the `check` step skipped it for good; and
+   while the PR merely sat open, the next release grafted that unreceived commit as
+   the merge base. The tag now moves only once the content is on the target branch —
+   the first run after the sync PR merges takes one of the paths above and
+   advances it there. Until then each run redoes the merge and refreshes the same
+   PR, which is the honest description of the state: not synced yet.
+2. **The graft base must be a *strict* ancestor of the sync target.**
+   `git merge-base --is-ancestor` is true for a commit and itself, so a `version.inc`
+   naming the target would otherwise graft the target onto the branch tip, making the
+   merge-base the target — the merge is then a no-op *by construction* and the tree
+   comparison "confirms" a release that was never merged. The one content-based guard
+   becomes a rubber stamp. The `check` step's refusal to skip on `version.inc` alone
+   only works together with this.
+
+   When the records *do* name the target itself, the base becomes the target's
+   **first parent** — which is what "our content is based on this release" actually
+   means, so the merge applies that release's own delta and the tree comparison
+   still decides. Rejecting the candidate outright instead left no graft at all,
+   and the merge then ran against the ancient pre-squash ancestor and conflicted,
+   turning a run that should quietly do nothing into a weekly conflict issue.
+
+3. **Every graft candidate must be content-validated, for its *inherited*
+   content — not just its own delta.** Choosing the graft base is **asymmetric**:
+   too old is merely expensive (more delta recomputed, conflict set inflated),
+   while too new **silently drops upstream work** — git reads the content between
+   the real base and the claimed one as deliberate local reversions and never
+   re-applies it. The merge succeeds, the PR opens, and it claims a release whose
+   content is only partly present.
+
+   Strictness alone does not catch this. If the tree holds v2.4.1, `version.inc`
+   says v2.4.2 and the target is v2.4.3, then v2.4.2 *is* a strict ancestor of the
+   target — so it passes rule 2 and grafts, and only `v2.4.2..v2.4.3` is applied.
+
+   Validating the candidate's **own delta** does not catch it either, and that is
+   the subtle part. Grafting the candidate's first parent and trial-merging it
+   proves the candidate's last step is present and *assumes* everything under it.
+   When the gap sits below a small step, the assumption is exactly what is false:
+   tree at v2.4.0, `version.inc` says v2.4.2, v2.4.1 added a file, and v2.4.2 only
+   bumped the version string — which the fork already carries, so the trial passes
+   and v2.4.1's file is dropped. The same hole reached through the tracking tag,
+   which was not validated at all.
+
+   So validation asks about inherited content, and it compares **trees**. The
+   work lives in `scripts/helio/upstream_content.sh`, shared with the `check`
+   step so that "does this branch hold release X?" has one implementation; it was
+   inline in the graft step before, which is precisely why `check` could not use
+   it and went on trusting the tracking tag.
+
+   A path upstream changed between a base four releases below the candidate and
+   the candidate itself, which our tree still holds at exactly the base version,
+   is a change we never applied. Comparing changed path **names** is not enough:
+   if upstream edits one hunk of a file and Helio independently edits another
+   hunk, the path appears on both sides and a name-level set difference cancels
+   it out while upstream's hunk is genuinely absent. So blob ids are compared —
+   two `git diff --raw` calls give every id on both sides — and for the remainder
+   where our blob matches neither side, a three-way merge decides:
+
+   | our blob + mode | verdict |
+   | --- | --- |
+   | equals the candidate's | held |
+   | equals the base's | **missing** |
+   | neither, merge is clean and leaves ours alone | held |
+   | neither, merge is clean but only re-inserts a block we already hold | **unknown** |
+   | neither, merge is clean and changes ours otherwise | **missing** |
+   | neither, merge conflicts | **unknown** |
+
+   The second of those rows is the correction that #152 bought. (An earlier
+   version of this paragraph said it was "worth a 472-file conflict set to
+   learn" — that attribution was wrong: #150's 472 conflicts came from the
+   ancestry gate, which skipped this script entirely. See #158, and #160 for
+   the same failure recurring on v2.5.1.) `git merge-file` places upstream's hunk by
+   its position in the **base**, not by where that content ended up in our copy.
+   When Helio has appended to the same file — the ordinary shape for a touchpoint
+   — our copy of upstream's lines can sit at a different offset than the merge
+   wants to insert them, so the merge cleanly inserts the block a **second**
+   time. The result then differs from ours while our blob holds every line of
+   upstream's change, and reading that difference as *missing* is a definitive
+   "never received" for content that is plainly present.
+
+   Measured on the path that caused it, `src/slic3r/GUI/Widgets/TextInput.hpp`:
+   merging v2.2.0 → v2.4.2 onto our blob duplicates `static_tips`,
+   `static_tips_size` and `static_tips_icon`, all three already there.
+
+   The verdict is **`unknown`, not `held`**, and that asymmetry is the whole
+   point. Duplication shows presence is *possible*, not that it happened — the
+   lines could coincide — so `base-ok` tolerates it (which is what rescues the
+   graft, and the actual fix for #152) while `holds` still refuses (so no release
+   is ever skipped on this evidence). Answering `held` here, as the issue
+   originally proposed, would have opened the one direction that drops upstream
+   work silently and permanently. **Two tests decide it, and the review of
+   #154 is why there are two.** Both guard the same direction: `base-ok`
+   tolerates `unknown`, so a false `unknown` in a graft base drops upstream work
+   with no conflict to notice.
+
+   **1. Adjacency.** The appended block must equal the block immediately before
+   or after it in the merged file. This must not be weakened to "every added
+   line appears somewhere in ours". That weaker form
+   was the first version of this fix and Codex rejected it on #154: upstream
+   adding `    validate();` to `second()` when `first()` already contains that
+   line produces a clean merge whose added line *is* present elsewhere in our
+   blob, while `second()` genuinely never received it. Since `base-ok` tolerates
+   `unknown`, such a path can be grafted as a base — and a sync target that
+   still carries the insertion then merges cleanly without re-adding it,
+   dropping upstream work with no conflict to notice. Position is the only thing
+   separating "the merge duplicated what we hold" from "we never got it", so the
+   comparison is against the neighbouring lines, never the whole file.
+
+   **2. Run length at the insertion site, against the longest run upstream
+   has.** Adjacency alone is still not
+   enough, and CodeRabbit produced the case on #154: upstream *deliberately*
+   adds a second adjacent `counter++;` where we hold one. The merge appends it
+   right beside ours, so the positional test is satisfied — yet the new copy is
+   real content we never received. Counting separates the two cleanly, because
+   it asks about upstream's blob rather than only about the merge:
+
+   A **global occurrence count** does not settle it either — that was the
+   second version of the test, and Codex broke it as well: if *our* fork
+   independently adds the same block somewhere distant, both blobs hold two
+   copies, the totals match, and upstream's adjacent one is still absent.
+   Totals are not a local property, and this question is local.
+
+   So compare **runs of consecutive copies**. Duplication by the merge produces
+   a run longer than upstream has anywhere; a genuine upstream addition does
+   not, because upstream is where the run came from:
+
+   | run at the site, in merged | longest run in theirs | verdict |
+   | --- | --- | --- |
+   | 2 | 1 | the merge invented a copy → `unknown` |
+   | 2 | 2 | upstream holds that run → **`missing`** |
+
+   Taking the longest run *anywhere* in theirs, rather than at a matched
+   location, is deliberate: it can only make the test refuse more often, and
+   refusing is the safe direction — a wrong `missing` costs conflict volume, a
+   wrong `unknown` costs upstream content.
+
+   Narrow in two further ways: the diff must consist only of **append** commands
+   (a removal or a change means the merge genuinely rewrites our content), and
+   **every** appended block must pass **both** tests, so one real insertion
+   sitting beside a duplicate still answers `missing`.
+
+   One `awk` detail that is a correctness matter, not style: the line
+   comparisons force string context with `x ""`. A bare `!=` on two numeric
+   strings compares them as **numbers**, so `01` and `1` test equal and a
+   genuinely new line reads as a duplicate of its neighbour (Codex, #154).
+
+   Mode is part of the comparison, not just the blob, and it is decided **before**
+   the three-way merge rather than inside it. A path whose only change is
+   `100644` → `100755` has identical blob ids on both sides, so a blob-only test
+   reports nothing and the executable bit is dropped from the sync for good.
+   Comparing blob-and-mode together closes that case but not the next one: if
+   upstream changes only the mode while Helio independently edits the blob, the
+   composite values differ for a reason unrelated to the mode, and the text merge
+   — which is handed blob ids and cannot see modes at all — finds upstream's blob
+   equal to the base's, leaves ours alone and answers *held*. So the rule is
+   applied first and separately: upstream moved the mode and we are still at the
+   base's mode, therefore we never received it, whatever the blobs then say.
+
+   **`unknown` is a third answer, and the two callers lean opposite ways on it.**
+   A conflict cannot distinguish "we have upstream's change with our edit on top"
+   from "we never received it", because both produce overlapping hunks. So:
+
+   | question | caller | `unknown` means |
+   | --- | --- | --- |
+   | is the sync already done? | `holds`, in `check` | **not** done — do not skip |
+   | is this safe as a merge base? | `base-ok`, in `graft` | tolerated — but only as a last resort |
+
+   Guessing *yes* on the first skips a release silently. Guessing *no* on the
+   second leaves no graft, and the merge then runs against the ancient
+   pre-squash ancestor and conflicts every week. Collapsing the two was a real
+   bug: the conflict case was reasoned about for the graft base, then the same
+   function was reused for the skip decision, where the safe direction inverts.
+
+   **Tolerated is not the same as preferred**, and that distinction was itself a
+   bug for two rounds. The argument above is sound about *rejecting* an
+   undecidable candidate and unsound about *accepting* one, because an
+   undecidable path in the **base** is the single shape that drops upstream work
+   with no conflict at all: if the base already carries upstream's value for that
+   path and the sync target has not moved it since, the merge sees
+   `theirs == base`, keeps ours, and nothing is reported. So `graft` takes a
+   candidate outright only when `holds` passes. A candidate that is merely
+   `base-ok` sends the run looking for a provably-held base *below* it
+   (`first-held … strict`), where the same paths are still in motion and the
+   merge must therefore present them — as a change applied or as a conflict,
+   either way visible. Only when no such base exists within `MAX_WALK` steps is
+   the undecidable candidate used, and then the run says so and names the paths.
+   Preferring an older base costs conflict volume, which is the direction this
+   whole mechanism chooses everywhere else.
+
+   `MAX_WALK` is set in the `check` and `graft` steps' own `env:` blocks, not
+   only inside `upstream_content.sh`. The script runs as a separate process, so
+   a value defined only there is invisible to the workflow's shell — and the
+   graft step interpolates `$MAX_WALK` into its rejection warnings under
+   `set -u`, where an unset variable aborts the step instead of warning and
+   carrying on. `CONTENT_DEPTH` deliberately has no such duplication: no step
+   body expands it, so it lives only in the script, whose
+   `CONTENT_DEPTH="${CONTENT_DEPTH:-4}"` default is the single source — both
+   steps call the same script and therefore always validate at the same depth.
+
+   The candidate records themselves are evaluated **newest-first by ancestry,
+   with fall-through**: strictly-held on any candidate beats degraded
+   acceptance on any, and the walk below a candidate begins only after every
+   newer candidate has failed. Record preference — version.inc, then the
+   tracking tag, then (when the records self-name the target) the target's
+   first parent, appended last — is *not* ancestry order, and evaluating in
+   record order let a stale tracking tag's walk-down defeat a strictly newer
+   candidate that validates: with the tree fully holding the target and the
+   tag stale at v2.3.2, the tag was base-ok-with-unknowns, its strict walk
+   grafted v2.3.0, and the expected-no-op verification merge conflicted on
+   content already on the branch — the weekly treadmill of #110 for an
+   already-merged release.
+
+   Within the walk, releases are ordered by **ancestry** (`git describe` on
+   each successive parent), not by tag date — tags sharing a timestamp sort
+   arbitrarily, and a base one release too new is the very thing being
+   rejected.
+
+   A candidate that fails is not simply dropped: the run walks down to the newest
+   commit whose content *is* present and grafts that, warning loudly and naming
+   the files that were never applied. The walk prefers a provably-held base and
+   falls back to a merely base-ok one only when the strict walk exhausts
+   `MAX_WALK` — the fallback then carries undecidable paths by construction, so
+   the run emits the same warning naming them that the base-ok candidate case
+   emits. Rejecting outright leaves no graft, and the merge then runs against
+   the ancient pre-squash ancestor and conflicts — the weekly treadmill rule 2
+   already had to undo once.
+
+   The window is four releases. Any finite window has a floor — a change older
+   than the base is outside the diff and invisible — so this is a depth/cost
+   trade rather than a proof.
+
+
+`scripts/helio/test_sync_noop_guards.py` pins all of this. It extracts the real
+`check` and `graft` step bodies from the workflow rather than transcribing them,
+and runs them against synthetic repositories whose content is held by a squashed
+commit with no upstream ancestry. Add a row there before changing any of the three
+rules above — every one of them was added in response to a failure that the
+then-current tests did not catch.
+
+**The tracking tag is a convenience, not a source of truth.** `helio-last-synced`
+is only advanced by a successful push at the end of a run, so an out-of-band merge
+— or a run whose tag push was refused — leaves it behind while the tree moves on.
+It sat at `v2.3.2-rc2` through three releases that way. Two consequences are baked
+into the workflow: for tag-release syncs `version.inc` is preferred over the tag
+as the baseline whenever it names a **strictly newer** release, and a **refused tag
+push warns rather than failing the run**. If you see that warning, a maintainer can
+heal it with:
+
+```bash
+git push helio +<upstream_commit>:refs/tags/helio-last-synced
+```
+
+**Why the push is refused — it is not what it looked like.** This was recorded for
+months as "the token cannot *always* force-update tags (`HTTP 403`)", which implied
+an intermittent permission gap or a tag-protection rule. Neither is true. The real
+message, from run `32014594574`:
+
+```text
+! [remote rejected] helio-last-synced -> helio-last-synced
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/build_all.yml` without `workflows` permission)
+```
+
+The tracking tag points at an **upstream** commit. Creating that ref makes
+upstream's `.github/workflows/**` newly reachable from a ref in this repository,
+and GitHub refuses to let any GitHub App token — `GITHUB_TOKEN` included — create
+a ref that introduces workflow content without the `workflows` permission. That
+permission is **not** one of the scopes a workflow's `permissions:` block can
+grant, so this cannot be fixed by editing the workflow: it fails on every run, and
+always will. That, not bad luck, is why the tag stuck at `v2.3.2-rc2` across three
+releases and let the ancestry problem compound into #107.
+
+Three ways out, none yet chosen:
+
+| option | cost |
+| --- | --- |
+| PAT with `workflows` scope, stored as a **repo secret** | a long-lived credential able to rewrite workflow files, held to solve a bookkeeping problem |
+| drop the tag entirely | every decision already has a content-backed fallback, so this is mostly deletion |
+| point the tag at the **Helio** commit, upstream sha in the annotated tag message | needs no new permission (the commit is already reachable), but every reader of the tag has to change |
+
+Do **not** attempt to fix this by adding `workflows:` to the workflow's
+`permissions:` block. It is not a valid key there, and a run will not tell you so —
+it will just keep failing the same way.
+
+Note the remote. The workflow's own pushes use `origin` because `actions/checkout`
+configures origin as *this fork*; you are running this in your own clone, where
+`origin` is upstream OrcaSlicer and `helio` is the fork (see "Git Workflow" in
+`CLAUDE.md`). Every maintainer-facing command the workflow prints says `helio` for
+that reason — pushing a Helio tracking tag to `origin` would aim it at upstream.
 
 **Squash the sync branch *before* the PR is opened, too.** GitHub auto-subscribes
 the author of every commit in a PR to that PR's notification thread. A sync branch

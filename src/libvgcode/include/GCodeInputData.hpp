@@ -6,6 +6,8 @@
 #define VGCODE_GCODEINPUTDATA_HPP
 
 #include "PathVertex.hpp"
+#include <vector>
+#include "Types.hpp"
 
 #include <limits>
 
@@ -26,11 +28,11 @@ struct GCodeInputData
     //
     // Palette for extruders colors
     //
-    Palette tools_colors;
+    PaletteWithAlpha tools_colors;
     //
     // Palette for color print colors
     //
-    Palette color_print_colors;
+    PaletteWithAlpha color_print_colors;
     float warpage_wdm_p95{ std::numeric_limits<float>::quiet_NaN() };
     float warpage_whs_p95{ std::numeric_limits<float>::quiet_NaN() };
 };

@@ -2,6 +2,7 @@
 #define slic3r_HelioDragon_hpp_
 
 #include <string>
+#include <vector>
 #include <wx/string.h>
 #include <boost/optional.hpp>
 #include <boost/filesystem.hpp>
@@ -120,8 +121,8 @@ public:
         std::string name;
         std::string id;
         std::string error;
-        vector<std::string> warning_flags;
-        vector<std::string> error_flags;
+        std::vector<std::string> warning_flags;
+        std::vector<std::string> error_flags;
         std::string trace_id;
 
         // V2 API fields
@@ -488,7 +489,9 @@ public:
     };
 
 private:
-    State m_state;
+    // Guarded by m_mutex on every read and write. Default-initialised because
+    // Plater's reslice path calls is_running() before the first init().
+    State m_state{STATE_INITIAL};
 
 public:
     std::mutex              m_mutex;
@@ -634,7 +637,10 @@ public:
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
-        m_state = STATE_STARTED;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_state = STATE_STARTED;
+        }
         m_gcode_processor.reset();
         helio_origin_key  = api_key;
         helio_api_key     = "Bearer " + api_key;
@@ -663,7 +669,10 @@ public:
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
-        m_state = STATE_STARTED;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_state = STATE_STARTED;
+        }
         m_gcode_processor.reset();
         helio_origin_key       = api_key;
         helio_api_key          = "Bearer " + api_key;
@@ -682,7 +691,13 @@ public:
 
     void reset()
     {
-        m_state = STATE_INITIAL;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_state = STATE_INITIAL;
+        }
+        // Deliberately outside the lock: m_gcode_processor and m_gcode_result are
+        // read by the worker thread without ever taking m_mutex, so holding it here
+        // would not order those accesses. See issue #139.
         m_gcode_processor.reset();
         m_gcode_result = nullptr;
         m_input_gcode_path.clear();
