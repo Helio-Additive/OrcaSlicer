@@ -52,6 +52,19 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
+          # Upstream's tags AGAIN, into a namespace of their own, so that every
+          # ENUMERATION of `v*` below sees upstream's tags and not the fork's.
+          # `git tag -l 'v*'` lists the union of the two, and this fork really
+          # carries four v*-shaped tags (v2.3.0.1-rc1/rc2/rc3, v2.3.1-rc1), so
+          # a fork-created stable `v*` tag could be picked as the sync target
+          # (#170). Resolving an already-chosen name still goes through
+          # refs/tags/, which holds the same upstream tags.
+          #
+          # A second fetch invocation, so a second network operation — the same
+          # refs asked for twice. Deliberately no `|| true`: a failure exits
+          # this step and the sync never runs, which is the policy the plain
+          # --tags fetch above already set. Same split the digest uses (#157).
+          git fetch upstream --force 'refs/tags/*:refs/upstream-tags/*'
           git fetch upstream main
 
       - name: Determine sync mode
@@ -81,13 +94,34 @@ jobs:
             # prereleases — git's version:refname sort otherwise ranks e.g.
             # v2.3.2-rc2 above v2.3.2, causing stable releases to be missed).
             # The regex tolerates both `-rc2`-style and dotted `-rc.1`-style
-            # SemVer suffixes. `|| true` keeps pipefail happy when grep finds
-            # nothing (only prereleases exist) — handled by the empty-check below.
+            # SemVer suffixes, and EITHER separator. The separator class is not
+            # cosmetic: upstream's older tags separate the prerelease with an
+            # underscore (v1.4.0_beta1, _beta2, _beta3 are all real), so a
+            # hyphen-only test classifies those as STABLE — and an underscore
+            # prerelease that was the newest tag would then be merged into the
+            # release branch as this sync's target (#170).
+            # `|| true` keeps pipefail happy when grep finds nothing (only
+            # prereleases exist) — handled by the empty-check below.
+            #
             # Must stay byte-identical to PRERELEASE_RE in
             # scripts/helio/upstream_content.sh, whose ancestry walk uses the
-            # same exclusion (drift is pinned by test_sync_noop_guards.py).
-            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
-              | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
+            # same exclusion, AND to the stable-tag grep in
+            # helio-upstream-watch.yml, which labels whichever digest entry
+            # equals it as the sync target. The three are one invariant with no
+            # shared source — a partial change makes the digest promise a
+            # different target from the one the sync takes — and the drift is
+            # pinned by test_sync_noop_guards.py.
+            #
+            # Enumerated from refs/upstream-tags/, never `git tag -l`: see the
+            # fetch step. A fork-created stable `v*` tag above the baseline
+            # would otherwise be selected here — and on the likelier path,
+            # where such a tag is already on the release branch, the ancestor
+            # check below then points the tracking tag at a fork commit, which
+            # is what `check`'s baseline and the PR's changelog range are
+            # computed from (#170).
+            LATEST_TAG=$(git for-each-ref --sort=-version:refname \
+                --format='%(refname:strip=2)' 'refs/upstream-tags/v*' \
+              | grep -Evi -- '[-_](alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)
             if [ -z "$LATEST_TAG" ]; then
               echo "No stable upstream release tags found" >&2
@@ -261,7 +295,15 @@ jobs:
             # For tag mode, try to find the v* tag at that commit
             if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ] && \
                [ "$TRACKING_TAG" = "helio-last-synced" ]; then
-              LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
+              # refs/upstream-tags/ only. This answers "which upstream
+              # release is the tracking tag sitting at?", and the answer feeds
+              # the changelog range and the sync PR's "what changed upstream"
+              # report. `git tag -l` also matches a fork-created v* tag at that
+              # commit, which would make $LAST a fork commit and the range span
+              # unrelated history — a plausible-looking commit count and log
+              # that a reviewer has no reason to doubt (#170).
+              LAST_SYNCED=$(git for-each-ref --points-at "$SYNCED_COMMIT" \
+                --format='%(refname:strip=2)' 'refs/upstream-tags/v*' | head -1)
             fi
             if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ]; then
               LAST_SYNCED="$TRACKING_TAG"
