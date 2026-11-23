@@ -52,13 +52,26 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
-          # Upstream's tags AGAIN, into a namespace of their own, so that every
-          # ENUMERATION of `v*` below sees upstream's tags and not the fork's.
-          # `git tag -l 'v*'` lists the union of the two, and this fork really
-          # carries four v*-shaped tags (v2.3.0.1-rc1/rc2/rc3, v2.3.1-rc1), so
-          # a fork-created stable `v*` tag could be picked as the sync target
-          # (#170). Resolving an already-chosen name still goes through
-          # refs/tags/, which holds the same upstream tags.
+          # Upstream's tags AGAIN, into a namespace of their own, so that
+          # everything below — both the ENUMERATION of `v*` and the
+          # RESOLUTION of whichever name it picks — sees upstream's tags and
+          # not the fork's. `git tag -l 'v*'` lists the union of the two, and
+          # this fork really carries four v*-shaped tags (v2.3.0.1-rc1/rc2/rc3,
+          # v2.3.1-rc1), so a fork-created stable `v*` tag could otherwise be
+          # picked as the sync target (#170).
+          #
+          # These two fetches are NOT an atomic snapshot, and that is why
+          # resolution has to use the namespace as well. The `--tags --force`
+          # fetch above replaces a fork-local tag of a given name only when
+          # upstream's tag of that name EXISTS during that fetch. If upstream
+          # publishes the name in the window between the two, there is nothing
+          # to clobber: refs/tags/<name> keeps the FORK's commit while
+          # refs/upstream-tags/<name> records upstream's. An earlier revision
+          # of this comment claimed the two always agree afterwards and that
+          # resolving a chosen name through refs/tags/ was therefore safe.
+          # That was wrong, and it is the bug CodeRabbit reproduced on #171 —
+          # see the resolution note in the "Resolve sync target" step, where
+          # `sync_ref` drives the merge and the profile overwrite.
           #
           # A second fetch invocation, so a second network operation — the same
           # refs asked for twice. Deliberately no `|| true`: a failure exits

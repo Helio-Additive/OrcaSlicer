@@ -866,9 +866,11 @@ this fork's own, and the fork really carries four `v*`-shaped tags
 `helio-v{version}`, which would not collide — but those four tags *are* the
 convention being broken, so it enforces nothing. Both `helio-upstream-sync.yml`
 and `helio-upstream-watch.yml` therefore mirror `refs/tags/*` into
-`refs/upstream-tags/*` with a second fetch and enumerate from the namespace;
-resolving a name already chosen still goes through `refs/tags/`, which holds the
-same upstream tags. Note what the namespace buys and what it does not: it makes
+`refs/upstream-tags/*` with a second fetch and enumerate from the namespace —
+**and resolve the chosen name through the namespace too**, never by bare name
+(see the paragraph below; an earlier revision of this one said bare-name
+resolution was safe because the two namespaces hold the same tags, and that is
+false). Note what the namespace buys and what it does not: it makes
 *enumeration* provenance-safe, so a tag that survives it is upstream's. It is
 not a substitute for ancestry when the question is "is this commit in upstream's
 history" — and conversely, ancestry is not a substitute for it, which is the
