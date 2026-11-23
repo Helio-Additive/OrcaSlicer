@@ -268,11 +268,25 @@ jobs:
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
               for cand in "v$VER" "$VER"; do
-                if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
-                  VERSION_COMMIT=$(git rev-parse "refs/tags/$cand^{commit}")
-                  VERSION_TAG="$cand"
-                  break
-                fi
+                # Namespace-first, and this MUST match how BASELINE_COMMIT is
+                # resolved below. VERSION_MATCHES_TARGET gates the "baseline and
+                # target point to the same commit" skip, so resolving the two
+                # sides from different namespaces inverts that guard: under the
+                # fetch race, refs/tags/<name> is the fork's commit (so
+                # VERSION_MATCHES_TARGET=false) while the namespaced baseline is
+                # upstream's (so BASELINE_COMMIT == SYNC_SHA), and the run exits
+                # `skip=true` with no content check — a silently dropped
+                # release. That guard exists to stop a version.inc claim
+                # skipping on its own (#110); this keeps it working. Codex P2 on
+                # #171, reproduced by `no_false_skip_from_divergent_version_inc`
+                # in test_sync_noop_guards.py.
+                for ref in "refs/upstream-tags/$cand" "refs/tags/$cand"; do
+                  if git rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1; then
+                    VERSION_COMMIT=$(git rev-parse "$ref^{commit}")
+                    VERSION_TAG="$cand"
+                    break 2
+                  fi
+                done
               done
             fi
           fi

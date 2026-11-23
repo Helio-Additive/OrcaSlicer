@@ -1948,6 +1948,54 @@ def last_synced_output_is_a_commit():
 r.append(last_synced_output_is_a_commit())
 
 
+def no_false_skip_from_divergent_version_inc():
+    """A version.inc-derived baseline must never produce skip=true on its own.
+
+    Codex P2 on #171, and a regression the namespace-first BASELINE_COMMIT
+    change introduced. The two resolutions disagree:
+
+      VERSION_COMMIT  <- refs/tags/<name>            (fork's commit in the race)
+      BASELINE_COMMIT <- refs/upstream-tags/<name>   (upstream's commit)
+
+    so VERSION_MATCHES_TARGET is false while BASELINE_COMMIT == SYNC_SHA, and
+    the skip guard `BASELINE_COMMIT = SYNC_SHA && VERSION_MATCHES_TARGET !=
+    true` fires. The run then exits skip=true WITHOUT any content check, which
+    is a silently dropped release — the one direction CLAUDE.md calls worse
+    than everything else.
+
+    The guard exists precisely so a version.inc claim cannot skip on its own
+    (#110). Resolving the two sides from different namespaces inverts it.
+    """
+    label = "NO FALSE SKIP: version.inc baseline + divergent tag refs must not skip"
+    tmp = tempfile.mkdtemp()
+    try:
+        # version="2.4.3" makes version.inc name the TARGET, and no_tag drops the
+        # tracking tag so LAST_SYNCED falls through to VERSION_TAG.
+        fork, target, sync_sha = build(tmp, version="2.4.3", new_release=True,
+                                       no_tag=True)
+        # The race: refs/tags/<target> is the fork's own commit, the namespace
+        # holds upstream's. build() mirrors both namespaces, so re-point only
+        # refs/tags to simulate "upstream published the name between fetches".
+        fork_head = git(fork, "rev-parse", "HEAD")
+        sh("git update-ref refs/tags/%s %s" % (target, fork_head), fork)
+        p2, out = run_check(fork, target, sync_sha)
+        skipped = out.get("skip") == "true"
+        ok = not skipped
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        skip=%s (want false) rc=%s" % (out.get("skip"), p2.returncode))
+        if skipped:
+            print("        *** a release would be silently dropped ***")
+            print(p2.stdout[-700:])
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(no_false_skip_from_divergent_version_inc())
+
+
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
     # FAILURES was collected and never printed, so a run that failed showed the
