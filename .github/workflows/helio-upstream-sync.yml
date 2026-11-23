@@ -138,8 +138,27 @@ jobs:
               echo "No stable upstream release tags found" >&2
               exit 1
             fi
-            SYNC_REF="$LATEST_TAG"
-            SYNC_SHA=$(git rev-parse "$LATEST_TAG^{commit}")
+            # Resolve through the SAME ref that produced the name, not the
+            # bare name. A bare `$LATEST_TAG` resolves via refs/tags/, and
+            # refs/tags/ and refs/upstream-tags/ can disagree: the `--tags
+            # --force` fetch only replaces a fork-local tag when upstream's
+            # tag of that name EXISTS during that fetch. If upstream publishes
+            # it in the window between that fetch and the namespace fetch
+            # below, refs/tags/<name> keeps the FORK's commit while the
+            # namespace records upstream's — so the name is provenance-correct
+            # and the bare resolution is not.
+            #
+            # That matters far beyond SYNC_SHA: sync_ref is what `git merge`
+            # merges and what `git checkout "$SYNC_REF" -- resources/profiles`
+            # takes the profile tree from. Resolving it by bare name would
+            # merge a fork commit and import fork profiles under an upstream
+            # release name — the exact outcome #170 exists to prevent, reached
+            # by a different route. Reproduced by CodeRabbit on #171.
+            #
+            # SYNC_LABEL keeps the bare tag name, so the branch name, the
+            # commit message and the PR body still read `v2.5.1`.
+            SYNC_REF="refs/upstream-tags/$LATEST_TAG"
+            SYNC_SHA=$(git rev-parse "$SYNC_REF^{commit}")
             SHORT_SHA=$(echo "$SYNC_SHA" | cut -c1-7)
             SYNC_LABEL="$LATEST_TAG"
             BRANCH_NAME="helio-release-candidate-${LATEST_TAG}"
@@ -1414,7 +1433,6 @@ jobs:
         # that GitHub template expansion does not escape (template-injection).
         env:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
-          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
@@ -1431,7 +1449,7 @@ jobs:
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
-            -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
+            -m "Squashed single-commit sync of upstream ${SYNC_LABEL} (${SYNC_SHA})." \
             -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
             -m "$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")")
           git reset --hard "$NEW"
@@ -1476,7 +1494,6 @@ jobs:
         uses: actions/github-script@v7
         env:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
-          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
@@ -1486,7 +1503,6 @@ jobs:
         with:
           script: |
             const syncLabel = process.env.SYNC_LABEL;
-            const syncRef = process.env.SYNC_REF;
             const syncSha = process.env.SYNC_SHA;
             const target = process.env.TARGET_BRANCH;
             const branch = process.env.SYNC_BRANCH;
@@ -1526,7 +1542,7 @@ jobs:
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
-              `Merges upstream \`${syncRef}\` into \`${target}\`.`,
+              `Merges upstream \`${syncLabel}\` into \`${target}\`.`,
               '',
               `### Upstream changelog (${total} commits)`,
               '```',

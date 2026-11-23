@@ -874,6 +874,18 @@ not a substitute for ancestry when the question is "is this commit in upstream's
 history" — and conversely, ancestry is not a substitute for it, which is the
 constraint #170 hands #158 (#170 → #158: version order cannot tell provenance).
 
+**Resolve a chosen tag through the ref that produced its name.** Selecting from
+`refs/upstream-tags/` and then resolving the bare name re-opens the hole the
+namespace closes: `git fetch --tags --force` replaces a fork-local tag only when
+upstream's tag of that name exists during that fetch, so a name upstream
+publishes between the two fetches leaves `refs/tags/<name>` on the **fork's**
+commit while the namespace holds upstream's. In `helio-upstream-sync.yml` that
+ref is what `git merge` merges and what the Rule 13 profile overwrite
+(`git checkout "$SYNC_REF" -- resources/profiles`) reads, so the consequence is a
+fork commit merged and fork profiles imported under an upstream release name.
+Keep a separate bare-name variable for display, branch naming and commit
+messages.
+
 **"Stable" means neither `-` nor `_` before the suffix.** The prerelease
 exclusion that separates releases from prereleases accepts `[-_]`, because
 upstream's older tags use an underscore (`v1.4.0_beta1`, `_beta2`, `_beta3` are

@@ -1583,14 +1583,26 @@ def run_target(repo, mode="latest-tag"):
 
 
 def target_case(label, *, upstream_tags, fork_tags=(), want_ref):
+    """Assert WHICH tag was selected, and that its ref is the namespaced one.
+
+    `sync_label` carries the selected tag name and is what these cases are
+    about. `sync_ref` is checked alongside it rather than instead of it,
+    because the two have different jobs and must not drift: the label names
+    the release for display and branch naming, while the ref is what `git
+    merge` merges and what the profile checkout reads. Asserting only the
+    label would let the ref regress to a bare name — which is exactly the
+    divergence `target_divergent_namespaces` exists for.
+    """
     tmp = tempfile.mkdtemp()
     try:
         repo = target_repo(tmp, upstream_tags=upstream_tags, fork_tags=fork_tags)
         p, out = run_target(repo)
-        got = out.get("sync_ref")
-        ok = p.returncode == 0 and got == want_ref
+        got, ref = out.get("sync_label"), out.get("sync_ref")
+        want_ns = "refs/upstream-tags/" + want_ref
+        ok = p.returncode == 0 and got == want_ref and ref == want_ns
         print(("  PASS  " if ok else "  FAIL  ") + label)
-        print("        sync_ref=%s (want %s) rc=%s" % (got, want_ref, p.returncode))
+        print("        sync_label=%s (want %s) sync_ref=%s rc=%s"
+              % (got, want_ref, ref, p.returncode))
         if not ok:
             print(p.stdout[-800:], p.stderr[-800:])
             FAILURES.append(label)
@@ -1744,6 +1756,96 @@ def target_main_mode():
 
 
 r.append(target_main_mode())
+
+
+def target_divergent_namespaces():
+    """refs/tags/ and refs/upstream-tags/ disagree -> the UPSTREAM commit wins.
+
+    CodeRabbit's finding on #171, and my first answer to it was wrong. I argued
+    the two namespaces cannot disagree because the fetch uses `--tags --force`.
+    That holds only when upstream's tag of that name EXISTS during that fetch.
+    If upstream publishes it in the window between the `--tags --force` fetch
+    and the namespace fetch, refs/tags/<name> keeps the FORK's commit while
+    refs/upstream-tags/<name> records upstream's.
+
+    The stakes are not just SYNC_SHA: sync_ref is what `git merge` merges and
+    what `git checkout "$SYNC_REF" -- resources/profiles` takes profiles from,
+    so a bare-name resolution would merge a fork commit and import fork
+    profiles under an upstream release name.
+
+    Asserted on BOTH outputs, because fixing only one leaves the other wrong
+    and the scenario would still pass.
+    """
+    label = "divergent namespaces: sync_ref/sync_sha resolve to UPSTREAM, not the fork commit"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f.txt"), "w").write("upstream\n")
+        sh("git add -A && git commit -q -m upstream-commit", repo)
+        up_sha = git(repo, "rev-parse", "HEAD")
+        # Upstream's v2.6.0 is in the namespace only — the shape the fetch
+        # window leaves behind.
+        sh("git update-ref refs/upstream-tags/v2.6.0 %s" % up_sha, repo)
+        # The fork's own v2.6.0, of the same name, on a different commit, in
+        # refs/tags only — what actions/checkout left and --force never
+        # replaced, because upstream had not published the name yet.
+        open(os.path.join(repo, "helio.c"), "w").write("// helio\n")
+        sh("git add -A && git commit -q -m fork-commit", repo)
+        fork_sha = git(repo, "rev-parse", "HEAD")
+        sh("git tag v2.6.0 %s" % fork_sha, repo)
+        # A real upstream release below it, so the selection has something to
+        # choose and this is not merely asserting an empty answer.
+        sh("git update-ref refs/upstream-tags/v2.5.1 %s" % up_sha, repo)
+
+        p2, out = run_target(repo)
+        ref, sha = out.get("sync_ref"), out.get("sync_sha")
+        ok = (p2.returncode == 0
+              and ref == "refs/upstream-tags/v2.6.0"
+              and sha == up_sha and sha != fork_sha)
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_ref=%s" % ref)
+        print("        sync_sha=%s (upstream=%s fork=%s)"
+              % ((sha or "")[:12], up_sha[:12], fork_sha[:12]))
+        if not ok:
+            print(p2.stdout[-600:], p2.stderr[-600:])
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(target_divergent_namespaces())
+
+
+def sync_ref_is_namespaced():
+    """And sync_ref must stay a refs/upstream-tags/ path in the ordinary case.
+
+    The divergence scenario above would also pass if sync_ref were a bare name
+    and only sync_sha were namespaced — but then `git merge "$SYNC_REF"` and
+    the profile checkout would still take the fork's commit. This pins the ref
+    itself on a repo where the two namespaces agree, so the guarantee does not
+    depend on constructing the race.
+    """
+    label = "sync_ref is a refs/upstream-tags/ path, not a bare tag name"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = target_repo(tmp, upstream_tags=["v2.4.2", "v2.5.1"])
+        _, out = run_target(repo)
+        ok = out.get("sync_ref") == "refs/upstream-tags/v2.5.1" \
+            and out.get("sync_label") == "v2.5.1"
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_ref=%s sync_label=%s"
+              % (out.get("sync_ref"), out.get("sync_label")))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(sync_ref_is_namespaced())
 
 
 print("\n%d/%d passed" % (sum(r), len(r)))
