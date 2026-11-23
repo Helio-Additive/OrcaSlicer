@@ -1912,6 +1912,42 @@ def baseline_resolution_prefers_namespace():
 r.append(baseline_resolution_prefers_namespace())
 
 
+def last_synced_output_is_a_commit():
+    """The check step must emit a resolved COMMIT, not a bare tag name.
+
+    CodeRabbit's round-6 finding, and the other half of the defect fixed one
+    commit earlier: BASELINE_COMMIT was made namespace-first while the OUTPUT
+    that feeds the changelog kept emitting the bare name. Every consumer uses
+    it as a range endpoint — `git log "$LAST".."$LATEST"`, `rev-list --count`,
+    `diff --stat` — and none displays it, so a sha is unambiguous where a name
+    can be shadowed by a fork tag. Measured consequence of the name: a range
+    reporting 0 commits where the resolved range reports 1, i.e. a sync PR
+    claiming upstream changed nothing.
+
+    Asserted as "40 hex characters" rather than against a specific sha,
+    because the regression to prevent is *emitting a name at all*.
+    """
+    label = "check output: last_synced_commit is a resolved sha, not a tag name"
+    tmp = tempfile.mkdtemp()
+    try:
+        fork, target, sync_sha = build(tmp, version="2.4.2", new_release=True)
+        _, out = run_check(fork, target, sync_sha)
+        got = out.get("last_synced_commit", "")
+        ok = bool(re.fullmatch(r"[0-9a-f]{40}", got)) and "last_synced" not in (
+            set(out) - {"last_synced_commit"})
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        last_synced_commit=%s" % (got or "<unset>"))
+        if not ok:
+            print("        outputs seen: %s" % sorted(out))
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(last_synced_output_is_a_commit())
+
+
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
     # FAILURES was collected and never printed, so a run that failed showed the

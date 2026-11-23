@@ -541,7 +541,20 @@ jobs:
             exit 0
           fi
 
-          echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
+          # The RESOLVED COMMIT, not the name. Every consumer uses this as a
+          # range endpoint (`git log "$LAST".."$LATEST"`, `rev-list --count`,
+          # `diff --stat`) and none displays it, so a sha is strictly better: it
+          # cannot be shadowed by any ref at all, which closes the whole class
+          # rather than just the refs/tags-vs-namespace half.
+          #
+          # Emitting the bare NAME was the other half of the same defect fixed
+          # above for BASELINE_COMMIT — I corrected the equality check and left
+          # the changelog range, which is the consequence I had myself named as
+          # the reachable one. Measured by CodeRabbit on #171: with a fork tag
+          # shadowing the baseline name, the bare-name range reported 0 commits
+          # where the resolved range reported 1 — a sync PR claiming upstream
+          # changed nothing.
+          echo "last_synced_commit=$BASELINE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Exit if already synced
@@ -1052,7 +1065,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: helio_changes
         env:
-          LAST: ${{ steps.check.outputs.last_synced }}
+          LAST: ${{ steps.check.outputs.last_synced_commit }}
           LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
 
@@ -1112,7 +1125,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: changelog
         env:
-          LAST: ${{ steps.check.outputs.last_synced }}
+          LAST: ${{ steps.check.outputs.last_synced_commit }}
           LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
 
