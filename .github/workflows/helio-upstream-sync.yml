@@ -119,8 +119,19 @@ jobs:
             # check below then points the tracking tag at a fork commit, which
             # is what `check`'s baseline and the PR's changelog range are
             # computed from (#170).
+            #
+            # The namespace is enumerated with a LITERAL prefix and the `v*`
+            # test applied afterwards, because `for-each-ref`'s own pattern is
+            # wildmatch with WM_PATHNAME: its `*` does not cross `/`. Passing
+            # 'refs/upstream-tags/v*' therefore silently drops a tag whose name
+            # contains a slash, which `git tag -l 'v*'` (plain fnmatch) did
+            # list — measured: with v2.5.1 and v2.6.0/final present, the old
+            # enumeration heads the list with v2.6.0/final and the pattern form
+            # selects v2.5.1. That is the silent-skip direction, so the glob
+            # stays out of the pattern (Codex, #171).
             LATEST_TAG=$(git for-each-ref --sort=-version:refname \
-                --format='%(refname:strip=2)' 'refs/upstream-tags/v*' \
+                --format='%(refname:strip=2)' 'refs/upstream-tags/' \
+              | grep -E '^v' \
               | grep -Evi -- '[-_](alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)
             if [ -z "$LATEST_TAG" ]; then
@@ -302,8 +313,16 @@ jobs:
               # commit, which would make $LAST a fork commit and the range span
               # unrelated history — a plausible-looking commit count and log
               # that a reviewer has no reason to doubt (#170).
+              # Literal prefix plus a `v*` filter, not a 'refs/.../v*'
+              # pattern: for-each-ref's glob does not cross `/`, so the pattern
+              # form drops a slash-containing tag (see the target step). The
+              # `|| true` is required rather than tidy — the added grep exits 1
+              # when no `v*` tag sits at that commit, and under the `-e
+              # -o pipefail` shell Actions uses that would abort the step
+              # instead of leaving LAST_SYNCED empty for the fallbacks below.
               LAST_SYNCED=$(git for-each-ref --points-at "$SYNCED_COMMIT" \
-                --format='%(refname:strip=2)' 'refs/upstream-tags/v*' | head -1)
+                --format='%(refname:strip=2)' 'refs/upstream-tags/' \
+                | grep -E '^v' | head -1 || true)
             fi
             if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ]; then
               LAST_SYNCED="$TRACKING_TAG"

@@ -1663,6 +1663,64 @@ def target_no_upstream_tags():
 
 r.append(target_no_upstream_tags())
 
+r.append(target_case(
+    "SLASH TAG: a stable upstream tag containing `/` is still enumerated",
+    upstream_tags=["v2.5.1", "v2.6.0/final"],
+    want_ref="v2.6.0/final"))
+
+r.append(target_case(
+    "SLASH TAG: and one that is a prerelease is still excluded",
+    upstream_tags=["v2.5.1", "v2.6.0/rc1-beta"],
+    want_ref="v2.5.1"))
+
+
+def points_at_no_v_tag():
+    """The `--points-at` lookup must yield empty, not abort the step.
+
+    Codex's slash finding is fixed by enumerating a literal prefix and
+    filtering for `v*` afterwards, which adds a `grep` to this pipeline. That
+    grep exits 1 when no `v*` tag sits at the commit, and GitHub runs `run:`
+    bodies under `bash -e -o pipefail`, so without a guard the failing
+    pipeline would abort the whole `check` step rather than leave LAST_SYNCED
+    empty for the fallbacks below it.
+
+    No existing scenario reaches this: the fixture always parks the tracking
+    tag on a commit that does carry an upstream tag. So the hazard is pinned
+    directly, on the line lifted out of the workflow.
+    """
+    label = "points-at: no v* tag at the commit -> empty, exit 0 (not a pipefail abort)"
+    m = re.search(r"^\s*LAST_SYNCED=\$\(git for-each-ref --points-at .*?\)$",
+                  CHECK, re.S | re.M)
+    if not m:
+        print("  FAIL  " + label + " (the points-at lookup was not found in the"
+              " extracted check step — it was renamed or restructured)")
+        FAILURES.append(label)
+        return False
+    frag = m.group(0).strip()
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "r")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f"), "w").write("x\n")
+        sh("git add -A && git commit -q -m c", repo)
+        # A non-`v` upstream tag at the commit, so the grep really does filter
+        # everything out rather than the namespace simply being empty.
+        sh("git update-ref refs/upstream-tags/nightly-2026-11-23 HEAD", repo)
+        p2 = sh('SYNCED_COMMIT=$(git rev-parse HEAD)\n' + frag
+                + '\nprintf "[%s]" "$LAST_SYNCED"', repo, check=False)
+        ok = p2.returncode == 0 and p2.stdout.strip().endswith("[]")
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        rc=%s out=%r" % (p2.returncode, p2.stdout.strip()[-40:]))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(points_at_no_v_tag())
+
 
 def target_main_mode():
     """`main` mode must be untouched by any of this — it never reads a tag."""
