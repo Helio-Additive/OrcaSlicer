@@ -356,6 +356,25 @@ The heaviest modification. Contains the entire Helio processing pipeline.
 
 ### LOW RISK
 
+#### `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` (+1 word) and `tests/CMakeLists.txt` (+3) — the `libvgcode_tests` suite
+Helio adds a test suite upstream does not have, `tests/libvgcode/` (target
+`libvgcode_tests`, the warpage-value tests from #126). Registering it takes a hunk in
+**two** upstream files, and dropping either one breaks CI in a different way:
+
+- `tests/CMakeLists.txt`: `add_subdirectory(libvgcode)`, guarded by
+  `if (TARGET libvgcode)`. Without it the suite is never built or run anywhere.
+- The Flatpak manifest's `test-commands:` builds test targets **by name**, and
+  `libvgcode_tests` is appended to that list. Without it, both `Flatpak … / Flatpak Unit
+  Tests` legs fail with `libvgcode_tests_NOT_BUILT (Not Run)` (3010/3011 passed), because
+  ctest still registers the suite from the CMake hunk above. That is how this hunk was
+  found on #126.
+
+**This is a permanent hunk, not a backport.** The *Temporary backports* section below
+says to take upstream's whole version of this manifest at the next sync. Do that, then
+**re-append `libvgcode_tests`** to the target list. If you forget, the Flatpak test legs
+fail loudly with the `NOT_BUILT` line above, so this cannot drop silently. Any future
+Helio-only test suite needs the same two hunks.
+
 #### `src/libslic3r/AppConfig.cpp` (+25)
 - **Appended** defaults block in `set_defaults()`: `helio_api_url`, `enable_helio_processing` (defaults to `false`), `helio_api_china`, `helio_api_other`, `helio_multimaterial_enabled`, `helio_warping_analysis_enabled`, `helio_first_time_tutorial`
 
@@ -1439,6 +1458,9 @@ file**. Those are deliberately *not* here — they are ordinary upstream depende
 that must arrive with a sync and be built, not hand-carried. So expect a conflict in that
 file and take upstream's whole version; do not read our smaller diff as the only change
 the file needs.
+**One exception survives that:** the `libvgcode_tests` entry in the `test-commands:`
+target list is a permanent Helio hunk, not a backport. After taking upstream's version,
+re-append it (see *Modified Files → LOW RISK*).
 
 Then delete this section.
 
