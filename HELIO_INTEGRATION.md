@@ -864,9 +864,10 @@ failure this rule exists to prevent.
 this fork's own, and the fork really carries four `v*`-shaped tags
 (`v2.3.0.1-rc1`/`rc2`/`rc3`, `v2.3.1-rc1`). The documented fork convention is
 `helio-v{version}`, which would not collide — but those four tags *are* the
-convention being broken, so it enforces nothing. Both `helio-upstream-sync.yml`
-and `helio-upstream-watch.yml` therefore mirror `refs/tags/*` into
-`refs/upstream-tags/*` with a second fetch and enumerate from the namespace —
+convention being broken, so it enforces nothing. `helio-upstream-sync.yml`
+therefore mirrors `refs/tags/*` into `refs/upstream-tags/*` with a second fetch
+and enumerates from the namespace (`helio-upstream-watch.yml` does the same
+**once #157 lands** — on the current release branch it still reads `git tag -l`) —
 **and resolve the chosen name through the namespace too**, never by bare name
 (see the paragraph below; an earlier revision of this one said bare-name
 resolution was safe because the two namespaces hold the same tags, and that is

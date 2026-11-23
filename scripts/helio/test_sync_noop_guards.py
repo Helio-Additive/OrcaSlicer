@@ -1848,6 +1848,70 @@ def sync_ref_is_namespaced():
 r.append(sync_ref_is_namespaced())
 
 
+def baseline_resolution_prefers_namespace():
+    """The BASELINE name must resolve through the namespace when it lives there.
+
+    CodeRabbit's follow-up on #171: the --points-at lookup gives LAST_SYNCED a
+    provenance-correct NAME (stripped from refs/upstream-tags/), and
+    `git rev-parse "$LAST_SYNCED^{commit}"` then resolved it as a bare name
+    through refs/tags/ — the same split that made SYNC_REF wrong.
+
+    LAST_SYNCED is mixed-provenance, so the fix prefers the namespace rather
+    than prefixing unconditionally. Both halves are asserted here: the upstream
+    release name must resolve to UPSTREAM's commit even when a fork tag of the
+    same name exists, and a name that is NOT in the namespace (the Helio
+    tracking tag) must still resolve via the fallback rather than failing.
+    """
+    label = "baseline resolution: prefers refs/upstream-tags/, falls back for non-upstream names"
+    m = re.search(r"^\s*BASELINE_COMMIT=\$\(git rev-parse .*?\|\| true\)$",
+                  CHECK, re.S | re.M)
+    if not m:
+        print("  FAIL  " + label + " (BASELINE_COMMIT resolution not found in the"
+              " extracted check step)")
+        FAILURES.append(label)
+        return False
+    frag = "\n".join(ln.strip() for ln in m.group(0).split("\n"))
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "r")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f"), "w").write("upstream\n")
+        sh("git add -A && git commit -q -m upstream", repo)
+        up = git(repo, "rev-parse", "HEAD")
+        sh("git update-ref refs/upstream-tags/v2.5.1 %s" % up, repo)
+        # A fork tag of the SAME NAME on a different commit, in refs/tags only.
+        open(os.path.join(repo, "helio.c"), "w").write("// helio\n")
+        sh("git add -A && git commit -q -m fork", repo)
+        fork = git(repo, "rev-parse", "HEAD")
+        sh("git tag v2.5.1 %s" % fork, repo)
+        # And the Helio tracking tag, which is NOT in the namespace.
+        sh("git tag helio-last-synced %s" % fork, repo)
+
+        def resolve(name):
+            p2 = sh('LAST_SYNCED="%s"\n' % name + frag
+                    + '\nprintf "%s" "$BASELINE_COMMIT"', repo, check=False)
+            return p2.returncode, p2.stdout.strip()
+
+        rc1, got1 = resolve("v2.5.1")
+        rc2, got2 = resolve("helio-last-synced")
+        ok = (rc1 == 0 and got1 == up and got1 != fork
+              and rc2 == 0 and got2 == fork)
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        v2.5.1            -> %s (upstream=%s fork=%s)"
+              % (got1[:12], up[:12], fork[:12]))
+        print("        helio-last-synced -> %s (fallback, want fork %s)"
+              % (got2[:12], fork[:12]))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(baseline_resolution_prefers_namespace())
+
+
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
     # FAILURES was collected and never printed, so a run that failed showed the

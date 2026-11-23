@@ -390,7 +390,35 @@ jobs:
           fi
 
           # Skip if baseline and target point to the same commit
-          BASELINE_COMMIT=$(git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
+          # Prefer refs/upstream-tags/ for the same reason the target does, but
+          # fall back: LAST_SYNCED is MIXED-PROVENANCE. It can be an upstream
+          # release name (from the --points-at lookup above, from version.inc,
+          # from the content test, or the bootstrap v2.3.2-rc2), the Helio
+          # tracking tag, or a raw sha in main mode. Only the first kind lives
+          # in the namespace, so a blanket prefix would break the others —
+          # preferring it is what stops an upstream release NAME resolving to a
+          # fork tag that happens to carry it. Raised by CodeRabbit on #171
+          # after the same gap was fixed for SYNC_REF: the name came from the
+          # namespace and the resolution did not.
+          #
+          # `-q --verify` on the NAMESPACE PROBE ONLY, and that asymmetry is
+          # deliberate. A bare `git rev-parse` prints its argument to stdout on
+          # failure, so an unguarded probe would concatenate the unresolved
+          # name with the fallback's sha. `-q --verify` prints nothing.
+          #
+          # The fallback stays a bare `rev-parse`, preserving this line's
+          # existing behaviour exactly: on a name that resolves nowhere it
+          # echoes the name, so BASELINE_COMMIT is non-empty and the `-z` error
+          # below does not fire. That is a latent defect — the error path it
+          # guards is unreachable — but it is PRE-EXISTING and load-bearing:
+          # two "no tracking tag" scenarios in test_sync_noop_guards.py reach
+          # here with an unresolvable bootstrap baseline and must proceed to
+          # the merge, and making the check fire aborts them. Fixing it means
+          # deciding what an unresolvable baseline should do, which is a
+          # separate change with its own analysis — filed rather than folded
+          # into this PR.
+          BASELINE_COMMIT=$(git rev-parse -q --verify "refs/upstream-tags/$LAST_SYNCED^{commit}" 2>/dev/null \
+            || git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
           if [ -z "$BASELINE_COMMIT" ]; then
             echo "Error: Unable to resolve baseline ($LAST_SYNCED) to a commit."
             exit 1
