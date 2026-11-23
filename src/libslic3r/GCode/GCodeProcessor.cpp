@@ -92,6 +92,18 @@ static const float DEFAULT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_RETRACT_ACCELERATION = 1500.0f; // Prusa Firmware 1_75mm_MK2
 static const float DEFAULT_TRAVEL_ACCELERATION = 1250.0f;
 
+// Leave the previous value intact if the tag is empty, malformed, or out of range.
+static bool parse_warpage_value(std::string_view number, float& value)
+{
+    float parsed;
+    const char* end = number.data() + number.size();
+    const auto result = fast_float::from_chars(number.data(), end, parsed);
+    if (result.ec != std::errc() || result.ptr != end || !std::isfinite(parsed))
+        return false;
+    value = parsed;
+    return true;
+}
+
 static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& values)
 {
     static constexpr std::array<std::string_view, 9> keys = { "wdm", "wdx", "wdy", "wdz", "wr", "wtg", "wts", "whs", "wls" };
@@ -107,15 +119,8 @@ static bool parse_warpage_fields(std::string_view fields, std::array<float, 9>& 
         const size_t           separator = field.find('=');
         if (separator != std::string_view::npos) {
             const auto key = std::find(keys.begin(), keys.end(), field.substr(0, separator));
-            if (key != keys.end()) {
-                const std::string_view number = field.substr(separator + 1);
-                float                  value;
-                const auto [end, error] = fast_float::from_chars(number.data(), number.data() + number.size(), value);
-                if (error == std::errc() && end == number.data() + number.size() && std::isfinite(value)) {
-                    values[std::distance(keys.begin(), key)] = value;
-                    parsed = true;
-                }
-            }
+            if (key != keys.end() && parse_warpage_value(field.substr(separator + 1), values[std::distance(keys.begin(), key)]))
+                parsed = true;
         }
         if (delimiter == std::string_view::npos)
             break;
@@ -4554,9 +4559,7 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
     auto parse_warpage_percentile = [comment](const std::string_view prefix, float& value) {
         if (!boost::starts_with(comment, prefix))
             return false;
-        float parsed = NAN;
-        if (parse_number(comment.substr(prefix.size()), parsed) && std::isfinite(parsed))
-            value = parsed;
+        parse_warpage_value(comment.substr(prefix.size()), value);
         return true;
     };
     if (parse_warpage_percentile(" WARPAGE_WDM_P95=", m_result.warpage_wdm_p95) ||

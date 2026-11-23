@@ -301,7 +301,7 @@ TEST_CASE("Warpage percentiles accept complete finite numbers", "[GCode][Helio]"
 TEST_CASE("Invalid warpage percentiles preserve the previous value", "[GCode][Helio]")
 {
     const size_t field = GENERATE(size_t(0), size_t(1));
-    const auto invalid = GENERATE("", "abc", "0.5xyz", "nan", "inf", "-inf", "1e999");
+    const auto invalid = GENERATE("", "abc", "0.5xyz", "nan", "inf", "-inf", "1e40", "1e999");
     const bool has_previous = GENERATE(false, true);
     const std::string tag = field == 0 ? "; WARPAGE_WDM_P95=" : "; WARPAGE_WHS_P95=";
     const std::string gcode = std::string("M83\nG1 X1 E1\n") +
