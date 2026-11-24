@@ -363,6 +363,29 @@ def main():
              repo, "v2.5.0", "v2.10.0",
              want_tags=["v2.10.0", "v2.6.0"], want_target=["v2.10.0"])
 
+        print("\n== a tag name containing a slash is still enumerated ==")
+        # Codex on PR #171, applied here. `upstream_tags` enumerates
+        # refs/upstream-tags/ with a LITERAL prefix and filters `^v` with grep,
+        # because for-each-ref matches with wildmatch under WM_PATHNAME: `*`
+        # does not cross `/`, so the pattern 'refs/upstream-tags/v*' silently
+        # drops a slash-containing tag that the `git tag -l 'v*'` this replaced
+        # (plain fnmatch) did list.
+        #
+        # This case discriminates rather than merely asserting a non-empty
+        # list: v2.11.0/final sorts ABOVE v2.10.0, so with the pattern form it
+        # vanishes from want_tags AND the sync-target mark moves to v2.10.0.
+        # Both halves fail, which is what makes the regression unmissable.
+        # `up_tag` uses update-ref, so a slash in the name needs no new
+        # machinery.
+        git(repo, "checkout", "-q", "-b", "release/v2.11", "main")
+        git(repo, "update-ref", "refs/upstream-tags/v2.11.0/final",
+            git(repo, "rev-parse", "HEAD"))
+        git(repo, "checkout", "-q", "main")
+        case("a slash-containing stable tag lists and can be the sync target",
+             repo, "v2.5.0", "v2.11.0/final",
+             want_tags=["v2.11.0/final", "v2.10.0", "v2.6.0"],
+             want_target=["v2.11.0/final"])
+
     print("")
     if failures:
         print("FAILED (%d): %s" % (len(failures), ", ".join(failures)))

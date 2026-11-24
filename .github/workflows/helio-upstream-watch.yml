@@ -63,9 +63,37 @@ jobs:
           # --sort matches the `git tag -l --sort=-version:refname` this
           # replaced, so the stable-tag lookup below is unchanged in every
           # respect except which refs it can see.
+          #
+          # The namespace is enumerated with a LITERAL prefix and the `v*` test
+          # applied afterwards as a regex, NOT by passing
+          # 'refs/upstream-tags/v*' as the pattern. `for-each-ref` matches with
+          # wildmatch under WM_PATHNAME, so its `*` does not cross `/` —
+          # unlike `git tag -l 'v*'` (plain fnmatch), which is what this
+          # replaced. The pattern form therefore silently drops a tag whose
+          # name contains a slash. Measured with v2.5.1, v2.6.0/final and
+          # v1.4.0_beta1 in the namespace: the pattern form lists only v2.5.1
+          # and v1.4.0_beta1, while fnmatch listed v2.6.0/final at the head.
+          #
+          # That is the silent-under-report direction, which is the one this
+          # whole step exists to close, and the consistency guard below cannot
+          # catch it: the guard compares NEW_TAGS against LATEST_TAG and both
+          # are computed through this helper, so an error here is invisible to
+          # it. Same blind spot as the norm_ver note. (Codex, #171; the sync
+          # workflow's own enumeration is fixed the same way there.)
+          #
+          # `grep -E '^v'` rather than a translated glob because `v*` is the
+          # only thing this was ever called with, and a one-call-site helper
+          # translating a glob into a regex is more machinery than the job
+          # needs. Checked that `grep -E '^v'` and fnmatch `v*` agree on
+          # slashes, glob metacharacters, case and `release/v2.5.1`.
+          #
+          # `--sort` and `strip=2` are deliberately unchanged: every ref shares
+          # the prefix so the ordering is unaffected, and `strip=2` yields
+          # `v2.6.0/final` intact.
           upstream_tags() {
             git for-each-ref --sort=-version:refname \
-              --format='%(refname:strip=2)' "refs/upstream-tags/$1"
+              --format='%(refname:strip=2)' 'refs/upstream-tags/' \
+              | grep -E '^v'
           }
 
           # Baseline: the upstream release this branch actually holds.
@@ -127,7 +155,7 @@ jobs:
           #
           # Computed before the new-tag list below, which annotates whichever
           # entry equals it as the sync target.
-          LATEST_TAG=$(upstream_tags 'v*' \
+          LATEST_TAG=$(upstream_tags \
             | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
             | head -1 || true)
           if [ -z "$LATEST_TAG" ]; then
@@ -202,7 +230,17 @@ jobs:
           # field keeps the tab out of it. TAB goes through printf rather than
           # $'\t' so the fragment does not depend on the shell being bash.
           TAB=$(printf '\t')
-          NEW_TAGS=$(upstream_tags 'v*' | while read -r tag; do
+          # The trailing `|| true` on this pipeline is required, not tidy.
+          # `upstream_tags` now ends in a `grep`, which exits 1 when the
+          # namespace holds no `v*` ref at all, and under the `-e -o pipefail`
+          # shell Actions uses that aborts the whole step mid-digest rather
+          # than leaving NEW_TAGS empty for the "None" handling below.
+          # Unreachable as the step is ordered today — LATEST_TAG above comes
+          # from the same helper and already `exit 1`s when it finds nothing,
+          # so a match is guaranteed by the time this runs — but that is a
+          # property of the ordering, not of this pipeline, and it costs one
+          # clause not to depend on it.
+          NEW_TAGS=$(upstream_tags | while read -r tag; do
               [ -n "$tag" ] || continue
               if ver_newer "$tag" "$BASELINE_TAG"; then
                 printf '%s\t%s\n' "$(norm_ver "$tag")" "$tag"
@@ -216,7 +254,7 @@ jobs:
               else
                 echo "- \`$tag\` ($COMMIT_DATE)"
               fi
-            done)
+            done || true)
 
           if [ -z "$NEW_TAGS" ]; then
             NEW_TAGS="None"
