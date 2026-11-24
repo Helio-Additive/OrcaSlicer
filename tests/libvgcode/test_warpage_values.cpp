@@ -89,7 +89,13 @@ TEST_CASE("hull shrinkage coloring does not require thermal index data", "[libvg
 
     Viewer viewer;
     viewer.set_view_type(EViewType::WarpageHullShrinkage);
-    REQUIRE(viewer.get_vertex_color(vertex) != DUMMY_COLOR);
+    REQUIRE(viewer.get_vertex_color(vertex) == DUMMY_COLOR);
+
+    // Seed the non-const viewer's range as the load pass does, without an OpenGL context.
+    auto& range = const_cast<ColorRange&>(viewer.get_color_range(EViewType::WarpageHullShrinkage));
+    ColorRangeTestAccess::update(range, 0.0f);
+    ColorRangeTestAccess::update(range, 1.0f);
+    REQUIRE(viewer.get_vertex_color(vertex) == range.get_color_at(vertex.warpage_hull_shrinkage));
 }
 
 TEST_CASE("warpage hull and layer shrinkage use distinct fields", "[libvgcode][warpage]")
