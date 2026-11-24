@@ -1822,7 +1822,12 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
         if (v.is_travel()) return get_option_color(move_type_to_option(v.type));
         const size_t index = static_cast<size_t>(m_settings.view_type) - static_cast<size_t>(EViewType::WarpageDisplacement);
         const float  value = get_warpage_value(v, m_settings.view_type);
-        return !is_valid_warpage_value(value) ? DUMMY_COLOR : m_warpage_ranges[index].get_color_at(value);
+        const ColorRange& range = m_warpage_ranges[index];
+        const auto& bounds = range.get_range();
+        // Reset ranges have reversed bounds until a sample initializes them.
+        if (!is_valid_warpage_value(value) || bounds[0] > bounds[1])
+            return DUMMY_COLOR;
+        return range.get_color_at(value);
     }
     case EViewType::VolumetricFlowRate:
     {
