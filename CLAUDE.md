@@ -191,13 +191,16 @@ the pin — only that nothing had to clone it.
   *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
   everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
   *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
-  unexpired, and `unit_tests` declines to run it anyway. So while the external suite is
-  red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
-  `ctest` instructions further down this file describe a local-only signal. Observed
-  casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
-  a silent warpage-metadata cross-attribution bug, which have never had an assertion run
-  in CI. The gate is inherited upstream code, so per Rule 15 it is recorded here, not
-  patched; #133 carries the options.
+  unexpired, and `unit_tests` declines to run it anyway. Whenever the external suite is
+  red, therefore, **no Catch2 assertion is evaluated on any PR in this repo** and the
+  `ctest` instructions further down this file describe a local-only signal.
+  **That is the mechanism, not the current state.** Since the v2.5.1/v2.5.2 syncs the
+  external suite has been passing and `unit_tests` has been running — see
+  *External slicer regression tests* below for the runs and the caveats — so a red
+  `unit_tests` today is **real and must not be waved through**. The coupling is
+  unchanged, so the signal goes away again the moment that third-party suite goes red,
+  which it can do without a commit here. The gate is inherited upstream code, so per
+  Rule 15 it is recorded here, not patched; #133 carries the options.
 - **The test *targets* are only ever compiled on Linux, so the skip above is the whole
   story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
   only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
@@ -224,10 +227,52 @@ the pin — only that nothing had to clone it.
   PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
   earlier revision of this line claimed the fork opens none.
 
-### External slicer regression tests — red since 14 Sep 2026 on a v2.4.2 tree (#133)
-**Everything in this section is an observation of a moving third-party repository, not a
-standing fact.** It describes builds of this fork while pinned to **v2.4.2**, between
-14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
+### External slicer regression tests — green since the v2.5.1 sync; red 14 Sep–20 Nov 2026 on a v2.4.2 tree (#133)
+
+**Current state, 25 Nov 2026: passing, and the mechanism that made it dangerous is
+unchanged.** Read this block before the historical analysis below it, which describes a
+tree this fork no longer has.
+
+| | then (29 Oct, v2.4.2 tree) | now (21 Nov, v2.5.1 tree) |
+|---|---|---|
+| suite | `25 failed / 58 passed / 4 skipped / 6 xfailed` | **`84 passed, 0 failed`** / 4 skipped / 5 xfailed |
+| `build_linux` | red | **green** |
+| `unit_tests` | skipped on every PR | **runs** — 3,023 tests, 21,010 runs, 0 failures |
+
+**The baseline run this section says has never been taken, now exists — three times.**
+Its strongest complaint was that all 25 failures had *"only ever been observed in PR
+builds"* with no release-branch baseline to compare against. Release-branch post-merge
+runs [44895806778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44895806778),
+[44935255665](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935255665) and
+[44935380778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935380778)
+(21 Nov) all concluded **success**, with `Run external slicer regression tests` green and
+`Unit Tests` green on Linux x86_64, Linux aarch64, Windows x64 and Windows arm64. So the
+ten crashes this section attributes to *"our own binary"* — the four `transform-*`
+SIGSEGVs among them — no longer reproduce, which is strong evidence they were upstream
+defects fixed between v2.4.2 and v2.5.1 rather than Helio-caused. That was explicitly
+left *unchecked* below; treat it as answered in that direction, though no per-case trace
+was run.
+
+**What has *not* changed, and is why #133 stays open.** The clone is still unpinned and
+still records no revision, so this says nothing about future runs: one commit in
+`orca-test-repo` can recreate the skew against a v2.5.2 tree with no commit here. Do not
+read "green" as a standing fact — the whole point of the section below is that this
+repository has over-read exactly this evidence, in the reassuring direction, six times.
+
+**Why the dated analysis below is kept rather than deleted.** This section instructs that
+when it stops applying, the dated incident details should be deleted and the
+unpinned-clone warning and ownership reasoning kept. That is followed only in part,
+deliberately: **#133 is still undecided**, and its options are priced against exactly
+that evidence (what the 25 failures were, what pinning to `0dfd8df` would cost). Deleting
+it while the decision is open would remove the basis for the decision. It is therefore
+**labelled historical** instead, and should be deleted once #133 is closed.
+
+---
+
+**Everything below this line is a historical record of the 14 Sep – 20 Nov 2026 incident
+on a v2.4.2 tree. It is not the current state.** It is an observation of a moving
+third-party repository, not a standing fact, and it describes builds of this fork while
+pinned to **v2.4.2**, between 14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
 any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
 against the job log before concluding a red `build_linux` is this issue; do not treat a
 red Linux leg as pre-diagnosed. If you confirm it still applies, note the date on #133.
