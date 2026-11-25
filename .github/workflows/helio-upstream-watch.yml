@@ -173,7 +173,29 @@ jobs:
             echo "No stable upstream release tags found" >&2
             exit 1
           fi
-          MAIN_COMMITS=$(git rev-list --count "$LATEST_TAG"..upstream/main 2>/dev/null || echo "unknown")
+
+          # The NAME came from the namespace, so the RESOLUTION has to come
+          # from there too. The `--tags --force` fetch above only replaces a
+          # fork-local tag of the same name when upstream's tag exists DURING
+          # that fetch, so if upstream publishes the name in the window between
+          # that fetch and the namespace fetch, refs/tags/<name> keeps the
+          # FORK's commit while refs/upstream-tags/<name> records upstream's.
+          # A bare $LATEST_TAG resolves through refs/tags/, so every range
+          # below would be computed against the fork commit while the digest
+          # prints the upstream name beside it.
+          #
+          # Same defect CodeRabbit found in the sync's SYNC_REF (#171), and
+          # CLAUDE.md states it as a rule: "The chosen name must be resolved
+          # through the namespace too, not by bare name." There the consequence
+          # was a merge and a profile import from a fork commit; here it is
+          # only reporting, which makes it lower severity and not less wrong —
+          # a digest that states a confident number computed from the wrong
+          # commit is the failure mode this whole file exists to close.
+          #
+          # LATEST_TAG keeps the bare name, which is what the digest displays
+          # and what the sync-target comparison matches on.
+          LATEST_REF="refs/upstream-tags/$LATEST_TAG"
+          MAIN_COMMITS=$(git rev-list --count "$LATEST_REF"..upstream/main 2>/dev/null || echo "unknown")
 
           # >>> new-tags-selection (extracted verbatim by scripts/helio/test_upstream_watch_tags.py)
           # "Is this tag newer than what we hold?" is a VERSION-ORDER question,
@@ -292,7 +314,7 @@ jobs:
           # Active release branches
           RELEASE_BRANCHES=$(git branch -r --list 'upstream/release/*' | while read branch; do
             CLEAN_BRANCH=$(echo "$branch" | xargs)
-            COMMITS_AHEAD=$(git rev-list --count "$LATEST_TAG".."$CLEAN_BRANCH" 2>/dev/null || echo "?")
+            COMMITS_AHEAD=$(git rev-list --count "$LATEST_REF".."$CLEAN_BRANCH" 2>/dev/null || echo "?")
             echo "- \`$CLEAN_BRANCH\`: $COMMITS_AHEAD commits ahead of \`$LATEST_TAG\`"
           done)
 
@@ -333,7 +355,7 @@ jobs:
 
           MAIN_CHANGES=""
           for f in "${WATCHED_FILES[@]}"; do
-            STAT=$(git diff --stat "$LATEST_TAG"..upstream/main -- "$f" 2>/dev/null | tail -1)
+            STAT=$(git diff --stat "$LATEST_REF"..upstream/main -- "$f" 2>/dev/null | tail -1)
             if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
               printf -v MAIN_CHANGES '%s- `%s`: %s\n' "$MAIN_CHANGES" "$f" "$STAT"
             fi
@@ -348,7 +370,7 @@ jobs:
           for branch in $(git branch -r --list 'upstream/release/*' | xargs); do
             BRANCH_REPORT=""
             for f in "${WATCHED_FILES[@]}"; do
-              STAT=$(git diff --stat "$LATEST_TAG".."$branch" -- "$f" 2>/dev/null | tail -1)
+              STAT=$(git diff --stat "$LATEST_REF".."$branch" -- "$f" 2>/dev/null | tail -1)
               if [ -n "$STAT" ] && echo "$STAT" | grep -q "changed"; then
                 printf -v BRANCH_REPORT '%s  - `%s`: %s\n' "$BRANCH_REPORT" "$f" "$STAT"
               fi
