@@ -257,7 +257,7 @@ private:
 
     void on_selected_simulation(wxMouseEvent& e) { update_action(0); }
     void on_selected_optimaztion(wxMouseEvent& e){ update_action(1); }
-    void on_confirm(wxMouseEvent& e);
+    void on_confirm(wxCommandEvent& e);
     void on_dpi_changed(const wxRect& suggested_rect) override;
     void update_action(int action);
     void show_advanced_mode();

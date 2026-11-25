@@ -2271,7 +2271,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     m_button_confirm->SetMinSize(wxSize(-1, FromDIP(56)));
     m_button_confirm->SetCornerRadius(FromDIP(16));
     m_button_confirm->SetToolTip(_L("Enhancement will only take a few minutes to complete, depending on the size of your object. (A lot of compute is happening in the background) (Formerly referred to as 'Optimize' or 'Optimization')"));
-    m_button_confirm->Bind(wxEVT_LEFT_DOWN, &HelioInputDialog::on_confirm, this);
+    m_button_confirm->Bind(wxEVT_BUTTON, &HelioInputDialog::on_confirm, this);
     m_button_confirm->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
     m_button_confirm->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
 
@@ -3136,7 +3136,7 @@ Slic3r::HelioQuery::OptimizationInput HelioInputDialog::get_optimization_input(b
 }
 
 
-void HelioInputDialog::on_confirm(wxMouseEvent& e)
+void HelioInputDialog::on_confirm(wxCommandEvent&)
 {
     bool ok = false;
     if (current_action == 0) // Simulation
