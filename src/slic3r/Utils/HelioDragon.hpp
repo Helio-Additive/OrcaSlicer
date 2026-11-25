@@ -707,10 +707,52 @@ public:
     void set_gcode_result(Slic3r::GCodeProcessorResult* gcode_result);
     void create_simulation_step(HelioQuery::CreateGCodeResult create_gcode_res,std::unique_ptr<GUI::NotificationManager>& notification_manager);
     void create_optimization_step(HelioQuery::CreateGCodeResult create_gcode_res, std::unique_ptr<GUI::NotificationManager>& notification_manager);
-    bool save_downloaded_gcodes_and_load_preview(const std::string& preview_download_url,
-                                                const std::string& printable_download_url,
-                                                const std::string& input_gcode_path,
-                                                const HelioQuery::RatingData& rating_data);
+    void save_downloaded_gcodes_and_load_preview(std::string                                preview_download_url,
+                                                 std::string                                preview_gcode_path,
+                                                 std::string                                printable_download_url,
+                                                 std::string                                printable_gcode_path,
+                                                 std::string                                tmp_path,
+                                                std::unique_ptr<GUI::NotificationManager>& notification_manager,
+                                                HelioQuery::RatingData                    rating_data);
+
+    std::string create_path_for_simulated_gcode(std::string unsimulated_gcode_path)
+    {
+        boost::filesystem::path p(unsimulated_gcode_path);
+
+        if (!p.has_filename()) {
+            throw std::runtime_error("Invalid path: No filename present.");
+        }
+
+        boost::filesystem::path parent       = p.parent_path();
+        std::string             new_filename = "simulated_" + p.filename().string();
+
+        return (parent / new_filename).string();
+    }
+
+    std::string create_path_for_optimization_gcode(std::string unoptimized_gcode_path)
+    {
+        boost::filesystem::path p(unoptimized_gcode_path);
+
+        if (!p.has_filename()) {
+            throw std::runtime_error("Invalid path: No filename present.");
+        }
+
+        boost::filesystem::path parent = p.parent_path();
+        std::string             new_filename = "optimized_" + p.filename().string();
+
+        return (parent / new_filename).string();
+    }
+
+    std::string create_path_for_thermal_gcode(std::string printable_gcode_path)
+    {
+        boost::filesystem::path p(printable_gcode_path);
+        if (!p.has_filename())
+            throw std::runtime_error("Invalid path: No filename present.");
+        return (p.parent_path() / ("thermal_" + p.filename().string())).string();
+    }
+
+    void load_helio_file_to_viewer(std::string preview_path, std::string printable_path, std::string tmp_path,
+                                   HelioQuery::RatingData rating_data);
 };
 } // namespace Slic3r
 #endif
