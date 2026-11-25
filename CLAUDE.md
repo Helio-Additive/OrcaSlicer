@@ -206,20 +206,36 @@ the pin — only that nothing had to clone it.
   `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
   outcome today, but the gate on those two is inherited, not stated — dropping or
   re-pointing a `needs:` would let them run unlabelled.
-- **`unit_tests`' `needs: build_linux` has a second consequence, and it currently costs
-  the fork its entire Catch2 signal.** The job is `needs: build_linux` +
+- **A red `build_linux` costs the *Linux* Catch2 jobs, and only those.** The unit-test
+  jobs each depend on their own platform's build, so the blast radius is two of seven —
+  read from the parsed `jobs.*.needs`, not from the job names:
+
+  | unit-test job | `needs:` |
+  |---|---|
+  | `unit_tests_linux_x86_64`, `unit_tests_linux_aarch64` | **`build_linux`** |
+  | `unit_tests_windows_x64`, `unit_tests_windows_arm64` | `build_windows` |
+  | `unit_tests_macos_arm64` | `build_macos_arch` |
+  | `unit_tests_flatpak_x86_64`, `unit_tests_flatpak_aarch64` | `flatpak` |
+
+  The mechanism for the Linux pair: `needs: build_linux` +
   `if: ${{ !cancelled() && success() }}`, and `success()` is false if any needed job
-  failed — so a red `build_linux` skips `unit_tests`. `build_linux` goes red at
+  failed — so a red `build_linux` skips them. `build_linux` goes red at
   *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
-  everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
-  *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
-  unexpired, and `unit_tests` declines to run it anyway. So while the external suite is
-  red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
-  `ctest` instructions further down this file describe a local-only signal. Observed
-  casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
-  a silent warpage-metadata cross-attribution bug, which have never had an assertion run
-  in CI. The gate is inherited upstream code, so per Rule 15 it is recorded here, not
-  patched; #133 carries the options.
+  everything they consume: *Build slicer and tests* (`:381`) and
+  *Upload Test Artifact* (`:393`). The bundle is built, uploaded and left unexpired, and
+  the jobs decline to run it anyway.
+
+  **Do not over-state this, in either direction.** It was once true that a red external
+  suite cost the fork *every* Catch2 assertion, and this file said so; the v2.5.x syncs
+  added the Windows, macOS and Flatpak test jobs, each wired to its own build, so that
+  claim is now wrong and was corrected here only after review caught it. Equally, a red
+  `unit_tests` on **any** platform is real and must not be waved through — since the
+  v2.5.1/v2.5.2 syncs the external suite has been passing and all seven jobs have been
+  running (see *External slicer regression tests* below for the runs and the caveats).
+  The Linux coupling is
+  unchanged, so the signal goes away again the moment that third-party suite goes red,
+  which it can do without a commit here. The gate is inherited upstream code, so per
+  Rule 15 it is recorded here, not patched; #133 carries the options.
 - **The test *targets* are only ever compiled on Linux, so the skip above is the whole
   story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
   only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
@@ -246,10 +262,59 @@ the pin — only that nothing had to clone it.
   PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
   earlier revision of this line claimed the fork opens none.
 
-### External slicer regression tests — red since 14 Sep 2026 on a v2.4.2 tree (#133)
-**Everything in this section is an observation of a moving third-party repository, not a
-standing fact.** It describes builds of this fork while pinned to **v2.4.2**, between
-14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
+### External slicer regression tests — green since the v2.5.1 sync; red 14 Sep–20 Nov 2026 on a v2.4.2 tree (#133)
+
+**Current state, 25 Nov 2026: passing, and the mechanism that made it dangerous is
+unchanged.** Read this block before the historical analysis below it, which describes a
+tree this fork no longer has.
+
+| | then (29 Oct, v2.4.2 tree) | now (21 Nov, v2.5.1 tree) |
+|---|---|---|
+| suite | `25 failed / 58 passed / 4 skipped / 6 xfailed` | **`84 passed, 0 failed`** / 4 skipped / 5 xfailed |
+| `build_linux` | red | **green** |
+| `unit_tests` | skipped on every PR | **runs** — 3,023 tests, 21,010 runs, 0 failures |
+
+**The baseline run this section says has never been taken, now exists — three times.**
+Its strongest complaint was that all 25 failures had *"only ever been observed in PR
+builds"* with no release-branch baseline to compare against. Release-branch post-merge
+runs [44895806778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44895806778),
+[44935255665](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935255665) and
+[44935380778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935380778)
+(21 Nov) all concluded **success**, with `Run external slicer regression tests` green and
+`Unit Tests` green on Linux x86_64, Linux aarch64, Windows x64 and Windows arm64. So the
+ten crashes this section attributes to *"our own binary"* — the four `transform-*`
+SIGSEGVs among them — **no longer reproduce on this tree against this suite revision.**
+
+**That is an observation, and the historical attribution stays unresolved.** It is
+tempting to read it as clearing those crashes to upstream, and an earlier revision of
+this block did exactly that. It does not follow: **both variables moved at once.** The
+slicer tree went v2.4.2 → v2.5.1, *and* the suite is floating and records no revision,
+so the runs cannot separate "upstream fixed the defect" from "the suite stopped
+exercising it". Neither check the analysis below prescribes was performed — no per-case
+causal trace, and no reproduction on unmodified upstream with the same inputs and the
+same suite revision. Until one of them is, the question is **open**, exactly as that
+section says. Reporting these runs is not the same as answering it.
+
+**What has *not* changed, and is why #133 stays open.** The clone is still unpinned and
+still records no revision, so this says nothing about future runs: one commit in
+`orca-test-repo` can recreate the skew against a v2.5.2 tree with no commit here. Do not
+read "green" as a standing fact — the whole point of the section below is that this
+repository has over-read exactly this evidence, in the reassuring direction, six times.
+
+**Why the dated analysis below is kept rather than deleted.** This section instructs that
+when it stops applying, the dated incident details should be deleted and the
+unpinned-clone warning and ownership reasoning kept. That is followed only in part,
+deliberately: **#133 is still undecided**, and its options are priced against exactly
+that evidence (what the 25 failures were, what pinning to `0dfd8df` would cost). Deleting
+it while the decision is open would remove the basis for the decision. It is therefore
+**labelled historical** instead, and should be deleted once #133 is closed.
+
+---
+
+**Everything below this line is a historical record of the 14 Sep – 20 Nov 2026 incident
+on a v2.4.2 tree. It is not the current state.** It is an observation of a moving
+third-party repository, not a standing fact, and it describes builds of this fork while
+pinned to **v2.4.2**, between 14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
 any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
 against the job log before concluding a red `build_linux` is this issue; do not treat a
 red Linux leg as pre-diagnosed. If you confirm it still applies, note the date on #133.
@@ -636,10 +701,23 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 - `tests/slic3rutils/` - Utility function tests
 - `tests/sandboxes/` - Experimental/sandbox test code
 
-**Run these locally — CI currently does not.** While the external regression suite is red
-(see *External slicer regression tests* above), `unit_tests` skips on every PR, so a local
-`ctest` run is the only place these assertions are evaluated. If you add or change a test,
-say in the PR that you ran it; the green check mark does not cover it.
+**CI does run these — but check, because it has not always.** Since the v2.5.1/v2.5.2
+syncs all seven `unit_tests` jobs run on PRs (Linux x86_64/aarch64, Windows x64/arm64,
+macOS arm64, Flatpak x86_64/aarch64), so a red `unit_tests` is a real signal. This file
+said the opposite until 25 Nov 2026 — *"CI currently does not … a local `ctest` run is
+the only place these assertions are evaluated"* — which was true while the external
+regression suite was red, and stopped being true without anyone editing this line.
+
+So confirm rather than assume, in both directions: **a red `unit_tests` must not be
+dismissed**, and a green one covers only the platforms whose jobs actually ran. If the
+external suite goes red again, `build_linux` fails and the **Linux pair** skips with it —
+the other five are wired to their own builds and keep running. See *Build All* above for
+the `needs:` table and *External slicer regression tests* for the current state.
+
+A local `ctest` run is still worth doing on a test change, and worth saying in the PR —
+not because CI skips it, but because the Catch2 **targets** are only compiled on Linux
+(`BUILD_TESTS` is `OFF` elsewhere; see *Build All*), so a test that fails to compile on
+Windows or macOS is caught nowhere.
 
 Run all tests after building:
 ```bash
