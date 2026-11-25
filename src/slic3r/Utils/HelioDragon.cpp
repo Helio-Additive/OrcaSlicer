@@ -885,19 +885,49 @@ HelioQuery::PresignedURLResult HelioQuery::create_presigned_url(const std::strin
             }
         })
         .on_complete([&res](std::string body, unsigned status) {
-            nlohmann::json parsed_obj = nlohmann::json::parse(body);
-            res.status                = status;
-            if (parsed_obj.contains("error")) {
-                res.error = parsed_obj["error"];
-            } else {
-                res.key      = parsed_obj["data"]["getPresignedUrl"]["key"];
-                res.mimeType = parsed_obj["data"]["getPresignedUrl"]["mimeType"];
-                res.url      = parsed_obj["data"]["getPresignedUrl"]["url"];
-            }
-        })
-        .on_error([&res](std::string body, std::string error, unsigned status) {
-            res.error  = (boost::format("error: %1%, message: %2%") % error % body).str();
             res.status = status;
+            const auto response = nlohmann::json::parse(body, nullptr, false);
+            if (!response.is_object()) {
+                res.error = _u8L("Helio returned an invalid upload signing response.");
+                return;
+            }
+
+            const auto errors = response.find("errors");
+            if (response.contains("error") ||
+                (errors != response.end() && (!errors->is_array() || !errors->empty()))) {
+                res.error = _u8L("Helio could not sign the file upload.");
+                return;
+            }
+
+            const auto data = response.find("data");
+            if (data == response.end() || !data->is_object()) {
+                res.error = _u8L("Helio returned an invalid upload signing response.");
+                return;
+            }
+            const auto signing_result = data->find("getPresignedUrl");
+            if (signing_result == data->end() || !signing_result->is_object()) {
+                res.error = _u8L("Helio returned an invalid upload signing response.");
+                return;
+            }
+
+            const auto key = signing_result->find("key");
+            const auto mime_type = signing_result->find("mimeType");
+            const auto url = signing_result->find("url");
+            if (key == signing_result->end() || !key->is_string() ||
+                mime_type == signing_result->end() || !mime_type->is_string() ||
+                url == signing_result->end() || !url->is_string() ||
+                key->get_ref<const std::string&>().empty() || url->get_ref<const std::string&>().empty()) {
+                res.error = _u8L("Helio returned an invalid upload signing response.");
+                return;
+            }
+
+            res.key = key->get_ref<const std::string&>();
+            res.mimeType = mime_type->get_ref<const std::string&>();
+            res.url = url->get_ref<const std::string&>();
+        })
+        .on_error([&res](std::string, std::string, unsigned status) {
+            res.status = status;
+            res.error = _u8L("Helio could not sign the file upload.");
         })
         .perform_sync();
 
