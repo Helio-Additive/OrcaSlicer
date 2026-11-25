@@ -184,20 +184,33 @@ the pin — only that nothing had to clone it.
   `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
   outcome today, but the gate on those two is inherited, not stated — dropping or
   re-pointing a `needs:` would let them run unlabelled.
-- **`unit_tests`' `needs: build_linux` has a second consequence, and it currently costs
-  the fork its entire Catch2 signal.** The job is `needs: build_linux` +
+- **A red `build_linux` costs the *Linux* Catch2 jobs, and only those.** The unit-test
+  jobs each depend on their own platform's build, so the blast radius is two of seven —
+  read from the parsed `jobs.*.needs`, not from the job names:
+
+  | unit-test job | `needs:` |
+  |---|---|
+  | `unit_tests_linux_x86_64`, `unit_tests_linux_aarch64` | **`build_linux`** |
+  | `unit_tests_windows_x64`, `unit_tests_windows_arm64` | `build_windows` |
+  | `unit_tests_macos_arm64` | `build_macos_arch` |
+  | `unit_tests_flatpak_x86_64`, `unit_tests_flatpak_aarch64` | `flatpak` |
+
+  The mechanism for the Linux pair: `needs: build_linux` +
   `if: ${{ !cancelled() && success() }}`, and `success()` is false if any needed job
-  failed — so a red `build_linux` skips `unit_tests`. `build_linux` goes red at
+  failed — so a red `build_linux` skips them. `build_linux` goes red at
   *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
-  everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
-  *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
-  unexpired, and `unit_tests` declines to run it anyway. Whenever the external suite is
-  red, therefore, **no Catch2 assertion is evaluated on any PR in this repo** and the
-  `ctest` instructions further down this file describe a local-only signal.
-  **That is the mechanism, not the current state.** Since the v2.5.1/v2.5.2 syncs the
-  external suite has been passing and `unit_tests` has been running — see
-  *External slicer regression tests* below for the runs and the caveats — so a red
-  `unit_tests` today is **real and must not be waved through**. The coupling is
+  everything they consume: *Build slicer and tests* (`:381`) and
+  *Upload Test Artifact* (`:393`). The bundle is built, uploaded and left unexpired, and
+  the jobs decline to run it anyway.
+
+  **Do not over-state this, in either direction.** It was once true that a red external
+  suite cost the fork *every* Catch2 assertion, and this file said so; the v2.5.x syncs
+  added the Windows, macOS and Flatpak test jobs, each wired to its own build, so that
+  claim is now wrong and was corrected here only after review caught it. Equally, a red
+  `unit_tests` on **any** platform is real and must not be waved through — since the
+  v2.5.1/v2.5.2 syncs the external suite has been passing and all seven jobs have been
+  running (see *External slicer regression tests* below for the runs and the caveats).
+  The Linux coupling is
   unchanged, so the signal goes away again the moment that third-party suite goes red,
   which it can do without a commit here. The gate is inherited upstream code, so per
   Rule 15 it is recorded here, not patched; #133 carries the options.
@@ -248,10 +261,17 @@ runs [44895806778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/448
 (21 Nov) all concluded **success**, with `Run external slicer regression tests` green and
 `Unit Tests` green on Linux x86_64, Linux aarch64, Windows x64 and Windows arm64. So the
 ten crashes this section attributes to *"our own binary"* — the four `transform-*`
-SIGSEGVs among them — no longer reproduce, which is strong evidence they were upstream
-defects fixed between v2.4.2 and v2.5.1 rather than Helio-caused. That was explicitly
-left *unchecked* below; treat it as answered in that direction, though no per-case trace
-was run.
+SIGSEGVs among them — **no longer reproduce on this tree against this suite revision.**
+
+**That is an observation, and the historical attribution stays unresolved.** It is
+tempting to read it as clearing those crashes to upstream, and an earlier revision of
+this block did exactly that. It does not follow: **both variables moved at once.** The
+slicer tree went v2.4.2 → v2.5.1, *and* the suite is floating and records no revision,
+so the runs cannot separate "upstream fixed the defect" from "the suite stopped
+exercising it". Neither check the analysis below prescribes was performed — no per-case
+causal trace, and no reproduction on unmodified upstream with the same inputs and the
+same suite revision. Until one of them is, the question is **open**, exactly as that
+section says. Reporting these runs is not the same as answering it.
 
 **What has *not* changed, and is why #133 stays open.** The clone is still unpinned and
 still records no revision, so this says nothing about future runs: one commit in
