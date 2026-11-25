@@ -4260,7 +4260,7 @@ void HelioSimulationResultsDialog::create_fix_suggestions_section(wxBoxSizer* pa
         auto link1 = new Label(m_learn_more_content, Label::Body_13, _L("Helio Flowchart"));
         link1->SetForegroundColour(theme.purple);
         link1->Bind(wxEVT_LEFT_DOWN, [](wxMouseEvent& e) {
-            wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/flowchart");
+            wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/print-debugging-flow-chart");
         });
         link1->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
         link1->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
@@ -4271,7 +4271,7 @@ void HelioSimulationResultsDialog::create_fix_suggestions_section(wxBoxSizer* pa
             auto link2 = new Label(m_learn_more_content, Label::Body_13, _L("Fixing cold prints"));
             link2->SetForegroundColour(theme.purple);
             link2->Bind(wxEVT_LEFT_DOWN, [](wxMouseEvent& e) {
-                wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/simulation/how-tos/fixing-cold-prints");
+                wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/fixing-cold-prints");
             });
             link2->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
             link2->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
