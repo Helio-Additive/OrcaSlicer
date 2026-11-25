@@ -15106,8 +15106,11 @@ bool Plater::priv::check_helio_mixed_color_sublayer()
     if (enabled == nullptr || !enabled->value)
         return true;
 
-    MessageDialog(q, _L("Helio does not support Mixed color sublayer. Disable it and slice the plate again before using Helio."),
-                  _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE)
+    MessageDialog(q, _L("Helio does not support Mixed color sublayer. Disable it and slice the plate again before using Helio.") + "\n\n",
+                  _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE, wxEmptyString, _L("Learn more"),
+                  [](const wxString&) {
+                      wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/known-issues-null-values");
+                  })
         .ShowModal();
     return false;
 }
