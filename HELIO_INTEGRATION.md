@@ -859,6 +859,50 @@ non-zero, so the guard catches it — without one the script runs on regardless 
 answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
 
+**A `v*` tag is not proof of upstream provenance — enumerate from
+`refs/upstream-tags/`.** `git tag -l 'v*'` lists the union of upstream's tags and
+this fork's own, and the fork really carries four `v*`-shaped tags
+(`v2.3.0.1-rc1`/`rc2`/`rc3`, `v2.3.1-rc1`). The documented fork convention is
+`helio-v{version}`, which would not collide — but those four tags *are* the
+convention being broken, so it enforces nothing. `helio-upstream-sync.yml`
+therefore mirrors `refs/tags/*` into `refs/upstream-tags/*` with a second fetch
+and enumerates from the namespace (`helio-upstream-watch.yml` does the same
+**once #157 lands** — on the current release branch it still reads `git tag -l`) —
+**and resolve the chosen name through the namespace too**, never by bare name
+(see the paragraph below; an earlier revision of this one said bare-name
+resolution was safe because the two namespaces hold the same tags, and that is
+false). Note what the namespace buys and what it does not: it makes
+*enumeration* provenance-safe, so a tag that survives it is upstream's. It is
+not a substitute for ancestry when the question is "is this commit in upstream's
+history" — and conversely, ancestry is not a substitute for it, which is the
+constraint #170 hands #158 (#170 → #158: version order cannot tell provenance).
+
+**Resolve a chosen tag through the ref that produced its name.** Selecting from
+`refs/upstream-tags/` and then resolving the bare name re-opens the hole the
+namespace closes: `git fetch --tags --force` replaces a fork-local tag only when
+upstream's tag of that name exists during that fetch, so a name upstream
+publishes between the two fetches leaves `refs/tags/<name>` on the **fork's**
+commit while the namespace holds upstream's. In `helio-upstream-sync.yml` that
+ref is what `git merge` merges and what the Rule 13 profile overwrite
+(`git checkout "$SYNC_REF" -- resources/profiles`) reads, so the consequence is a
+fork commit merged and fork profiles imported under an upstream release name.
+Keep a separate bare-name variable for display, branch naming and commit
+messages.
+
+**"Stable" means neither `-` nor `_` before the suffix.** The prerelease
+exclusion that separates releases from prereleases accepts `[-_]`, because
+upstream's older tags use an underscore (`v1.4.0_beta1`, `_beta2`, `_beta3` are
+all real) and a hyphen-only test reads those as *stable*. The same expression
+lives in three places with no shared source — the sync's target selection,
+`PRERELEASE_RE` in `scripts/helio/upstream_content.sh`, and the watch digest's
+stable-tag lookup — and they must change together: the sync's copy picks the
+target, `PRERELEASE_RE` keeps `base_below`'s walk inside one release family, and
+the watch's copy is what the digest labels **sync target**. `prerelease_re_drift`
+in `scripts/helio/test_sync_noop_guards.py` pins the three as byte-identical and
+a companion check pins the pattern's behaviour on upstream's real tag shapes,
+including that the legacy **stable** names (`v1.1.0.14-sf`, `v1.0.10.05`) are not
+swept up by the wider separator class.
+
 **`--stat` answers the first question, the patch answers the real one.** A diffstat
 shows *whether* the file differs, which settles the empty case for **content** — no Helio
 content in it, so a content defect is not ours, stop. (Not byte identity, and so not the

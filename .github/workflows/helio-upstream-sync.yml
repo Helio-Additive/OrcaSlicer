@@ -52,6 +52,32 @@ jobs:
         run: |
           git remote add upstream https://github.com/SoftFever/OrcaSlicer.git || true
           git fetch upstream --tags --force
+          # Upstream's tags AGAIN, into a namespace of their own, so that
+          # everything below — both the ENUMERATION of `v*` and the
+          # RESOLUTION of whichever name it picks — sees upstream's tags and
+          # not the fork's. `git tag -l 'v*'` lists the union of the two, and
+          # this fork really carries four v*-shaped tags (v2.3.0.1-rc1/rc2/rc3,
+          # v2.3.1-rc1), so a fork-created stable `v*` tag could otherwise be
+          # picked as the sync target (#170).
+          #
+          # These two fetches are NOT an atomic snapshot, and that is why
+          # resolution has to use the namespace as well. The `--tags --force`
+          # fetch above replaces a fork-local tag of a given name only when
+          # upstream's tag of that name EXISTS during that fetch. If upstream
+          # publishes the name in the window between the two, there is nothing
+          # to clobber: refs/tags/<name> keeps the FORK's commit while
+          # refs/upstream-tags/<name> records upstream's. An earlier revision
+          # of this comment claimed the two always agree afterwards and that
+          # resolving a chosen name through refs/tags/ was therefore safe.
+          # That was wrong, and it is the bug CodeRabbit reproduced on #171 —
+          # see the resolution note in the "Resolve sync target" step, where
+          # `sync_ref` drives the merge and the profile overwrite.
+          #
+          # A second fetch invocation, so a second network operation — the same
+          # refs asked for twice. Deliberately no `|| true`: a failure exits
+          # this step and the sync never runs, which is the policy the plain
+          # --tags fetch above already set. Same split the digest uses (#157).
+          git fetch upstream --force 'refs/tags/*:refs/upstream-tags/*'
           git fetch upstream main
 
       - name: Determine sync mode
@@ -81,20 +107,71 @@ jobs:
             # prereleases — git's version:refname sort otherwise ranks e.g.
             # v2.3.2-rc2 above v2.3.2, causing stable releases to be missed).
             # The regex tolerates both `-rc2`-style and dotted `-rc.1`-style
-            # SemVer suffixes. `|| true` keeps pipefail happy when grep finds
-            # nothing (only prereleases exist) — handled by the empty-check below.
+            # SemVer suffixes, and EITHER separator. The separator class is not
+            # cosmetic: upstream's older tags separate the prerelease with an
+            # underscore (v1.4.0_beta1, _beta2, _beta3 are all real), so a
+            # hyphen-only test classifies those as STABLE — and an underscore
+            # prerelease that was the newest tag would then be merged into the
+            # release branch as this sync's target (#170).
+            # `|| true` keeps pipefail happy when grep finds nothing (only
+            # prereleases exist) — handled by the empty-check below.
+            #
             # Must stay byte-identical to PRERELEASE_RE in
             # scripts/helio/upstream_content.sh, whose ancestry walk uses the
-            # same exclusion (drift is pinned by test_sync_noop_guards.py).
-            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname \
-              | grep -Evi -- '-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
+            # same exclusion, AND to the stable-tag grep in
+            # helio-upstream-watch.yml, which labels whichever digest entry
+            # equals it as the sync target. The three are one invariant with no
+            # shared source — a partial change makes the digest promise a
+            # different target from the one the sync takes — and the drift is
+            # pinned by test_sync_noop_guards.py.
+            #
+            # Enumerated from refs/upstream-tags/, never `git tag -l`: see the
+            # fetch step. A fork-created stable `v*` tag above the baseline
+            # would otherwise be selected here — and on the likelier path,
+            # where such a tag is already on the release branch, the ancestor
+            # check below then points the tracking tag at a fork commit, which
+            # is what `check`'s baseline and the PR's changelog range are
+            # computed from (#170).
+            #
+            # The namespace is enumerated with a LITERAL prefix and the `v*`
+            # test applied afterwards, because `for-each-ref`'s own pattern is
+            # wildmatch with WM_PATHNAME: its `*` does not cross `/`. Passing
+            # 'refs/upstream-tags/v*' therefore silently drops a tag whose name
+            # contains a slash, which `git tag -l 'v*'` (plain fnmatch) did
+            # list — measured: with v2.5.1 and v2.6.0/final present, the old
+            # enumeration heads the list with v2.6.0/final and the pattern form
+            # selects v2.5.1. That is the silent-skip direction, so the glob
+            # stays out of the pattern (Codex, #171).
+            LATEST_TAG=$(git for-each-ref --sort=-version:refname \
+                --format='%(refname:strip=2)' 'refs/upstream-tags/' \
+              | grep -E '^v' \
+              | grep -Evi -- '[-_](alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$' \
               | head -1 || true)
             if [ -z "$LATEST_TAG" ]; then
               echo "No stable upstream release tags found" >&2
               exit 1
             fi
-            SYNC_REF="$LATEST_TAG"
-            SYNC_SHA=$(git rev-parse "$LATEST_TAG^{commit}")
+            # Resolve through the SAME ref that produced the name, not the
+            # bare name. A bare `$LATEST_TAG` resolves via refs/tags/, and
+            # refs/tags/ and refs/upstream-tags/ can disagree: the `--tags
+            # --force` fetch only replaces a fork-local tag when upstream's
+            # tag of that name EXISTS during that fetch. If upstream publishes
+            # it in the window between that fetch and the namespace fetch
+            # below, refs/tags/<name> keeps the FORK's commit while the
+            # namespace records upstream's — so the name is provenance-correct
+            # and the bare resolution is not.
+            #
+            # That matters far beyond SYNC_SHA: sync_ref is what `git merge`
+            # merges and what `git checkout "$SYNC_REF" -- resources/profiles`
+            # takes the profile tree from. Resolving it by bare name would
+            # merge a fork commit and import fork profiles under an upstream
+            # release name — the exact outcome #170 exists to prevent, reached
+            # by a different route. Reproduced by CodeRabbit on #171.
+            #
+            # SYNC_LABEL keeps the bare tag name, so the branch name, the
+            # commit message and the PR body still read `v2.5.1`.
+            SYNC_REF="refs/upstream-tags/$LATEST_TAG"
+            SYNC_SHA=$(git rev-parse "$SYNC_REF^{commit}")
             SHORT_SHA=$(echo "$SYNC_SHA" | cut -c1-7)
             SYNC_LABEL="$LATEST_TAG"
             BRANCH_NAME="helio-release-candidate-${LATEST_TAG}"
@@ -191,11 +268,25 @@ jobs:
             VER=$(grep -oP 'SoftFever_VERSION[^"]*"\K[^"]+' version.inc 2>/dev/null || true)
             if [ -n "$VER" ]; then
               for cand in "v$VER" "$VER"; do
-                if git rev-parse -q --verify "refs/tags/$cand^{commit}" >/dev/null 2>&1; then
-                  VERSION_COMMIT=$(git rev-parse "refs/tags/$cand^{commit}")
-                  VERSION_TAG="$cand"
-                  break
-                fi
+                # Namespace-first, and this MUST match how BASELINE_COMMIT is
+                # resolved below. VERSION_MATCHES_TARGET gates the "baseline and
+                # target point to the same commit" skip, so resolving the two
+                # sides from different namespaces inverts that guard: under the
+                # fetch race, refs/tags/<name> is the fork's commit (so
+                # VERSION_MATCHES_TARGET=false) while the namespaced baseline is
+                # upstream's (so BASELINE_COMMIT == SYNC_SHA), and the run exits
+                # `skip=true` with no content check — a silently dropped
+                # release. That guard exists to stop a version.inc claim
+                # skipping on its own (#110); this keeps it working. Codex P2 on
+                # #171, reproduced by `no_false_skip_from_divergent_version_inc`
+                # in test_sync_noop_guards.py.
+                for ref in "refs/upstream-tags/$cand" "refs/tags/$cand"; do
+                  if git rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1; then
+                    VERSION_COMMIT=$(git rev-parse "$ref^{commit}")
+                    VERSION_TAG="$cand"
+                    break 2
+                  fi
+                done
               done
             fi
           fi
@@ -261,7 +352,23 @@ jobs:
             # For tag mode, try to find the v* tag at that commit
             if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ] && \
                [ "$TRACKING_TAG" = "helio-last-synced" ]; then
-              LAST_SYNCED=$(git tag -l --points-at "$SYNCED_COMMIT" 'v*' | head -1)
+              # refs/upstream-tags/ only. This answers "which upstream
+              # release is the tracking tag sitting at?", and the answer feeds
+              # the changelog range and the sync PR's "what changed upstream"
+              # report. `git tag -l` also matches a fork-created v* tag at that
+              # commit, which would make $LAST a fork commit and the range span
+              # unrelated history — a plausible-looking commit count and log
+              # that a reviewer has no reason to doubt (#170).
+              # Literal prefix plus a `v*` filter, not a 'refs/.../v*'
+              # pattern: for-each-ref's glob does not cross `/`, so the pattern
+              # form drops a slash-containing tag (see the target step). The
+              # `|| true` is required rather than tidy — the added grep exits 1
+              # when no `v*` tag sits at that commit, and under the `-e
+              # -o pipefail` shell Actions uses that would abort the step
+              # instead of leaving LAST_SYNCED empty for the fallbacks below.
+              LAST_SYNCED=$(git for-each-ref --points-at "$SYNCED_COMMIT" \
+                --format='%(refname:strip=2)' 'refs/upstream-tags/' \
+                | grep -E '^v' | head -1 || true)
             fi
             if [ -z "$LAST_SYNCED" ] && [ "$TAG_UNTRUSTED" != "true" ]; then
               LAST_SYNCED="$TRACKING_TAG"
@@ -297,7 +404,35 @@ jobs:
           fi
 
           # Skip if baseline and target point to the same commit
-          BASELINE_COMMIT=$(git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
+          # Prefer refs/upstream-tags/ for the same reason the target does, but
+          # fall back: LAST_SYNCED is MIXED-PROVENANCE. It can be an upstream
+          # release name (from the --points-at lookup above, from version.inc,
+          # from the content test, or the bootstrap v2.3.2-rc2), the Helio
+          # tracking tag, or a raw sha in main mode. Only the first kind lives
+          # in the namespace, so a blanket prefix would break the others —
+          # preferring it is what stops an upstream release NAME resolving to a
+          # fork tag that happens to carry it. Raised by CodeRabbit on #171
+          # after the same gap was fixed for SYNC_REF: the name came from the
+          # namespace and the resolution did not.
+          #
+          # `-q --verify` on the NAMESPACE PROBE ONLY, and that asymmetry is
+          # deliberate. A bare `git rev-parse` prints its argument to stdout on
+          # failure, so an unguarded probe would concatenate the unresolved
+          # name with the fallback's sha. `-q --verify` prints nothing.
+          #
+          # The fallback stays a bare `rev-parse`, preserving this line's
+          # existing behaviour exactly: on a name that resolves nowhere it
+          # echoes the name, so BASELINE_COMMIT is non-empty and the `-z` error
+          # below does not fire. That is a latent defect — the error path it
+          # guards is unreachable — but it is PRE-EXISTING and load-bearing:
+          # two "no tracking tag" scenarios in test_sync_noop_guards.py reach
+          # here with an unresolvable bootstrap baseline and must proceed to
+          # the merge, and making the check fire aborts them. Fixing it means
+          # deciding what an unresolvable baseline should do, which is a
+          # separate change with its own analysis — filed rather than folded
+          # into this PR.
+          BASELINE_COMMIT=$(git rev-parse -q --verify "refs/upstream-tags/$LAST_SYNCED^{commit}" 2>/dev/null \
+            || git rev-parse "$LAST_SYNCED^{commit}" 2>/dev/null || true)
           if [ -z "$BASELINE_COMMIT" ]; then
             echo "Error: Unable to resolve baseline ($LAST_SYNCED) to a commit."
             exit 1
@@ -420,7 +555,20 @@ jobs:
             exit 0
           fi
 
-          echo "last_synced=$LAST_SYNCED" >> "$GITHUB_OUTPUT"
+          # The RESOLVED COMMIT, not the name. Every consumer uses this as a
+          # range endpoint (`git log "$LAST".."$LATEST"`, `rev-list --count`,
+          # `diff --stat`) and none displays it, so a sha is strictly better: it
+          # cannot be shadowed by any ref at all, which closes the whole class
+          # rather than just the refs/tags-vs-namespace half.
+          #
+          # Emitting the bare NAME was the other half of the same defect fixed
+          # above for BASELINE_COMMIT — I corrected the equality check and left
+          # the changelog range, which is the consequence I had myself named as
+          # the reachable one. Measured by CodeRabbit on #171: with a fork tag
+          # shadowing the baseline name, the bare-name range reported 0 commits
+          # where the resolved range reported 1 — a sync PR claiming upstream
+          # changed nothing.
+          echo "last_synced_commit=$BASELINE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Exit if already synced
@@ -931,7 +1079,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: helio_changes
         env:
-          LAST: ${{ steps.check.outputs.last_synced }}
+          LAST: ${{ steps.check.outputs.last_synced_commit }}
           LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
 
@@ -991,7 +1139,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         id: changelog
         env:
-          LAST: ${{ steps.check.outputs.last_synced }}
+          LAST: ${{ steps.check.outputs.last_synced_commit }}
           LATEST: ${{ steps.target.outputs.sync_ref }}
         run: |
 
@@ -1353,7 +1501,6 @@ jobs:
         # that GitHub template expansion does not escape (template-injection).
         env:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
-          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           PRE_MERGE: ${{ steps.merge.outputs.pre_merge }}
@@ -1370,7 +1517,7 @@ jobs:
           if [ "$TRACKING_TAG" = "helio-last-synced-main" ]; then SYNC_MODE=main; fi
           NEW=$(git commit-tree "$TREE" -p "$BASE" \
             -m "Upstream sync: ${SYNC_LABEL} into ${TARGET_BRANCH} (squashed)" \
-            -m "Squashed single-commit sync of upstream ${SYNC_REF} (${SYNC_SHA})." \
+            -m "Squashed single-commit sync of upstream ${SYNC_LABEL} (${SYNC_SHA})." \
             -m "Collapsed from the merge commit so the PR carries one internally-authored commit instead of upstream's individual commits — the latter auto-subscribes external upstream contributors to this fork's PR notifications." \
             -m "$(printf 'upstream-commit: %s\nupstream-sync-mode: %s' "$SYNC_SHA" "$SYNC_MODE")")
           git reset --hard "$NEW"
@@ -1415,7 +1562,6 @@ jobs:
         uses: actions/github-script@v7
         env:
           SYNC_LABEL: ${{ steps.target.outputs.sync_label }}
-          SYNC_REF: ${{ steps.target.outputs.sync_ref }}
           SYNC_SHA: ${{ steps.target.outputs.sync_sha }}
           TARGET_BRANCH: ${{ steps.branch.outputs.target }}
           SYNC_BRANCH: ${{ steps.sync_branch.outputs.branch }}
@@ -1425,7 +1571,6 @@ jobs:
         with:
           script: |
             const syncLabel = process.env.SYNC_LABEL;
-            const syncRef = process.env.SYNC_REF;
             const syncSha = process.env.SYNC_SHA;
             const target = process.env.TARGET_BRANCH;
             const branch = process.env.SYNC_BRANCH;
@@ -1465,7 +1610,7 @@ jobs:
             const body = [
               `## Upstream Sync: ${syncLabel}`,
               '',
-              `Merges upstream \`${syncRef}\` into \`${target}\`.`,
+              `Merges upstream \`${syncLabel}\` into \`${target}\`.`,
               '',
               `### Upstream changelog (${total} commits)`,
               '```',

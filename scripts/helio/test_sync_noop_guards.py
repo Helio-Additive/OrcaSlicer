@@ -23,7 +23,10 @@ EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}", re.DOTALL)
 # same variable names directly and no expression substitution is needed. Any
 # expression left in a body is a mapping the harness does not know about, and is
 # raised rather than silently passed through as literal text.
-MAP: dict[str, str] = {}
+# The `check` and `graft` steps need no entries (see above). The `target` step
+# does: its only expression is the sync mode, which the harness supplies as an
+# ordinary environment variable so the real selection logic runs unmodified.
+MAP: dict[str, str] = {"steps.mode.outputs.sync_mode": "SYNC_MODE_IN"}
 
 
 def _sub_exprs(name, body):
@@ -59,6 +62,7 @@ def step_body(name):
 
 CHECK, CHECK_ENV = step_body("Check if already synced")
 GRAFT, GRAFT_ENV = step_body("Establish correct merge base (ephemeral graft)")
+TARGET, TARGET_ENV = step_body("Resolve sync target")
 
 
 CONTENT_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -353,7 +357,13 @@ def build(tmp, *, version, retag=False, bump_ahead=False, tag_at_target=False,
         sh("git tag v2.4.3", up)
 
     install_content_script(fork)
-    sh("git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --force", fork)
+    # refs/upstream-tags/ as well as refs/tags/, because that is what the real
+    # workflow's fetch step leaves behind and the step bodies under test
+    # ENUMERATE `v*` from the namespace (#170). Mirroring only refs/tags here
+    # would leave the namespace empty, and the extracted `check` step would
+    # quietly exercise its "no v* tag at the tracking commit" fallback in every
+    # scenario — passing while testing a path production never takes.
+    sh("git fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' '+refs/tags/*:refs/upstream-tags/*' --force", fork)
 
     target = target_tag or ("v2.4.3" if (bump_ahead or new_release) else "v2.4.2")
     sync_sha = git(fork, "rev-list", "-n1", target)
@@ -540,25 +550,85 @@ def expr_guard_selftest():
     return False
 
 
-def prerelease_re_drift():
-    """upstream_content.sh's PRERELEASE_RE and the workflow's sync-target grep
-    must be byte-identical.
+WATCH_WF = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", ".github", "workflows",
+                        "helio-upstream-watch.yml")
 
-    Their agreement is load-bearing with no shared source: the sync target is
-    chosen by the workflow's grep, and base_below walks releases using
-    PRERELEASE_RE. If the two drift, a tag one of them counts and the other
+
+def prerelease_re_drift():
+    """upstream_content.sh's PRERELEASE_RE, the sync workflow's target-selection
+    grep and the watch workflow's stable-tag grep must all be byte-identical.
+
+    Their agreement is load-bearing with no shared source. The sync target is
+    chosen by the sync workflow's grep, and base_below walks releases using
+    PRERELEASE_RE: if those two drift, a tag one of them counts and the other
     skips puts the walk one release off — the window stops spanning the
     release that was actually skipped, and the depth guarantee is silently
     worth nothing.
+
+    The watch workflow is the third site, added with #170. Its value is what
+    the weekly digest labels "**sync target**", so if it drifts from the sync's
+    own grep the digest promises a target the sync will not take. That is worse
+    than both being wrong together, which was the state before: the digest at
+    least reported the truth about what the sync would do.
     """
-    label = "harness: PRERELEASE_RE matches the workflow's sync-target grep"
+    label = ("harness: PRERELEASE_RE matches the sync AND watch workflow greps")
     m = re.search(r"^PRERELEASE_RE='([^']+)'", open(CONTENT_SH).read(), re.M)
-    ok = bool(m) and ("grep -Evi -- '%s'" % m.group(1)) in open(WF).read()
+    grep = ("grep -Evi -- '%s'" % m.group(1)) if m else None
+    sites = {} if not m else {
+        "helio-upstream-sync.yml": grep in open(WF).read(),
+        "helio-upstream-watch.yml": grep in open(WATCH_WF).read(),
+    }
+    ok = bool(m) and all(sites.values())
     print(("  PASS  " if ok else "  FAIL  ") + label)
     if not ok:
-        print("        the prerelease exclusion in upstream_content.sh and the"
-              " target-selection grep in helio-upstream-sync.yml have drifted"
-              " apart — change both together, they are one invariant")
+        missing = [k for k, v in sites.items() if not v] or ["(PRERELEASE_RE not found)"]
+        print("        the prerelease exclusion has drifted: %s does not carry"
+              " upstream_content.sh's PRERELEASE_RE. All three are one"
+              " invariant — change them together" % ", ".join(missing))
+        FAILURES.append(label)
+    return ok
+
+
+def prerelease_re_behaviour():
+    """And it must actually classify upstream's real tag shapes correctly.
+
+    Byte-identity alone only proves the three sites agree; it does not stop
+    them agreeing on a wrong answer, which is exactly what #170 was — all
+    three required a literal `-` before the suffix, so upstream's underscore
+    prereleases (v1.4.0_beta1/_beta2/_beta3, all real) were classified as
+    STABLE and an underscore prerelease that was the newest tag would have
+    been merged into the release branch as a sync target.
+
+    The stable cases are here because widening the separator class is the kind
+    of change that is easy to widen too far: upstream's legacy names
+    (v1.1.0.14-sf, v1.0.10.05) must stay stable.
+    """
+    m = re.search(r"^PRERELEASE_RE='([^']+)'", open(CONTENT_SH).read(), re.M)
+    if not m:
+        return False
+    # Through grep, not Python's re: the shipped sites are greps, and ERE and
+    # Python disagree in ways that would let this pass on a pattern grep reads
+    # differently.
+    prerelease = ["v2.6.0_beta1", "v1.4.0_beta1", "v1.4.0_beta3",
+                  "v2.5.0-alpha", "v2.3.2-rc2", "v2.4.2-rc1", "v2.5.0-rc.1",
+                  "v2.6.0_RC2", "v2.6.0_dev", "v2.6.0_pre1"]
+    stable = ["v2.5.1", "v2.4.2", "v1.1.0.14-sf", "v1.0.10.05", "v2.3.0.1",
+              # `-sf-beta` IS a prerelease and is covered above by shape; these
+              # are the stable legacy names that must not be swept up.
+              "v1.3.3", "v2.10.0"]
+    ok = True
+    for tag, want_pre in [(t, True) for t in prerelease] + \
+                         [(t, False) for t in stable]:
+        hit = subprocess.run(["grep", "-Eqi", "--", m.group(1)],
+                             input=tag, text=True).returncode == 0
+        if hit != want_pre:
+            ok = False
+            print("  FAIL  harness: %s classified as %s" %
+                  (tag, "prerelease" if hit else "stable"))
+    label = "harness: PRERELEASE_RE classifies upstream's real tag shapes"
+    print(("  PASS  " if ok else "  FAIL  ") + label)
+    if not ok:
         FAILURES.append(label)
     return ok
 
@@ -567,6 +637,7 @@ print("Harness self-checks\n")
 r = []
 r.append(expr_guard_selftest())
 r.append(prerelease_re_drift())
+r.append(prerelease_re_behaviour())
 
 print("\nScenarios (fork tree holds v2.4.2 via a squashed commit; tag stale at v2.4.1)\n")
 # Was expect_skip=False/noop=True: the run merged, then discovered the merge
@@ -832,7 +903,7 @@ def content_repo(tmp, *, mode_only=False, overlap=False, prereleases=False,
         os.remove(tool)
         os.symlink("cfg.ini", tool)
     sh("git add -A && git commit -q -m squashed", fork)
-    sh("git fetch -q origin '+refs/tags/*:refs/tags/*' --force", fork)
+    sh("git fetch -q origin '+refs/tags/*:refs/tags/*' '+refs/tags/*:refs/upstream-tags/*' --force", fork)
     install_content_script(fork)
     return fork, git(fork, "rev-list", "-n1", "v2.4.0")
 
@@ -1449,6 +1520,481 @@ r.append(completion_e2e(
 r.append(completion_e2e(
     "an unmerged PR does NOT make the check step skip",
     [pr(96, merged=False, body=MARKER)], want_skip=False))
+
+
+# ---------------------------------------------------------------------------
+# Target selection (#170): which tag the sync will actually merge
+#
+# The two defects this pins are both in one two-line expression, and neither is
+# visible to any scenario above — those all take their target as a parameter,
+# so nothing exercised the selection itself.
+#
+#   1. The prerelease exclusion required a literal `-`, so upstream's
+#      underscore prereleases (v1.4.0_beta1/_beta2/_beta3 are real) were
+#      classified as STABLE. An underscore prerelease that was the newest tag
+#      would have been merged into the release branch as a release.
+#   2. Enumeration was `git tag -l 'v*'`, the union of upstream's tags and the
+#      fork's own. This fork carries four v*-shaped tags (v2.3.0.1-rc1..rc3,
+#      v2.3.1-rc1), so a fork-created STABLE v* tag above the baseline would
+#      have been selected as the sync target.
+#
+# Both cases pair the bad tag with a REAL upstream release below it, so a pass
+# means the right tag was chosen rather than merely that the wrong one was
+# rejected — an assertion that the selection is empty would also be satisfied
+# by a step that selected nothing at all.
+print("\n\nTarget selection — the tag the sync will merge (#170)\n")
+
+
+def target_repo(tmp, *, upstream_tags, fork_tags=()):
+    """A repo shaped like the fork after the workflow's fetch step.
+
+    Upstream tags go in BOTH refs/tags/ and refs/upstream-tags/, exactly as the
+    two fetches leave them; fork tags go only in refs/tags/, which is where
+    actions/checkout leaves the fork's own. That split is the whole subject of
+    defect 2, so the fixture has to reproduce it rather than assert on a repo
+    where the namespaces agree.
+    """
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(repo)
+    sh("git init -q -b main && git config user.email a@b && git config user.name A", repo)
+    for i, name in enumerate(upstream_tags):
+        open(os.path.join(repo, "f.txt"), "a").write(name + "\n")
+        sh("git add -A && git commit -q -m %r" % name, repo)
+        sh("git tag %s" % name, repo)
+        sh("git update-ref refs/upstream-tags/%s HEAD" % name, repo)
+    # Fork tags land on a commit of their own, off to the side, as a tag cut on
+    # fork work would.
+    if fork_tags:
+        open(os.path.join(repo, "helio.c"), "w").write("// helio\n")
+        sh("git add -A && git commit -q -m 'helio work'", repo)
+        for name in fork_tags:
+            sh("git tag %s" % name, repo)
+    return repo
+
+
+def run_target(repo, mode="latest-tag"):
+    outfile = os.path.join(repo, "..", "ghout-target")
+    open(outfile, "w").close()
+    p = sh(TARGET, repo, dict(TARGET_ENV, SYNC_MODE_IN=mode,
+                              GITHUB_OUTPUT=outfile), check=False)
+    out = dict(l.split("=", 1) for l in open(outfile).read().splitlines()
+               if "=" in l)
+    return p, out
+
+
+def target_case(label, *, upstream_tags, fork_tags=(), want_ref):
+    """Assert WHICH tag was selected, and that its ref is the namespaced one.
+
+    `sync_label` carries the selected tag name and is what these cases are
+    about. `sync_ref` is checked alongside it rather than instead of it,
+    because the two have different jobs and must not drift: the label names
+    the release for display and branch naming, while the ref is what `git
+    merge` merges and what the profile checkout reads. Asserting only the
+    label would let the ref regress to a bare name — which is exactly the
+    divergence `target_divergent_namespaces` exists for.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = target_repo(tmp, upstream_tags=upstream_tags, fork_tags=fork_tags)
+        p, out = run_target(repo)
+        got, ref = out.get("sync_label"), out.get("sync_ref")
+        want_ns = "refs/upstream-tags/" + want_ref
+        ok = p.returncode == 0 and got == want_ref and ref == want_ns
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_label=%s (want %s) sync_ref=%s rc=%s"
+              % (got, want_ref, ref, p.returncode))
+        if not ok:
+            print(p.stdout[-800:], p.stderr[-800:])
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# Positive control first: with nothing adversarial present the selection must
+# still pick the newest stable release, and must prefer it over its own
+# prereleases (the original reason this grep exists).
+r.append(target_case(
+    "positive control: newest stable wins over its own prereleases",
+    upstream_tags=["v2.4.2", "v2.5.1-alpha", "v2.5.1-rc2", "v2.5.1"],
+    want_ref="v2.5.1"))
+
+r.append(target_case(
+    "DEFECT 1: an underscore prerelease above the newest stable is NOT the target",
+    upstream_tags=["v2.5.1", "v2.6.0_beta1"],
+    want_ref="v2.5.1"))
+
+r.append(target_case(
+    "DEFECT 1: upstream's real legacy shape (v1.4.0_beta1..3) is excluded too",
+    upstream_tags=["v1.3.3", "v1.4.0_beta1", "v1.4.0_beta2", "v1.4.0_beta3"],
+    want_ref="v1.3.3"))
+
+r.append(target_case(
+    "DEFECT 1 boundary: a legacy STABLE name is not swept up by the wider class",
+    upstream_tags=["v1.0.10.05", "v1.1.0.14-sf"],
+    want_ref="v1.1.0.14-sf"))
+
+r.append(target_case(
+    "DEFECT 2: a fork-created stable v* tag above the baseline is NOT the target",
+    upstream_tags=["v2.4.2", "v2.5.1"], fork_tags=["v9.9.9"],
+    want_ref="v2.5.1"))
+
+r.append(target_case(
+    "DEFECT 2: the fork's four real v*-shaped tags are invisible to selection",
+    upstream_tags=["v2.4.2", "v2.5.1"],
+    fork_tags=["v2.3.0.1-rc1", "v2.3.0.1-rc2", "v2.3.0.1-rc3", "v2.3.1-rc1"],
+    want_ref="v2.5.1"))
+
+r.append(target_case(
+    "both defects at once: fork stable tag AND an underscore prerelease",
+    upstream_tags=["v2.4.2", "v2.5.1", "v2.6.0_beta1"], fork_tags=["v9.9.9"],
+    want_ref="v2.5.1"))
+
+
+def target_no_upstream_tags():
+    """With the namespace empty the step must FAIL, not fall back to refs/tags.
+
+    This is the failure mode the namespace split introduces: if the fetch were
+    ever dropped, enumeration returns nothing. Exiting is the right answer — a
+    sync that silently picked a fork tag instead is the bug being fixed.
+    """
+    label = "namespace empty (fetch dropped) -> the step fails rather than guessing"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = target_repo(tmp, upstream_tags=[], fork_tags=["v9.9.9"])
+        p, out = run_target(repo)
+        ok = p.returncode != 0 and not out.get("sync_ref")
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        rc=%s sync_ref=%s" % (p.returncode, out.get("sync_ref")))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(target_no_upstream_tags())
+
+r.append(target_case(
+    "SLASH TAG: a stable upstream tag containing `/` is still enumerated",
+    upstream_tags=["v2.5.1", "v2.6.0/final"],
+    want_ref="v2.6.0/final"))
+
+r.append(target_case(
+    "SLASH TAG: and one that is a prerelease is still excluded",
+    upstream_tags=["v2.5.1", "v2.6.0/rc1-beta"],
+    want_ref="v2.5.1"))
+
+
+def points_at_no_v_tag():
+    """The `--points-at` lookup must yield empty, not abort the step.
+
+    Codex's slash finding is fixed by enumerating a literal prefix and
+    filtering for `v*` afterwards, which adds a `grep` to this pipeline. That
+    grep exits 1 when no `v*` tag sits at the commit, and GitHub runs `run:`
+    bodies under `bash -e -o pipefail`, so without a guard the failing
+    pipeline would abort the whole `check` step rather than leave LAST_SYNCED
+    empty for the fallbacks below it.
+
+    No existing scenario reaches this: the fixture always parks the tracking
+    tag on a commit that does carry an upstream tag. So the hazard is pinned
+    directly, on the line lifted out of the workflow.
+    """
+    label = "points-at: no v* tag at the commit -> empty, exit 0 (not a pipefail abort)"
+    m = re.search(r"^\s*LAST_SYNCED=\$\(git for-each-ref --points-at .*?\)$",
+                  CHECK, re.S | re.M)
+    if not m:
+        print("  FAIL  " + label + " (the points-at lookup was not found in the"
+              " extracted check step — it was renamed or restructured)")
+        FAILURES.append(label)
+        return False
+    frag = m.group(0).strip()
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "r")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f"), "w").write("x\n")
+        sh("git add -A && git commit -q -m c", repo)
+        # A non-`v` upstream tag at the commit, so the grep really does filter
+        # everything out rather than the namespace simply being empty.
+        sh("git update-ref refs/upstream-tags/nightly-2026-11-23 HEAD", repo)
+        p2 = sh('SYNCED_COMMIT=$(git rev-parse HEAD)\n' + frag
+                + '\nprintf "[%s]" "$LAST_SYNCED"', repo, check=False)
+        ok = p2.returncode == 0 and p2.stdout.strip().endswith("[]")
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        rc=%s out=%r" % (p2.returncode, p2.stdout.strip()[-40:]))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(points_at_no_v_tag())
+
+
+def target_main_mode():
+    """`main` mode must be untouched by any of this — it never reads a tag."""
+    label = "main mode is unaffected: target is upstream/main, not a tag"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = target_repo(tmp, upstream_tags=["v2.5.1"], fork_tags=["v9.9.9"])
+        sh("git update-ref refs/remotes/upstream/main HEAD", repo)
+        p, out = run_target(repo, mode="main")
+        ok = (p.returncode == 0 and out.get("sync_ref") == "upstream/main"
+              and out.get("tracking_tag") == "helio-last-synced-main")
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_ref=%s tracking_tag=%s rc=%s"
+              % (out.get("sync_ref"), out.get("tracking_tag"), p.returncode))
+        if not ok:
+            print(p.stdout[-800:], p.stderr[-800:])
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(target_main_mode())
+
+
+def target_divergent_namespaces():
+    """refs/tags/ and refs/upstream-tags/ disagree -> the UPSTREAM commit wins.
+
+    CodeRabbit's finding on #171, and my first answer to it was wrong. I argued
+    the two namespaces cannot disagree because the fetch uses `--tags --force`.
+    That holds only when upstream's tag of that name EXISTS during that fetch.
+    If upstream publishes it in the window between the `--tags --force` fetch
+    and the namespace fetch, refs/tags/<name> keeps the FORK's commit while
+    refs/upstream-tags/<name> records upstream's.
+
+    The stakes are not just SYNC_SHA: sync_ref is what `git merge` merges and
+    what `git checkout "$SYNC_REF" -- resources/profiles` takes profiles from,
+    so a bare-name resolution would merge a fork commit and import fork
+    profiles under an upstream release name.
+
+    Asserted on BOTH outputs, because fixing only one leaves the other wrong
+    and the scenario would still pass.
+    """
+    label = "divergent namespaces: sync_ref/sync_sha resolve to UPSTREAM, not the fork commit"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f.txt"), "w").write("upstream\n")
+        sh("git add -A && git commit -q -m upstream-commit", repo)
+        up_sha = git(repo, "rev-parse", "HEAD")
+        # Upstream's v2.6.0 is in the namespace only — the shape the fetch
+        # window leaves behind.
+        sh("git update-ref refs/upstream-tags/v2.6.0 %s" % up_sha, repo)
+        # The fork's own v2.6.0, of the same name, on a different commit, in
+        # refs/tags only — what actions/checkout left and --force never
+        # replaced, because upstream had not published the name yet.
+        open(os.path.join(repo, "helio.c"), "w").write("// helio\n")
+        sh("git add -A && git commit -q -m fork-commit", repo)
+        fork_sha = git(repo, "rev-parse", "HEAD")
+        sh("git tag v2.6.0 %s" % fork_sha, repo)
+        # A real upstream release below it, so the selection has something to
+        # choose and this is not merely asserting an empty answer.
+        sh("git update-ref refs/upstream-tags/v2.5.1 %s" % up_sha, repo)
+
+        p2, out = run_target(repo)
+        ref, sha = out.get("sync_ref"), out.get("sync_sha")
+        ok = (p2.returncode == 0
+              and ref == "refs/upstream-tags/v2.6.0"
+              and sha == up_sha and sha != fork_sha)
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_ref=%s" % ref)
+        print("        sync_sha=%s (upstream=%s fork=%s)"
+              % ((sha or "")[:12], up_sha[:12], fork_sha[:12]))
+        if not ok:
+            print(p2.stdout[-600:], p2.stderr[-600:])
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(target_divergent_namespaces())
+
+
+def sync_ref_is_namespaced():
+    """And sync_ref must stay a refs/upstream-tags/ path in the ordinary case.
+
+    The divergence scenario above would also pass if sync_ref were a bare name
+    and only sync_sha were namespaced — but then `git merge "$SYNC_REF"` and
+    the profile checkout would still take the fork's commit. This pins the ref
+    itself on a repo where the two namespaces agree, so the guarantee does not
+    depend on constructing the race.
+    """
+    label = "sync_ref is a refs/upstream-tags/ path, not a bare tag name"
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = target_repo(tmp, upstream_tags=["v2.4.2", "v2.5.1"])
+        _, out = run_target(repo)
+        ok = out.get("sync_ref") == "refs/upstream-tags/v2.5.1" \
+            and out.get("sync_label") == "v2.5.1"
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        sync_ref=%s sync_label=%s"
+              % (out.get("sync_ref"), out.get("sync_label")))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(sync_ref_is_namespaced())
+
+
+def baseline_resolution_prefers_namespace():
+    """The BASELINE name must resolve through the namespace when it lives there.
+
+    CodeRabbit's follow-up on #171: the --points-at lookup gives LAST_SYNCED a
+    provenance-correct NAME (stripped from refs/upstream-tags/), and
+    `git rev-parse "$LAST_SYNCED^{commit}"` then resolved it as a bare name
+    through refs/tags/ — the same split that made SYNC_REF wrong.
+
+    LAST_SYNCED is mixed-provenance, so the fix prefers the namespace rather
+    than prefixing unconditionally. Both halves are asserted here: the upstream
+    release name must resolve to UPSTREAM's commit even when a fork tag of the
+    same name exists, and a name that is NOT in the namespace (the Helio
+    tracking tag) must still resolve via the fallback rather than failing.
+    """
+    label = "baseline resolution: prefers refs/upstream-tags/, falls back for non-upstream names"
+    m = re.search(r"^\s*BASELINE_COMMIT=\$\(git rev-parse .*?\|\| true\)$",
+                  CHECK, re.S | re.M)
+    if not m:
+        print("  FAIL  " + label + " (BASELINE_COMMIT resolution not found in the"
+              " extracted check step)")
+        FAILURES.append(label)
+        return False
+    frag = "\n".join(ln.strip() for ln in m.group(0).split("\n"))
+    tmp = tempfile.mkdtemp()
+    try:
+        repo = os.path.join(tmp, "r")
+        os.makedirs(repo)
+        sh("git init -q -b main . && git config user.email a@b && git config user.name A", repo)
+        open(os.path.join(repo, "f"), "w").write("upstream\n")
+        sh("git add -A && git commit -q -m upstream", repo)
+        up = git(repo, "rev-parse", "HEAD")
+        sh("git update-ref refs/upstream-tags/v2.5.1 %s" % up, repo)
+        # A fork tag of the SAME NAME on a different commit, in refs/tags only.
+        open(os.path.join(repo, "helio.c"), "w").write("// helio\n")
+        sh("git add -A && git commit -q -m fork", repo)
+        fork = git(repo, "rev-parse", "HEAD")
+        sh("git tag v2.5.1 %s" % fork, repo)
+        # And the Helio tracking tag, which is NOT in the namespace.
+        sh("git tag helio-last-synced %s" % fork, repo)
+
+        def resolve(name):
+            p2 = sh('LAST_SYNCED="%s"\n' % name + frag
+                    + '\nprintf "%s" "$BASELINE_COMMIT"', repo, check=False)
+            return p2.returncode, p2.stdout.strip()
+
+        rc1, got1 = resolve("v2.5.1")
+        rc2, got2 = resolve("helio-last-synced")
+        ok = (rc1 == 0 and got1 == up and got1 != fork
+              and rc2 == 0 and got2 == fork)
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        v2.5.1            -> %s (upstream=%s fork=%s)"
+              % (got1[:12], up[:12], fork[:12]))
+        print("        helio-last-synced -> %s (fallback, want fork %s)"
+              % (got2[:12], fork[:12]))
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(baseline_resolution_prefers_namespace())
+
+
+def last_synced_output_is_a_commit():
+    """The check step must emit a resolved COMMIT, not a bare tag name.
+
+    CodeRabbit's round-6 finding, and the other half of the defect fixed one
+    commit earlier: BASELINE_COMMIT was made namespace-first while the OUTPUT
+    that feeds the changelog kept emitting the bare name. Every consumer uses
+    it as a range endpoint — `git log "$LAST".."$LATEST"`, `rev-list --count`,
+    `diff --stat` — and none displays it, so a sha is unambiguous where a name
+    can be shadowed by a fork tag. Measured consequence of the name: a range
+    reporting 0 commits where the resolved range reports 1, i.e. a sync PR
+    claiming upstream changed nothing.
+
+    Asserted as "40 hex characters" rather than against a specific sha,
+    because the regression to prevent is *emitting a name at all*.
+    """
+    label = "check output: last_synced_commit is a resolved sha, not a tag name"
+    tmp = tempfile.mkdtemp()
+    try:
+        fork, target, sync_sha = build(tmp, version="2.4.2", new_release=True)
+        _, out = run_check(fork, target, sync_sha)
+        got = out.get("last_synced_commit", "")
+        ok = bool(re.fullmatch(r"[0-9a-f]{40}", got)) and "last_synced" not in (
+            set(out) - {"last_synced_commit"})
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        last_synced_commit=%s" % (got or "<unset>"))
+        if not ok:
+            print("        outputs seen: %s" % sorted(out))
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(last_synced_output_is_a_commit())
+
+
+def no_false_skip_from_divergent_version_inc():
+    """A version.inc-derived baseline must never produce skip=true on its own.
+
+    Codex P2 on #171, and a regression the namespace-first BASELINE_COMMIT
+    change introduced. The two resolutions disagree:
+
+      VERSION_COMMIT  <- refs/tags/<name>            (fork's commit in the race)
+      BASELINE_COMMIT <- refs/upstream-tags/<name>   (upstream's commit)
+
+    so VERSION_MATCHES_TARGET is false while BASELINE_COMMIT == SYNC_SHA, and
+    the skip guard `BASELINE_COMMIT = SYNC_SHA && VERSION_MATCHES_TARGET !=
+    true` fires. The run then exits skip=true WITHOUT any content check, which
+    is a silently dropped release — the one direction CLAUDE.md calls worse
+    than everything else.
+
+    The guard exists precisely so a version.inc claim cannot skip on its own
+    (#110). Resolving the two sides from different namespaces inverts it.
+    """
+    label = "NO FALSE SKIP: version.inc baseline + divergent tag refs must not skip"
+    tmp = tempfile.mkdtemp()
+    try:
+        # version="2.4.3" makes version.inc name the TARGET, and no_tag drops the
+        # tracking tag so LAST_SYNCED falls through to VERSION_TAG.
+        fork, target, sync_sha = build(tmp, version="2.4.3", new_release=True,
+                                       no_tag=True)
+        # The race: refs/tags/<target> is the fork's own commit, the namespace
+        # holds upstream's. build() mirrors both namespaces, so re-point only
+        # refs/tags to simulate "upstream published the name between fetches".
+        fork_head = git(fork, "rev-parse", "HEAD")
+        sh("git update-ref refs/tags/%s %s" % (target, fork_head), fork)
+        p2, out = run_check(fork, target, sync_sha)
+        skipped = out.get("skip") == "true"
+        ok = not skipped
+        print(("  PASS  " if ok else "  FAIL  ") + label)
+        print("        skip=%s (want false) rc=%s" % (out.get("skip"), p2.returncode))
+        if skipped:
+            print("        *** a release would be silently dropped ***")
+            print(p2.stdout[-700:])
+        if not ok:
+            FAILURES.append(label)
+        return ok
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+r.append(no_false_skip_from_divergent_version_inc())
+
 
 print("\n%d/%d passed" % (sum(r), len(r)))
 if FAILURES:
