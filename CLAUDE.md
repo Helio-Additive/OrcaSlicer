@@ -236,17 +236,33 @@ the pin — only that nothing had to clone it.
   unchanged, so the signal goes away again the moment that third-party suite goes red,
   which it can do without a commit here. The gate is inherited upstream code, so per
   Rule 15 it is recorded here, not patched; #133 carries the options.
-- **The test *targets* are only ever compiled on Linux, so the skip above is the whole
-  story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
-  only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
-  whose `t` sets `BUILD_TESTS=1`. The other legs do not: macOS runs
-  `./build_release_macos.sh … -t 10.15` (`:118`, `:154`) where `getopts ":dpa:snt:xbc:i:1Tuh"`
-  makes **lowercase `-t` the deployment target** and **uppercase `-T` the tests flag**, and
-  Windows runs `build_release_vs.bat slicer` (`:293`). So a test file that fails to compile
-  on Windows or macOS is not caught anywhere, and "it built on every platform" is never
-  evidence about `tests/**`. Said plainly because the opposite was asserted on #126 and in
-  this file before Codex corrected it on #138 — the error ran in the reassuring direction,
-  which is the one that matters.
+- **The test targets are compiled on Linux, Windows and macOS arm64 — and the one gap is
+  macOS x86_64.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`), and three legs
+  turn it on. Verified against the current tree rather than quoted, because the line
+  numbers below move with every sync — re-derive with
+  `grep -nE 'build_linux\.sh|build_win\.bat|build_release_macos\.sh' .github/workflows/build_orca.yml`:
+
+  | leg | invocation | tests? |
+  |---|---|---|
+  | Linux | `./build_linux.sh -istrlL` | ✅ `t` → `BUILD_TESTS=1` (`build_linux.sh:116`) |
+  | Windows x64 + arm64 | `build_win.bat -s --tests …` | ✅ `--tests` → `-DBUILD_TESTS=ON` (`build_win.bat:555-557`) |
+  | macOS **arm64** | `build_release_macos.sh … -t 10.15 -T` | ✅ uppercase `-T` → `BUILD_TESTS=1` (`build_release_macos.sh:45`, `:338`) |
+  | macOS **x86_64** | same command, **without** `-T` | ❌ the `-T` is `arch == 'arm64'`-conditional |
+
+  Note `getopts ":dpa:snt:xbc:i:j:Tuh"` still makes **lowercase `-t` the deployment
+  target** and **uppercase `-T` the tests flag**, which is the trap that made this
+  paragraph wrong twice. The arch-conditional `-T` is also why there is no
+  `unit_tests_macos_x86_64` job — the seven jobs listed above are exactly the
+  configurations that compile tests.
+
+  **This paragraph has now been wrong in both directions, which is the thing to remember.**
+  It first claimed cross-platform test coverage that did not exist (#126, corrected by
+  Codex on #138); it was then rewritten to say tests compile *only* on Linux, which was
+  true at the time and which the v2.5.x syncs falsified by adding `--tests` and `-T` — and
+  it kept asserting the old state, with stale line numbers, until review caught it on
+  #181 after that PR had already merged. So "it built on every platform" is now *weak*
+  evidence about `tests/**` rather than none at all: it covers everything except macOS
+  x86_64. Check the invocations instead of trusting this table.
 - **The `paths:` filter runs before the label gate.** GitHub evaluates trigger paths at
   the workflow level, so a PR that touches no path in the `pull_request` `paths:` list
   never starts the workflow at all and the `ready-to-build` label does nothing — the
@@ -715,9 +731,11 @@ the other five are wired to their own builds and keep running. See *Build All* a
 the `needs:` table and *External slicer regression tests* for the current state.
 
 A local `ctest` run is still worth doing on a test change, and worth saying in the PR —
-not because CI skips it, but because the Catch2 **targets** are only compiled on Linux
-(`BUILD_TESTS` is `OFF` elsewhere; see *Build All*), so a test that fails to compile on
-Windows or macOS is caught nowhere.
+but not for the reason this file gave until 25 Nov 2026. It is **not** true that the
+targets compile only on Linux: Windows (both arches) and macOS arm64 compile them too, so
+a test that fails to compile is caught on those. The remaining gap is **macOS x86_64**,
+whose build omits the `-T` flag. See *Build All* above for the per-leg table and how to
+re-derive it.
 
 Run all tests after building:
 ```bash
