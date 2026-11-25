@@ -595,7 +595,7 @@ private:
 #ifdef __linux__
 static void migrate_flatpak_legacy_datadir(const boost::filesystem::path &data_dir_path)
 {
-    if(!boost::filesystem::exists("/.flatpak-info"))
+    if (!is_running_in_flatpak())
         return; // Not running as a Flatpak, nothing to migrate.
     
     namespace fs = boost::filesystem;
@@ -9672,6 +9672,11 @@ void GUI_App::MacOpenURL(const wxString& url)
 {
     if (url.empty())
         return;
+    // A cold launch delivers the URL before post_init, so open it there like a command-line URL.
+    if (!m_post_initialized) {
+        init_params->input_files = { into_u8(url) };
+        return;
+    }
     start_download(into_u8(url));
 }
 

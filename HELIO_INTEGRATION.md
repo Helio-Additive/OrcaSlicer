@@ -1331,60 +1331,6 @@ published on a tree with the parser.
 The graduation step, when a feature is ready, is to delete its
 `helio_experimental_features_enabled()` call. Nothing moves between branches.
 
-## Temporary backports from upstream `main` (drop at the next sync)
-
-Upstream build fixes copied in **verbatim**, ahead of the upstream release that will
-carry them. Each fixes CI that was red on every PR. The mechanism keeps divergence at
-zero by copying upstream's own text rather than writing a Helio fix — but **the rows do
-not share one approval, and this section is the decision record, so read the status per
-row.**
-
-- **Rows 1–3** arrived with the v2.5.1 sync itself (#163, #164). The repo owner decided
-  not to merge with red CI, making these a deliberate, **owner-approved** exception to
-  Rule 15's "wait for the sync".
-- **Rows 4–5** (the two `wxWidgets` rows) were added afterwards, when the first
-  post-sync dependency build went red on **every** platform at once — all six
-  `Build Deps` legs and both Flatpak jobs, on PRs and on the release branch's own
-  post-merge run. They follow the same reasoning and the same verbatim-copy discipline,
-  but they were **not** covered by that decision and are **awaiting a separate owner
-  decision** (#167). Do not cite rows 1–3's approval for them.
-
-If the owner declines rows 4–5, the alternative is not "no fix" but "no build
-verification": while the pin is broken, no PR in this repo can exercise the build
-matrix at all.
-
-| file | fixes | upstream source |
-|---|---|---|
-| `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
-| `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
-| `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
-| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path. Our copy is **byte-identical**, pinned to an immutable reference rather than to a moving branch: blob `2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, which is what both `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` and the same path at upstream `main` `ced396fedc05842467f147ec67e926e4eb577faf` resolve to (checked 2026-11-21) |
-| no `branch:` + `disable-shallow-clone: true` on the `wxWidgets` git source in `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | Both Flatpak jobs: `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…` | `main`, same path |
-
-**At the next sync, take upstream's version of every row.** The two `deps/` rows and
-`deps/wxWidgets/wxWidgets.cmake` should merge cleanly, because both sides hold identical
-text. For `wxWidgets.cmake` that is checkable against a fixed revision rather than against
-whatever `main` says today — `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` is blob
-`2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, and so was upstream `main` at
-`ced396fedc05842467f147ec67e926e4eb577faf`. While that holds the merge is a no-op; if
-upstream has since changed the file, the blob will differ and the row stops claiming
-identity, which is the point of naming it. **Do not check this against the `v2.5.1` tag** —
-the release predates the fix and still carries `GIT_SHALLOW ON`, so comparing there shows a
-difference and invites the wrong conclusion that the backport diverges from upstream.
-The `build_all.yml` Flatpak row will not: upstream moved the job into
-`build_flatpak.yml`, so drop our volume line from `build_all.yml` when that restructure
-arrives.
-
-`scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` needs one caution. Only the `wxWidgets`
-git source was backported; upstream `main` additionally bumps gstreamer, OpenSSL (1.1.1w
-→ 3.5.9), CURL (7.75.0 → 8.23.0) and comments out the OpenVDB-only sources **in the same
-file**. Those are deliberately *not* here — they are ordinary upstream dependency changes
-that must arrive with a sync and be built, not hand-carried. So expect a conflict in that
-file and take upstream's whole version; do not read our smaller diff as the only change
-the file needs.
-
-Then delete this section.
-
 ## Upstream Sync: squash merges & the merge-base graft
 
 **Why upstream-sync PRs are squash-merged.** The release branch enforces a

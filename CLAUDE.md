@@ -156,20 +156,19 @@ simply absent:
 **The tell is the shape:** when a dependency Helio has never touched fails identically on
 every platform, suspect the pin or its remote, not the fork.
 
-Ownership was settled **before** the fix below was applied: at that point both files were
-byte-identical to upstream v2.5.1 — `git diff --ignore-cr-at-eol refs/tags/v2.5.1 <ref> --
-<file>` was empty against the then-current branch, and neither file contains the string
-`helio`. That is a statement about the pre-backport tree, so do not expect it to hold now:
-running it against today's branch returns the backport itself (~15 lines per file). The
-check that *does* survive, and the more useful one, is that
-`deps/wxWidgets/wxWidgets.cmake` is byte-identical to upstream `main` — which is what makes
-the next sync a no-op for that file.
+Ownership was settled by Rule 15's own test: both files were byte-identical to upstream
+v2.5.1, and neither contains the string `helio`. So this was upstream's, and **upstream
+had already written the fix on `main`** — `GIT_SHALLOW OFF`, and on the Flatpak side
+dropping the branch name plus `disable-shallow-clone: true`. Per the Scope rule the answer
+was to take upstream's text, not to write one, so it was backported verbatim.
 
-So under Rule 15 this is upstream's, and **upstream had already written the fix on `main`**
-— `GIT_SHALLOW OFF`, and on the Flatpak side dropping the branch name plus
-`disable-shallow-clone: true`. Per the Scope rule the answer was to take upstream's text,
-not to write one; it is backported verbatim and listed in `HELIO_INTEGRATION.md` →
-"Temporary backports from upstream `main`", to be dropped at the next sync.
+**That backport is over.** The v2.5.2 sync (#174) carries upstream's own version of both
+files, and our copies are byte-identical to `refs/tags/v2.5.2`, so the whole
+"Temporary backports from upstream `main`" section of `HELIO_INTEGRATION.md` was deleted
+with that sync — along with the other three rows (`deps/Boost/**`, `deps/OCCT/**` and the
+`/var/lib/flatpak` volume in `build_all.yml`), which v2.5.2 absorbed in the same way. The
+fork carries no temporary backports now; if one is ever added again, that section is where
+it is recorded.
 
 Note a cache hit hides this completely, so "CI was green yesterday" says nothing about
 the pin — only that nothing had to clone it.
