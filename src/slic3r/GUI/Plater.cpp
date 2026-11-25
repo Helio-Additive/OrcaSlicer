@@ -7651,6 +7651,7 @@ struct Plater::priv
     void on_helio_processing_complete(HelioCompletionEvent &evt);
     void on_helio_processing_start(SimpleEvent &evt);
     bool check_helio_mixed_color_sublayer();
+    bool check_helio_gcode_ready();
     void on_helio_input_dlg(wxCommandEvent &evt);
     void on_helio_process();
     void on_action_helio_processing(SimpleEvent &evt);
@@ -15059,13 +15060,8 @@ void Plater::priv::on_helio_process()
 
         while (dlg.ShowModal() == wxID_OK)
         {
-            if (partplate_list.get_curr_plate()->empty()) return;
-            if (!partplate_list.get_curr_plate()->is_slice_result_valid()) {
-                MessageDialog(nullptr, _L("Please slice the current plate before starting Helio simulation or optimization."),
-                              _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE)
-                    .ShowModal();
+            if (!check_helio_gcode_ready())
                 return;
-            }
             GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
             const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
@@ -15126,9 +15122,22 @@ bool Plater::priv::check_helio_mixed_color_sublayer()
     return false;
 }
 
+bool Plater::priv::check_helio_gcode_ready()
+{
+    auto* plate = partplate_list.get_curr_plate();
+    if (!plate->empty() && plate->is_valid_gcode_file())
+        return true;
+
+    const wxString message = q->m_only_gcode || q->m_exported_file
+        ? _L("Open the original model or project and slice it before starting Helio simulation or optimization.")
+        : _L("Please slice the current plate before starting Helio simulation or optimization.");
+    MessageDialog(q, message, _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE).ShowModal();
+    return false;
+}
+
 void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
 {
-    if (!check_helio_mixed_color_sublayer())
+    if (!check_helio_mixed_color_sublayer() || !check_helio_gcode_ready())
         return;
 
     std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
@@ -15181,15 +15190,7 @@ void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
 
 void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
-    if (!(partplate_list.get_curr_plate()->empty())) {
-        if (!check_helio_mixed_color_sublayer())
-            return;
-        if (!partplate_list.get_curr_plate()->is_slice_result_valid()) {
-            MessageDialog(nullptr, _L("Please slice the current plate before starting Helio simulation or optimization."),
-                          _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE)
-                .ShowModal();
-            return;
-        }
+    if (check_helio_mixed_color_sublayer() && check_helio_gcode_ready()) {
         helio_processing_disabled = true;
         std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
         if (helio_api_key.empty()) {
