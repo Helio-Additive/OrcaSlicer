@@ -679,10 +679,23 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 - `tests/slic3rutils/` - Utility function tests
 - `tests/sandboxes/` - Experimental/sandbox test code
 
-**Run these locally — CI currently does not.** While the external regression suite is red
-(see *External slicer regression tests* above), `unit_tests` skips on every PR, so a local
-`ctest` run is the only place these assertions are evaluated. If you add or change a test,
-say in the PR that you ran it; the green check mark does not cover it.
+**CI does run these — but check, because it has not always.** Since the v2.5.1/v2.5.2
+syncs all seven `unit_tests` jobs run on PRs (Linux x86_64/aarch64, Windows x64/arm64,
+macOS arm64, Flatpak x86_64/aarch64), so a red `unit_tests` is a real signal. This file
+said the opposite until 25 Nov 2026 — *"CI currently does not … a local `ctest` run is
+the only place these assertions are evaluated"* — which was true while the external
+regression suite was red, and stopped being true without anyone editing this line.
+
+So confirm rather than assume, in both directions: **a red `unit_tests` must not be
+dismissed**, and a green one covers only the platforms whose jobs actually ran. If the
+external suite goes red again, `build_linux` fails and the **Linux pair** skips with it —
+the other five are wired to their own builds and keep running. See *Build All* above for
+the `needs:` table and *External slicer regression tests* for the current state.
+
+A local `ctest` run is still worth doing on a test change, and worth saying in the PR —
+not because CI skips it, but because the Catch2 **targets** are only compiled on Linux
+(`BUILD_TESTS` is `OFF` elsewhere; see *Build All*), so a test that fails to compile on
+Windows or macOS is caught nowhere.
 
 Run all tests after building:
 ```bash
