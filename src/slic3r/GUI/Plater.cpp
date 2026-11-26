@@ -11628,12 +11628,7 @@ bool Plater::priv::restart_background_process(unsigned int state)
            (state & UPDATE_BACKGROUND_PROCESS_RESTART) != 0 ) ) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%: print is valid, try to start it now")%__LINE__;
         // Helio: auto-stop running helio when reslicing (FIX-4)
-        if (helio_background_process.is_running()) {
-            helio_background_process.stop_current_helio_action();
-            helio_background_process.stop();
-            helio_background_process.reset();
-            helio_processing_disabled = false;
-        }
+        q->stop_helio_process();
         // Keep the Helio artifact selection for an export-only run so that it uses
         // the optimized printable G-code. A reslice invalidates the Helio artifacts.
         if ((state & (UPDATE_BACKGROUND_PROCESS_FORCE_RESTART | UPDATE_BACKGROUND_PROCESS_RESTART)) != 0) {
@@ -11652,12 +11647,7 @@ bool Plater::priv::restart_background_process(unsigned int state)
         PartPlate* cur_plate = background_process.get_current_plate();
         if (cur_plate->is_slice_result_valid() && ((state & UPDATE_BACKGROUND_PROCESS_FORCE_RESTART) != 0)) {
             // Helio: auto-stop running helio when reslicing (FIX-4)
-            if (helio_background_process.is_running()) {
-                helio_background_process.stop_current_helio_action();
-                helio_background_process.stop();
-                helio_background_process.reset();
-                helio_processing_disabled = false;
-            }
+            q->stop_helio_process();
             // Helio: clear previous helio result on reslice (FIX-1)
             if (cur_plate) cur_plate->clear_helio_result();
             if (this->background_process.start()) {
@@ -13265,6 +13255,10 @@ void Plater::priv::on_slicing_completed(wxCommandEvent & evt)
 
 void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
 {
+    if (a.cancel_requested && a.cancel_requested->load())
+        return;
+    helio_processing_disabled = false;
+
     if (a.is_successful) {
         this->reset_gcode_toolpaths();
 
@@ -13337,7 +13331,6 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             plate->restore_staged_helio_result();
         notification_manager->push_helio_error_notification(a.error_message);
     }
-    helio_processing_disabled = false;
 }
 
 void Plater::priv::on_helio_processing_start(SimpleEvent &a)
@@ -16437,10 +16430,11 @@ void Plater::priv::init_notification_manager()
         bool res1 = false;
         bool res2 = false;
 
-        if (this->helio_background_process.is_running()) {
-            this->helio_background_process.stop_current_helio_action();
-            this->helio_background_process.stop();
+        if (helio_processing_disabled) {
+            helio_background_process.cancel_current_helio_action();
             helio_processing_disabled = false;
+            if (PartPlate* plate = background_process.get_current_plate())
+                plate->restore_staged_helio_result();
             res1 = true;
             notification_manager->set_slicing_progress_hidden();
         }
@@ -22777,14 +22771,14 @@ void Plater::feedback_helio_process(float rating, std::string commend)
 
 void Plater::stop_helio_process()
 {
-    if (p->helio_background_process.is_running()) {
-        p->helio_background_process.clear_helio_file_cache();
-        PartPlate* plate = p->background_process.get_current_plate();
-        if (plate) plate->clear_helio_result();
-        p->helio_background_process.reset();
-        p->helio_background_process.stop_current_helio_action();
-        p->helio_background_process.stop();
-    }
+    if (!p->helio_processing_disabled)
+        return;
+
+    p->helio_background_process.cancel_current_helio_action();
+    p->helio_background_process.clear_helio_file_cache();
+    if (PartPlate* plate = p->background_process.get_current_plate())
+        plate->clear_helio_result();
+    p->helio_background_process.reset();
     p->helio_processing_disabled = false;
 }
 

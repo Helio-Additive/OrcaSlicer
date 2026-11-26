@@ -6,6 +6,7 @@
 #include <cstddef>
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Polygon.hpp"
+#include <atomic>
 #include <memory>
 #include <functional>
 #include <string>
@@ -100,6 +101,7 @@ public:
           quality_std_improvement(std_impro), printable_path(in_printable_path) {}
     virtual wxEvent* Clone() const { return new HelioCompletionEvent(*this); }
 
+    std::shared_ptr<const std::atomic_bool> cancel_requested;
     std::string tmp_path;
     std::string path;
     bool is_successful;
