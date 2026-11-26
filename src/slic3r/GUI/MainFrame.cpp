@@ -4510,6 +4510,8 @@ void MainFrame::on_presets_changed(SimpleEvent &event)
             return;
         }
 
+        if (preset_type == Slic3r::Preset::TYPE_PRINTER)
+            m_plater->stop_helio_process();
         m_plater->on_config_change(*tab->get_config());
 
         m_plater->sidebar().update_presets(preset_type);
