@@ -719,16 +719,31 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 
 **CI does run these — but check, because it has not always.** Since the v2.5.1/v2.5.2
 syncs all seven `unit_tests` jobs run on PRs (Linux x86_64/aarch64, Windows x64/arm64,
-macOS arm64, Flatpak x86_64/aarch64), so a red `unit_tests` is a real signal. This file
+macOS arm64, Flatpak x86_64/aarch64), so a failing test now surfaces in CI instead of
+nowhere. This file
 said the opposite until 25 Nov 2026 — *"CI currently does not … a local `ctest` run is
 the only place these assertions are evaluated"* — which was true while the external
 regression suite was red, and stopped being true without anyone editing this line.
 
 So confirm rather than assume, in both directions: **a red `unit_tests` must not be
-dismissed**, and a green one covers only the platforms whose jobs actually ran. If the
-external suite goes red again, `build_linux` fails and the **Linux pair** skips with it —
-the other five are wired to their own builds and keep running. See *Build All* above for
-the `needs:` table and *External slicer regression tests* for the current state.
+dismissed from the check mark alone**, and a green one covers only the platforms whose
+jobs actually ran. If the external suite goes red again, `build_linux` fails and the
+**Linux pair** skips with it — the other five are wired to their own builds and keep
+running. See *Build All* above for the `needs:` table and *External slicer regression
+tests* for the current state.
+
+**And a red `unit_tests` is not always a failed test — the step name is what tells them
+apart** (#184). `unit_tests.yml`'s `Delete Test Artifact` step (`:75-79`) carries no
+`failOnError`, so the action's default `true` fails the whole job when GitHub's artifact
+index 404s a delete that in fact took effect — *after* `Unpackage and Run Unit Tests` has
+already passed. That reddens up to **five** of the seven jobs, because `unit_tests.yml`
+backs every leg but the two Flatpak ones (`build_all.yml:253`, `:261`, `:269`, `:277`,
+`:286`), while the identical cleanup is tolerant in `unit_tests_flatpak.yml:67` and
+`build_all.yml:340` — the asymmetry is the whole defect. Recognise it on sight:
+`Delete Test Artifact` red, `Unpackage and Run Unit Tests` green,
+`(404) Not Found: artifact does not exist`. Upstream's file — byte-identical to
+`refs/tags/v2.5.2` with and without `--ignore-cr-at-eol`, zero `helio` matches, and
+unfixed on upstream `main` — so per Rule 15 it is recorded here, not patched.
 
 A local `ctest` run is still worth doing on a test change, and worth saying in the PR —
 but not for the reason this file gave until 25 Nov 2026. It is **not** true that the
