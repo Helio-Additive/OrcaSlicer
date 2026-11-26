@@ -133,7 +133,7 @@ generation so work started under the old credential can never land.
 | `scripts/helio/test_release_channel.py` | Regression suite for those rules and for `helio-release.yml`'s tag step |
 | `.github/workflows/helio-release.yml` | Release workflow: builds all platforms, creates GitHub Release with Helio-prefixed assets. Triggers on merged PR with `release` label or manual `workflow_dispatch` (from `orca-latest-parity-bambu` or `helio-experimental`) |
 | `.github/workflows/helio-upstream-sync.yml` | Upstream sync: merges upstream changes, creates conflict issues (labeled `claude-work`), creates sync PRs |
-| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, creates tracking issues |
+| `.github/workflows/helio-upstream-watch.yml` | Monitors upstream for new tags/releases, posts the weekly digest on issue #21. New-tag selection is version-order, never ancestry — upstream cuts `release/*` from `main`, so releases are siblings. Tests: `scripts/helio/test_upstream_watch_tags.py` |
 | `.github/workflows/helio-workflow-inventory.yml` | Enforces the workflow inventory manifest (see Rule 12) |
 | `.github/helio-workflows.yml` | The inventory manifest itself — fork policy for every workflow in the repo |
 | `scripts/helio/check_workflow_inventory.py` | Validator behind the inventory workflow |
@@ -859,6 +859,50 @@ non-zero, so the guard catches it — without one the script runs on regardless 
 answers from whatever stale tags happen to be local, which is the wrong-baseline
 failure this rule exists to prevent.
 
+**A `v*` tag is not proof of upstream provenance — enumerate from
+`refs/upstream-tags/`.** `git tag -l 'v*'` lists the union of upstream's tags and
+this fork's own, and the fork really carries four `v*`-shaped tags
+(`v2.3.0.1-rc1`/`rc2`/`rc3`, `v2.3.1-rc1`). The documented fork convention is
+`helio-v{version}`, which would not collide — but those four tags *are* the
+convention being broken, so it enforces nothing. `helio-upstream-sync.yml`
+therefore mirrors `refs/tags/*` into `refs/upstream-tags/*` with a second fetch
+and enumerates from the namespace (`helio-upstream-watch.yml` does the same
+**once #157 lands** — on the current release branch it still reads `git tag -l`) —
+**and resolve the chosen name through the namespace too**, never by bare name
+(see the paragraph below; an earlier revision of this one said bare-name
+resolution was safe because the two namespaces hold the same tags, and that is
+false). Note what the namespace buys and what it does not: it makes
+*enumeration* provenance-safe, so a tag that survives it is upstream's. It is
+not a substitute for ancestry when the question is "is this commit in upstream's
+history" — and conversely, ancestry is not a substitute for it, which is the
+constraint #170 hands #158 (#170 → #158: version order cannot tell provenance).
+
+**Resolve a chosen tag through the ref that produced its name.** Selecting from
+`refs/upstream-tags/` and then resolving the bare name re-opens the hole the
+namespace closes: `git fetch --tags --force` replaces a fork-local tag only when
+upstream's tag of that name exists during that fetch, so a name upstream
+publishes between the two fetches leaves `refs/tags/<name>` on the **fork's**
+commit while the namespace holds upstream's. In `helio-upstream-sync.yml` that
+ref is what `git merge` merges and what the Rule 13 profile overwrite
+(`git checkout "$SYNC_REF" -- resources/profiles`) reads, so the consequence is a
+fork commit merged and fork profiles imported under an upstream release name.
+Keep a separate bare-name variable for display, branch naming and commit
+messages.
+
+**"Stable" means neither `-` nor `_` before the suffix.** The prerelease
+exclusion that separates releases from prereleases accepts `[-_]`, because
+upstream's older tags use an underscore (`v1.4.0_beta1`, `_beta2`, `_beta3` are
+all real) and a hyphen-only test reads those as *stable*. The same expression
+lives in three places with no shared source — the sync's target selection,
+`PRERELEASE_RE` in `scripts/helio/upstream_content.sh`, and the watch digest's
+stable-tag lookup — and they must change together: the sync's copy picks the
+target, `PRERELEASE_RE` keeps `base_below`'s walk inside one release family, and
+the watch's copy is what the digest labels **sync target**. `prerelease_re_drift`
+in `scripts/helio/test_sync_noop_guards.py` pins the three as byte-identical and
+a companion check pins the pattern's behaviour on upstream's real tag shapes,
+including that the legacy **stable** names (`v1.1.0.14-sf`, `v1.0.10.05`) are not
+swept up by the wider separator class.
+
 **`--stat` answers the first question, the patch answers the real one.** A diffstat
 shows *whether* the file differs, which settles the empty case for **content** — no Helio
 content in it, so a content defect is not ours, stop. (Not byte identity, and so not the
@@ -1330,60 +1374,6 @@ published on a tree with the parser.
 
 The graduation step, when a feature is ready, is to delete its
 `helio_experimental_features_enabled()` call. Nothing moves between branches.
-
-## Temporary backports from upstream `main` (drop at the next sync)
-
-Upstream build fixes copied in **verbatim**, ahead of the upstream release that will
-carry them. Each fixes CI that was red on every PR. The mechanism keeps divergence at
-zero by copying upstream's own text rather than writing a Helio fix — but **the rows do
-not share one approval, and this section is the decision record, so read the status per
-row.**
-
-- **Rows 1–3** arrived with the v2.5.1 sync itself (#163, #164). The repo owner decided
-  not to merge with red CI, making these a deliberate, **owner-approved** exception to
-  Rule 15's "wait for the sync".
-- **Rows 4–5** (the two `wxWidgets` rows) were added afterwards, when the first
-  post-sync dependency build went red on **every** platform at once — all six
-  `Build Deps` legs and both Flatpak jobs, on PRs and on the release branch's own
-  post-merge run. They follow the same reasoning and the same verbatim-copy discipline,
-  but they were **not** covered by that decision and are **awaiting a separate owner
-  decision** (#167). Do not cite rows 1–3's approval for them.
-
-If the owner declines rows 4–5, the alternative is not "no fix" but "no build
-verification": while the pin is broken, no PR in this repo can exercise the build
-matrix at all.
-
-| file | fixes | upstream source |
-|---|---|---|
-| `deps/Boost/fix_locale_source_group.cmake` + one `PATCH_COMMAND` in `deps/Boost/Boost.cmake` | Flatpak aarch64: Boost.Locale `source_group … is not a prefix of file` under CMake 4.5 | `main`, same paths |
-| `deps/OCCT/0002-BRepGraph-MSVC-ARM64-ICE-workaround.patch` + the `PATCH_COMMAND` in `deps/OCCT/OCCT.cmake` | Windows arm64: MSVC `C1001` on `BRepGraph_LayerTopoSupplement.cxx`; guarded `_MSC_VER && !__clang__ && _M_ARM64`, so no effect on shipped x64/macOS/Linux binaries | `main`, same paths |
-| `/var/lib/flatpak` volume on the `flatpak` job's container in `build_all.yml` | Flatpak x86_64: `Failed to update org.gnome.Sdk: Invalid cross-device link` | `main` moved this job to `build_flatpak.yml` |
-| `GIT_SHALLOW OFF` in `deps/wxWidgets/wxWidgets.cmake` | All six `Build Deps` legs: `fatal: unable to read tree (b44c39c1…)`. The pinned wxWidgets commit is no longer the tip of `Orca-deps-wxWidgets`'s `v3.3.2` branch, and a shallow clone fetches only tips | `main`, same path. Our copy is **byte-identical**, pinned to an immutable reference rather than to a moving branch: blob `2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, which is what both `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` and the same path at upstream `main` `ced396fedc05842467f147ec67e926e4eb577faf` resolve to (checked 2026-11-21) |
-| no `branch:` + `disable-shallow-clone: true` on the `wxWidgets` git source in `scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` | Both Flatpak jobs: `Git commit for branch v3.3.2 is 89844cb1…, but expected b44c39c1…` | `main`, same path |
-
-**At the next sync, take upstream's version of every row.** The two `deps/` rows and
-`deps/wxWidgets/wxWidgets.cmake` should merge cleanly, because both sides hold identical
-text. For `wxWidgets.cmake` that is checkable against a fixed revision rather than against
-whatever `main` says today — `git rev-parse HEAD:deps/wxWidgets/wxWidgets.cmake` is blob
-`2f384e6cbe74375cf1495a0d664f374e3fcfae5d`, and so was upstream `main` at
-`ced396fedc05842467f147ec67e926e4eb577faf`. While that holds the merge is a no-op; if
-upstream has since changed the file, the blob will differ and the row stops claiming
-identity, which is the point of naming it. **Do not check this against the `v2.5.1` tag** —
-the release predates the fix and still carries `GIT_SHALLOW ON`, so comparing there shows a
-difference and invites the wrong conclusion that the backport diverges from upstream.
-The `build_all.yml` Flatpak row will not: upstream moved the job into
-`build_flatpak.yml`, so drop our volume line from `build_all.yml` when that restructure
-arrives.
-
-`scripts/flatpak/com.orcaslicer.OrcaSlicer.yml` needs one caution. Only the `wxWidgets`
-git source was backported; upstream `main` additionally bumps gstreamer, OpenSSL (1.1.1w
-→ 3.5.9), CURL (7.75.0 → 8.23.0) and comments out the OpenVDB-only sources **in the same
-file**. Those are deliberately *not* here — they are ordinary upstream dependency changes
-that must arrive with a sync and be built, not hand-carried. So expect a conflict in that
-file and take upstream's whole version; do not read our smaller diff as the only change
-the file needs.
-
-Then delete this section.
 
 ## Upstream Sync: squash merges & the merge-base graft
 

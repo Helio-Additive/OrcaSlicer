@@ -5,6 +5,9 @@
 #
 #   * test_sync_noop_guards.py   — the `check` and `graft` steps of
 #     helio-upstream-sync.yml, against synthetic repositories.
+#   * test_upstream_watch_tags.py — the new-tag selection of
+#     helio-upstream-watch.yml, which answered "None" for every upstream release
+#     for as long as it existed (#157).
 #   * test_release_channel.py    — the release-channel rules and the tag step of
 #     helio-release.yml. Its central case is a build that publishes cleanly and
 #     is then offered to nobody, which no other check would catch.
@@ -13,6 +16,13 @@
 # suite pinning the workflow's most failure-prone logic ran only when someone
 # remembered to, which is precisely the rot the workflow inventory (#106) exists
 # to prevent.
+#
+# Because every suite here extracts from a workflow, each one has to run when
+# the workflow it covers changes. The trigger is deliberately unfiltered (see
+# the comment on `on:` below), which satisfies that for all of them with no path
+# list to keep in step — a filter that missed one would silently stop testing
+# it. The job name stays "Upstream sync guards" even as the suites broaden, so
+# no branch-protection rule has to be re-pointed.
 #
 # It is a separate Helio-owned workflow rather than a job bolted onto the
 # upstream-owned shellcheck.yml, so it is not a new conflict site on every
@@ -71,8 +81,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install PyYAML
-        # The harness parses helio-upstream-sync.yml to extract the step bodies
-        # under test, rather than transcribing them.
+        # The harnesses parse helio-upstream-sync.yml and
+        # helio-upstream-watch.yml to extract the step bodies under test,
+        # rather than transcribing them.
         run: python -m pip install --disable-pip-version-check pyyaml
 
       - name: Configure git identity
@@ -85,6 +96,11 @@ jobs:
 
       - name: Run guard suite
         run: python3 scripts/helio/test_sync_noop_guards.py
+
+      - name: Run upstream-watch tag-selection suite
+        # A step of its own rather than appended to the suite above, so a
+        # failure names which workflow's logic broke without reading the log.
+        run: python3 scripts/helio/test_upstream_watch_tags.py
 
       - name: Run release channel suite
         run: python3 scripts/helio/test_release_channel.py

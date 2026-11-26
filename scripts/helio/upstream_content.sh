@@ -65,9 +65,18 @@ EMPTY_BLOB="0000000000000000000000000000000000000000"
 # release family: `base_below v2.4.2 2` would return v2.4.2-rc1 rather than
 # v2.4.0, the diff would not span the release that was actually skipped, and the
 # depth guarantee this file rests on would be silently worth nothing.
+# Either separator, not just `-`: upstream's older tags separate the prerelease
+# with an underscore (v1.4.0_beta1, _beta2, _beta3 are all real), and a
+# hyphen-only test classifies those as STABLE. Here that would make the walk
+# stop at a prerelease and call it a release, defeating the inside-one-family
+# guarantee the paragraph above rests on; in the sync's target selection the
+# same gap would pick a prerelease as the sync target (#170).
+#
 # Must stay byte-identical to the grep in helio-upstream-sync.yml's "Resolve
-# sync target" step (drift is pinned by test_sync_noop_guards.py).
-PRERELEASE_RE='-(alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$'
+# sync target" step and to the stable-tag grep in helio-upstream-watch.yml's
+# digest, which labels the sync target. Drift is pinned by
+# test_sync_noop_guards.py.
+PRERELEASE_RE='[-_](alpha|beta|rc|pre|dev)([.-]?[0-9A-Za-z]+)?$'
 
 # base_below <ref> <n>: the nth release tag strictly older than <ref> on its
 # ancestry; the oldest reachable if there are fewer than n; <ref>^1 if there are
