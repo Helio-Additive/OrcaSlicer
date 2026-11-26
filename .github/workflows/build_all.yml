@@ -30,6 +30,10 @@ on:
      - 'scripts/msix/**'
      - 'scripts/sign_windows.ps1'
      - 'tests/**'
+     # Helio: upstream's jobs run this script (unit_tests.yml, unit_tests_flatpak.yml)
+     # but neither upstream filter lists it, so a change to the ctest runner alone
+     # would never be built. See #135. A sync must not drop it as non-upstream.
+     - 'scripts/run_unit_tests.sh'
 
   pull_request:
     # Helio: `labeled` is what lets a reviewer start a build on a parity-branch PR
@@ -62,6 +66,8 @@ on:
      - 'scripts/msix/**'
      - 'scripts/sign_windows.ps1'
      - 'tests/**'
+     # Helio: see the matching entry in `push` above (#135).
+     - 'scripts/run_unit_tests.sh'
      # Helio: data-only paths, present in the `push` filter above but historically
      # absent here. Without them a PR touching only profiles or translations never
      # triggers this workflow, so applying `ready-to-build` to such a PR is silently

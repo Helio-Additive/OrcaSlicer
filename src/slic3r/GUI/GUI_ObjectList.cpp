@@ -53,6 +53,7 @@
 #include "libslic3r/Point.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include "libslic3r/LocalesUtils.hpp"
+#include "libslic3r/Utils.hpp"
 #include <exception>
 #include "slic3r/GUI/ParamsPanel.hpp"
 #include "slic3r/GUI/GUI_ObjectLayers.hpp"
@@ -221,6 +222,9 @@ ObjectList::ObjectList(wxWindow* parent) :
 
     // describe control behavior
     Bind(wxEVT_DATAVIEW_SELECTION_CHANGED, [this](wxDataViewEvent& event) {
+        if (m_restoring_plate_selection)
+            return;
+
         // detect the current mouse position here, to pass it to list_manipulation() method
         // if we detect it later, the user may have moved the mouse pointer while calculations are performed, and this would mess-up the HitTest() call performed into list_manipulation()
         if (!GetScreenRect().Contains(wxGetMousePosition())) {
@@ -285,12 +289,17 @@ ObjectList::ObjectList(wxWindow* parent) :
 
         ObjectDataViewModelNode* sel_node = (ObjectDataViewModelNode*)event.GetItem().GetID();
         if (sel_node && (sel_node->GetType() & ItemType::itPlate)) {
-            if (wxGetApp().plater()->is_preview_shown()) {
-                wxGetApp().plater()->select_sliced_plate(sel_node->GetPlateIdx());
-            } else {
-                wxGetApp().plater()->select_plate(sel_node->GetPlateIdx());
+            auto* plater = wxGetApp().plater();
+            const int plate = sel_node->GetPlateIdx();
+            const int result = plater->is_preview_shown() ? plater->select_sliced_plate(plate) : plater->select_plate(plate);
+            if (result != 0) {
+                ScopeGuard restore_events([this] { m_restoring_plate_selection = false; });
+                m_restoring_plate_selection = true;
+                on_plate_selected(plater->get_partplate_list().get_curr_plate_index());
+                m_last_selected_item = GetSelection();
+                return;
             }
-            wxGetApp().plater()->deselect_all();
+            plater->deselect_all();
         }
         else {
             selection_changed();
@@ -1639,9 +1648,12 @@ void ObjectList::list_manipulation(const wxPoint& mouse_pos, bool evt_context_me
 
             get_selected_item_indexes(obj_idx, vol_idx, item);
             //wxGetApp().plater()->PopupObjectTable(obj_idx, vol_idx, mouse_pos);
-            if (m_objects_model->GetItemType(item) & itPlate)
+            if (m_objects_model->GetItemType(item) & itPlate) {
+                const auto* plate_node = static_cast<ObjectDataViewModelNode*>(item.GetID());
+                if (plate_node->GetPlateIdx() != wxGetApp().plater()->get_partplate_list().get_curr_plate_index())
+                    return;
                 dynamic_cast<TabPrintPlate*>(wxGetApp().get_plate_tab())->reset_model_config();
-            else if (m_objects_model->GetItemType(item) & itLayer)
+            } else if (m_objects_model->GetItemType(item) & itLayer)
                 dynamic_cast<TabPrintLayer*>(wxGetApp().get_layer_tab())->reset_model_config();
             else if (item.IsOk())
                 dynamic_cast<TabPrintModel*>(wxGetApp().get_model_tab(vol_idx >= 0))->reset_model_config();

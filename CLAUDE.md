@@ -30,6 +30,14 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Auto-creates sync PRs with changelog and Helio-relevant change reports
 - Uses `claude-work` label to flag items for automated triage
 - Detects out-of-band merges (e.g. manual PRs) via ancestor check and auto-updates the tracking tag
+- **The sync target is chosen from `refs/upstream-tags/`, and "stable" accepts either prerelease separator** (#170). Two defects lived in the same two-line expression, and both have the shape this file keeps recording: a selection that looks right because the inputs that would break it do not happen to exist today.
+  - **`git tag -l 'v*'` is the union of upstream's tags and the fork's own**, and this fork really carries four `v*`-shaped tags (`v2.3.0.1-rc1`/`rc2`/`rc3`, `v2.3.1-rc1`) — departures from the documented `helio-v{version}` convention, so the convention has already failed to hold once. A fork-created **stable** `v*` tag above the baseline would have been selected as the sync target. The likely consequence is not a bad merge: such a tag usually points at a commit already on the release branch, so the ancestor check skips the merge and instead points `helio-last-synced` at a **fork commit**. The graft rejects that on its strict-ancestor gate (a fork commit is never an ancestor of an upstream release — measured), but **two reporting consumers do not**: the `check` step's baseline takes any `v*` tag at that commit, and the changelog computes `git log $LAST..$LATEST` across unrelated history, so the sync PR would carry a plausible commit count and log that a reviewer has no reason to doubt. The fetch step now mirrors `refs/tags/*` into `refs/upstream-tags/*` and both enumerations read the namespace. **The sync target's resolution reads it too** (next bullet). The *baseline's* resolution only **prefers** it and falls back to a bare name, because `LAST_SYNCED` is mixed-provenance — an upstream release name, the Helio tracking tag, or a raw sha — and only the first kind is in the namespace. The watch workflow is **not** namespaced on this branch; that is #157's change.
+  - **The prerelease exclusion required a literal `-`.** Upstream's older tags separate the prerelease with an **underscore** — `v1.4.0_beta1`, `_beta2`, `_beta3` are all real — so a hyphen-only test classifies those as *stable*, and an underscore prerelease that was the newest tag would be merged into the release branch as a release. The class is now `[-_]`. Upstream's legacy **stable** names (`v1.1.0.14-sf`, `v1.0.10.05`) are unaffected, which is asserted rather than assumed: widening a separator class is exactly the change that is easy to widen too far.
+  - **Three sites, one invariant.** The exclusion appears in `helio-upstream-sync.yml`'s target selection, in `upstream_content.sh`'s `PRERELEASE_RE`, and in `helio-upstream-watch.yml`'s stable-tag lookup — with no shared source. The sync's grep picks the target; `base_below` uses `PRERELEASE_RE` to keep the ancestry walk inside one release family; and the watch's value is what the weekly digest labels **sync target**. A partial change is worse than both being wrong together, because before #170 the digest at least reported the truth about what the sync would do — fixing one side makes the digest promise a target the sync will not take. `prerelease_re_drift` in `scripts/helio/test_sync_noop_guards.py` now pins all three, and a companion check asserts the pattern's *behaviour* on upstream's real tag shapes, because byte-identity only proves the three agree — it does not stop them agreeing on a wrong answer, which is precisely what this was.
+  - **Reachability, stated plainly so nobody re-derives it:** neither defect is reachable against upstream's current naming (everything since 2022 uses `-alpha`/`-beta`/`-rc`) and all four fork tags are `-rc` **and** below the baseline. That is two accidents, not a guarantee; the regression suite's `DEFECT 2: the fork's four real v*-shaped tags are invisible` case passes on the pre-fix code for exactly that reason, and the `v9.9.9` case beside it is the one that reproduces the bug.
+  - **The chosen name must be resolved through the namespace too, not by bare name** — `SYNC_REF="refs/upstream-tags/$LATEST_TAG"`, and `SYNC_SHA` from that. The `--tags --force` fetch only replaces a fork-local tag of the same name when upstream's tag **exists during that fetch**, so if upstream publishes the name in the window between that fetch and the namespace fetch, `refs/tags/<name>` keeps the **fork's** commit while the namespace records upstream's. A bare `$LATEST_TAG` resolves via `refs/tags/`, so the name would be provenance-correct and the resolution would not. That reaches much further than `SYNC_SHA`: `sync_ref` is what `git merge` merges and what `git checkout "$SYNC_REF" -- resources/profiles` takes the profile tree from, so the sync would merge a fork commit and import fork profiles under an upstream release name. `SYNC_LABEL` keeps the bare name for the branch name, the commit message and the PR body. Found by CodeRabbit on #171 after an initial refutation of mine was wrong — the `--force` argument is sound only for the non-racing case.
+  - **The baseline name is resolved namespace-first too, but only *preferentially*.** `LAST_SYNCED` is mixed-provenance — an upstream release name (from the `--points-at` lookup, `version.inc`, the content test, or the bootstrap `v2.3.2-rc2`), the Helio tracking tag, or a raw sha in `main` mode — so a blanket `refs/upstream-tags/` prefix would break the non-upstream kinds. The namespace probe therefore runs first with **`-q --verify`** and the bare `rev-parse` stays as the fallback. The step then emits that **resolved commit** as `last_synced_commit`, not the name — every consumer uses it as a range endpoint (`git log`, `rev-list --count`, `diff --stat`) and none displays it, so a sha closes the whole shadowing class rather than just the namespace half. Emitting the name was the other half of the same defect: with a fork tag shadowing the baseline name, the range reports **0 commits where the resolved range reports 1**, so the sync PR claims upstream changed nothing. **`version.inc`'s own lookup is resolved namespace-first for the same reason, and the two MUST agree.** `VERSION_MATCHES_TARGET` gates the "baseline and target point to the same commit" skip, so resolving those two sides from different namespaces inverts that guard: under the fetch race `refs/tags/<name>` is the fork's commit (so the flag is false) while the namespaced baseline is upstream's (so it equals the target), and the run exits `skip=true` **with no content check** — a silently dropped release, which is the one direction this file treats as worse than everything else. That guard exists precisely so a `version.inc` claim cannot skip on its own (#110). Codex found this as a regression introduced by the baseline fix; pinned by `no_false_skip_from_divergent_version_inc`. The `-q --verify` on the probe is not tidiness: a bare `git rev-parse` **prints its argument to stdout on failure**, so an unguarded probe would concatenate the unresolved name with the fallback's sha. That same quirk makes the step's own "Unable to resolve baseline" guard unreachable — pre-existing, benign in effect (an unresolvable baseline flows on as a literal string, which no sha equals, so the run proceeds rather than skipping) and load-bearing for two `no_tag` scenarios, so it is **#173** rather than a fix here. Raised by CodeRabbit on #171.
+  - **Order matters for #158.** #170's namespace fix is a **precondition** for #158's option 1, not an independent nicety: replacing the strict-ancestry gate with a version-order comparison would accept a fork tag `v9.9.9` without blinking, because version order cannot tell provenance and ancestry — for all its faults — can. Enumerate from the namespace first; only then is relaxing that gate safe.
 - **Never opens an empty PR.** "Already synced?" is answered cheapest first, but only **content-backed** answers may skip a run: the tracking tag equalling the target (a commit id, and only ever written after content was validated), the ancestor/trial-merge checks, the `upstream_content.sh holds` test, and — as the backstop — comparing the **merged tree** with the target branch's tree after the grafted merge. `version.inc` equalling the target is *not* on that list: it is a version string, it sets an expectation only, and it cannot skip on its own (see the next bullet). Two of those checks are immune to squash-flattened history — `upstream_content.sh holds` and the merged-tree comparison, both of which ask the tree — while the ancestor check and the pre-graft trial merge are not, which is what produced the empty #107. The merged-tree comparison is the backstop because it is the only one that runs *after* the corrected merge. A no-op merge skips the PR, explains itself in the job summary, and advances the tracking tag
 - **`version.inc` sets an expectation; it never skips a run on its own.** It is a version string, and the release it names can stop describing the tree without the file changing (upstream force-retagging a release we already synced, or a local version bump landing before the content). Skipping there would silently drop upstream work — far worse than #107's empty PR. Three invariants protect this: every write of the tracking tag must be content-backed (that is why the *tag* may skip a run but `version.inc` may not, and why opening a sync PR no longer advances it — see below); the merge-base graft requires a **strict** ancestor, falling back to the target's first parent when the records name the target itself; and **every** graft candidate — `version.inc` and the tracking tag alike — must be validated for its **inherited** content, not just its own delta. Validation compares **trees**, in `scripts/helio/upstream_content.sh` — shared with the `check` step so "does this branch hold release X?" has one implementation. A path upstream changed between a base four releases down and the candidate, which our tree still holds at the base version, is a change we never applied. Comparing changed path *names* is not enough: if upstream edits one hunk of a file and Helio independently edits another, the path appears on both sides and cancels out while upstream's hunk is absent — so blob **and mode** are compared (a mode-only `100644`→`100755` change has identical blobs and would otherwise be dropped for good), and where ours matches neither side a three-way merge decides. That merge has one more trap in it (#152 — **not** the cause of #150's 472 conflicts, which was the ancestry gate skipping this script entirely; see #158, and #160 where the same failure recurred on v2.5.1): `git merge-file` places upstream's hunk by its position in the **base**, so when Helio has appended to the same file our copy of upstream's lines can sit at a different offset and the merge cleanly inserts them a **second** time. The result differs from ours while our blob holds every line of the change, and the old code read that as a definitive `missing` (#152 — measured on `TextInput.hpp`, where the merge duplicates three `static_tips*` lines already present). A clean merge whose only effect is re-inserting a block **immediately beside an identical one** therefore answers `unknown`, **not** `held`: duplication shows presence is possible, not that it happened, so `base-ok` tolerates it (this is #152's fix) while `holds` still refuses (so no release is skipped on it). Answering `held` there would open the one direction that drops upstream work silently. **Two tests decide it, and the #154 review is why there are two.** First, adjacency, not whole-file containment — Codex rejected the containment form: upstream adding `    validate();` to `second()` when `first()` already has that line yields a clean merge whose added line *is* somewhere in our blob while `second()` never received it, and `base-ok` tolerating that grafts a base which then merges the real target cleanly without re-adding the call. Position is the only discriminator, so the comparison is against neighbouring lines. Second, a **run-length** comparison against upstream's blob, because adjacency alone fails CodeRabbit's case on #154: upstream *deliberately* adding a second adjacent `counter++;` where we hold one satisfies adjacency while being real content we never received. A global occurrence count does not settle it either (Codex, round 3) — if our fork independently adds the same block somewhere distant, the totals match while upstream's adjacent copy is still absent. So the run of consecutive copies at the insertion site must be **longer than the longest such run anywhere in upstream's blob**: site run 2 against theirs 1 is a merge artefact, site run 2 against theirs 2 is a real addition. Taking the longest run anywhere can only refuse more often, which is the safe direction. The diff must also be appends only, and every appended block must pass both tests, so one real insertion beside a duplicate still answers `missing`. The `awk` comparisons force string context with `x ""`: a bare `!=` on two numeric strings compares them numerically, so `01` and `1` test equal (Codex, #154). A conflict is a third answer, `unknown`, not a synonym for held: `holds` (the already-synced question, where a wrong yes skips a release) refuses on unknown, while `base-ok` (the merge-base question, where a wrong no means a weekly conflict) tolerates it. Tolerating it is not the same as *preferring* it, and the graft no longer accepts an undecidable candidate outright: an undecidable path in the **base** is the one shape that drops upstream work without a conflict, because if the base already carries upstream's value and the sync target has not moved it since, the three-way merge sees theirs == base and keeps ours silently. So a candidate carrying undecidable paths is used only after `first-held … strict` fails to find a provably-held base below it — and when it is used, the run says so and names the paths. Candidate records are evaluated **newest-first by ancestry, with fall-through** — strictly-held on any candidate beats degraded acceptance on any, and the walk-down below a candidate starts only after every newer candidate has failed. Record preference (version.inc, tag, then the target's first parent when the records self-name the target) is not ancestry order, and evaluating in record order let a stale tracking tag's walk-down graft v2.3.0 under a tree that fully held the target — turning the designed no-op verification merge into a weekly conflict for an already-merged release. A mode change is decided **before** the text merge for the same reason: upstream flipping `100644`→`100755` while Helio independently edits the blob leaves the text merge comparing blobs whose modes it cannot see, and it answers `held` for a change we never received. The ancestry walk skips prerelease tags, using the same exclusion as the sync-target selection — counting `v2.4.2-rc1` as a step keeps the window inside one release family and makes the depth guarantee worthless. Within the walk, releases are ordered by ancestry via `git describe`, not by tag date. A candidate that fails is not dropped — the run walks down to the newest commit whose content is present (provably-held preferred; the permissive fallback carries undecidable paths by construction and the run names them), names the files that were never applied, and grafts that. Choosing a graft base is asymmetric: too old only inflates the conflict set, too new makes git treat the missing content as deliberate reversions and drop it from the sync silently. Regression tests: `scripts/helio/test_sync_noop_guards.py` (runs the real step bodies extracted from the workflow)
 - **Opening a sync PR does not advance the tracking tag.** It used to, which made `helio-last-synced` a record of "a PR exists" while every reader treated it as "this content is on the branch". A PR closed unmerged then skipped that release permanently, and a PR left open got grafted as a merge base it had not earned. The tag now advances only on evidence the content is on the branch — the ancestor hit, the no-diff trial merge, the merged-tree comparison, or the content test below. Runs in between redo the merge and refresh the same PR
@@ -68,7 +76,21 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - Why it exists: upstream ships repo infrastructure along with slicer code, and syncs pull it in wholesale. `dedupe-issues.yml` failed on every opened issue from March to August 2026 because it needs a credential this fork never had, and nothing forced anyone to notice
 
 ### Upstream Watch (`helio-upstream-watch.yml`)
-- Monitors upstream for new tags/releases and creates tracking issues
+- Monitors upstream for new tags/releases and posts a weekly digest (Thursday 09:00 UTC) as a comment on the single open `upstream-watch` issue (#21)
+- **"Is this tag new?" is a version-order question, not an ancestry one.** The digest's `New Tags Since Last Sync` list asked `git merge-base --is-ancestor <baseline> <tag>`. Upstream cuts every `release/*` branch from `main` and tags there, so consecutive releases are **siblings, not descendants** — `v2.4.2` is not an ancestor of `v2.5.0`; their merge-base is a commit on `main` below both. The ancestor test therefore holds only *within* one release family (`v2.3.2-rc2` → `v2.3.2`, tagged on the same branch) and is false across every family boundary, which is precisely where a new release appears. Measured against the real 84-tag upstream set: from baseline `v2.4.2` the test passed for exactly one tag — the baseline itself — which the `!= $BASELINE_TAG` guard then dropped, so the section read `None` with four `v2.5.0` tags present. From the hardcoded `v2.3.2-rc2` fallback baseline it reported only `v2.3.2` while `v2.4.0`, `v2.4.1`, `v2.4.2` and `v2.5.0` all existed — so it under-reported across the whole period that tag was stuck (see the tracking-tag bullet under Upstream Sync). This is the same wrong-question-is-ancestry mistake the merge-base graft exists to correct, in a different file. v2.5.0 went unannounced for five days and surfaced only because the **sync** workflow picks its target by version sort, not by ancestry
+- **Comparison normalises prereleases before sorting.** Both `sort -V` and git's `version:refname` rank a stable release **below** its own prereleases (`v2.5.0` < `v2.5.0-alpha`), so `norm_ver` appends a sentinel suffix to stable tags to correct the order. It also folds `_` to `-` first, because upstream's older tags separate the prerelease with an underscore (`v1.4.0_beta1`, `_beta2`, `_beta3` are all real) and a hyphen-only test reads those as *stable* — ranking `v1.4.0_beta1` above `v1.4.0` and dropping the stable release that followed. Adding `*_*` to the case test is **not** sufficient: `sort -V` ranks `-` before `_`, so the fold is what fixes it. The consistency guard below cannot catch this class of error because it shares the same comparison (Codex P2 on #157). This is load-bearing whenever the baseline is itself a prerelease — including the workflow's own hardcoded `v2.3.2-rc2` fallback, where raw ordering would omit the stable `v2.3.2` that followed it, the silent-drop direction. The key is sorted with `sort -t"$TAB" -k1,1 -rV`: `sort -V` compares the whole line by default, and a tab embedded in a version string makes it rank `v2.3.2-rc` above `v2.3.2-rc2`
+- **A consistency guard makes the contradiction loud.** If the newest stable tag is *strictly newer* than the baseline, an empty new-tag list is arithmetically impossible, so the step emits a `::warning` and replaces the list with a do-not-trust banner. The comparison has to be the version test and not `!=`: a baseline that is a prerelease ahead of the newest stable release (holding `v2.5.0-rc` before `v2.5.0` is tagged) is a legitimately empty list. It warns rather than fails — a digest missing one section still carries the other five, and failing posts nothing. The bug hid for five days behind a digest that printed `Latest upstream tag: v2.5.0` and `New Tags Since Last Sync: None` in the same comment; that can no longer be posted silently
+- **Upstream tags are enumerated from `refs/upstream-tags/`, never `git tag -l`.** `git tag -l 'v*'` lists the union of upstream's tags and the fork's own, and this fork carries four `v*`-shaped tags of its own (`v2.3.0.1-rc1`/`rc2`/`rc3`, `v2.3.1-rc1`). Any of them above the baseline would be reported as an upstream release and, if it were the newest stable one, named the digest's sync target. All four currently sit below the baseline so nothing is misreported today — the digest simply must not depend on that. The fetch step mirrors `refs/tags/*` into `refs/upstream-tags/*` and the digest reads names through an `upstream_tags()` helper, so every `v*` enumeration and the baseline verification see upstream's tags only. It is a second fetch invocation, so a second network operation — the same refs asked for twice — but **not** a new failure mode: with no `|| true` a failure exits the fetch step, so the digest never runs and nothing is posted, which is the policy the plain `--tags` fetch already set on the grounds that a wrong digest is worse than none. The alternative considered was `git ls-remote` inside the digest step; it costs the same network operation but puts the failure mid-digest, where the policy would have to be decided from scratch. The helper keeps git's `--sort=-version:refname`, so the stable-tag lookup is unchanged except in which refs it can see. Raised by CodeRabbit on #157
+- **The helper enumerates a LITERAL prefix and applies the `v*` test afterwards — it must never be written as the pattern `refs/upstream-tags/v*`.** `for-each-ref` matches with wildmatch under `WM_PATHNAME`, so its `*` does **not** cross a `/`, unlike the `git tag -l 'v*'` (plain fnmatch) that the namespace split replaced. The pattern form therefore silently drops any upstream tag whose name contains a slash. Measured with `v2.5.1`, `v2.6.0/final` and `v1.4.0_beta1` in the namespace: fnmatch heads the list with `v2.6.0/final`, the pattern form lists only `v2.5.1` and `v1.4.0_beta1`. That is the silent-under-report direction — `LATEST_TAG` names an older release and the new-tag list omits the newer one — and the consistency guard above **cannot** catch it, because the guard compares `NEW_TAGS` against `LATEST_TAG` and both come through this helper (the same shared-comparison blind spot as `norm_ver`). Not reachable against upstream's tags today: none of the 87 `v*` tags contains a slash (checked 2026-11-23), which is upstream's habit and not a guarantee. `--sort` and `strip=2` need no change — every ref shares the prefix so ordering is unaffected, and `strip=2` yields `v2.6.0/final` intact. The added `grep` makes the helper exit 1 on an empty namespace, so **every call site needs a trailing `|| true`** on its pipeline: Actions runs `run:` bodies under `bash -e -o pipefail`, where that aborts the step mid-digest instead of leaving the list empty. Found by Codex on #171, where `helio-upstream-sync.yml`'s own enumeration is fixed the same way; pinned here by the slash-tag case in `test_upstream_watch_tags.py`, which fails on both the tag list and the sync-target mark if the pattern form comes back
+- **The baseline is `version.inc`, not the `helio-last-synced` tag** (#118). The tag points at an *upstream* commit and can never be moved by a workflow token (see the tracking-tag bullet under Upstream Sync), so it sat at `v2.3.2-rc2` for three releases and the digest reported long-synced releases as new. `version.inc` is written by the sync merge itself and needs no permission. The baseline is verified through `refs/upstream-tags/` explicitly — not `refs/tags/`, which also holds the fork's own `v*` tags (see the bullet above), and not a bare name, which resolves branches too and upstream ships `release/*` branches alongside these tags. There is deliberately **no** `BASELINE_REF` variable: the selection compares version *strings* and never resolves the baseline as a git ref, so that verification now establishes only that the baseline names a real upstream tag — which is what gates the fallback
+- Regression tests: `scripts/helio/test_upstream_watch_tags.py`, run by `helio-sync-guard-tests.yml`. It extracts the selection block from the workflow between the `>>> new-tags-selection` / `<<< new-tags-selection` markers (so it tests shipped code, like `test_sync_noop_guards.py` does for the sync step bodies) and runs it against a fixture that reproduces upstream's branch-off-`main` topology — tagging the releases linearly would make each an ancestor of the next and the bug would not reproduce. Renaming or removing a marker is a hard error, not an empty block
+
+### Helio Sync Guard Tests (`helio-sync-guard-tests.yml`)
+- Runs every extracted-from-workflow suite, each as its own step so a failure names which workflow's logic broke: `test_sync_noop_guards.py` (sync `check`/`graft`), `test_upstream_watch_tags.py` (watch tag selection) and `test_release_channel.py` (release-channel rules and the tag step). A fourth step runs `version_channel.py check --tree-only` against the tree's real `HelioChannel.hpp`, and no-ops with an explanatory line on any branch that is not a release branch
+- **There is no `paths:` filter, and that is deliberate** (#141, merged 2026-11-20). GitHub evaluates path filters against only the first 300 changed files, ordered by path, and `scripts/helio/**` sorts after `resources/**` where a sync's bulk lives — so on a sync PR those paths are always outside the window (measured: 857 files sort before `scripts/helio/` on v2.4.2, 7,940 on v2.4.1, 14,617 on v2.4.0-beta). A sync whose conflict resolution also rewrites `scripts/helio/**` would skip this suite on exactly the PR that changes the logic it guards. Same reasoning as `helio-workflow-inventory.yml`
+- **If a `paths:` filter is ever reintroduced it must name every workflow a suite extracts from**, or editing that workflow stops running its own tests — and the omission is silent. The hazard is now historical on both counts: #157 added `helio-upstream-watch.yml` to the then-existing list for that reason and #141's removal subsumed it (resolved in #141's favour), and **#130 — long flagged as the PR that would narrow the filter again — merged on 2026-11-20 leaving the trigger unfiltered**, so the #130 ↔ #141 silent-revert that five sweeps warned about did not happen. Keep the rule for the next proposal rather than as a live warning
+- There is also a weekly `cron` (Monday 08:00 UTC), because the suites depend on the runner image, Python and PyYAML as well as on this repo: between #121 and #130 nothing triggered them at all, so a breakage originating outside the repo would first have surfaced on a sync-workflow edit — the worst moment to debug the harness instead of the sync
+- The job name is `Upstream sync guards`. Keep it stable even as the suites broaden — renaming it re-points any branch-protection rule that references it
 
 ### Release (`helio-release.yml`)
 - Triggers on: merged PR with `release` label on `orca-latest-parity-bambu` or `helio-experimental`, or manual `workflow_dispatch` from either branch
@@ -127,7 +149,7 @@ Ours outright: Helio-owned CI (`.github/workflows/helio-*.yml`, `scripts/helio/*
 - **The version rule is what makes it work, and it is easy to get backwards.** An experimental version must sort *above* the newest stable release and *below* the stable release it anticipates: `2.4.3-exp01` against a `2.4.2` stable. Too low (`2.4.2-exp01`) and the update check skips it — the build publishes, looks healthy, and is offered to nobody. Too high, or missing the marker, and testers are never moved back onto stable when it ships. `version_channel.py` enforces both, and `scripts/helio/test_release_channel.py` pins the rules
 - **The format is `X.Y.Z-expNN`, and neither the dot nor the padding is cosmetic.** `get_version()` applies its regex with `std::regex_match` — whole-string — and the prerelease group is `(-[A-Za-z0-9]+)?`, so `2.4.3-exp.1` parses as **invalid** and that release is skipped in silence. **This cannot be fixed in the C++**: the clients that must read an experimental tag are the stable builds already installed, whose copy of that regex was fixed when they were compiled, so the published format is what has to comply. The zero-padding is the second half — prerelease identifiers that are not purely numeric compare as strings, so `exp9` sorts *above* `exp10` and the tenth build of a version would look older than the ninth. Both verified against the shipped matcher and the `semver` library the app links
 - Cutting one: re-create `helio-experimental` from the release branch, flip `HELIO_EXPERIMENTAL_BUILD` to `1` and `HELIO_RELEASE_CHANNEL` to `"experimental"`, set `version.inc` to the next patch with an `-expNN` marker, push, then dispatch `helio-release.yml` from that branch
-- **Before cutting a *stable* release, check that no unfinished feature is sitting on the branch ungated.** The gate is what keeps experimental work out of a stable build, so a feature that merges before its gate does is, for that window, shipping to everyone. Nothing enforces this — `grep` for the feature's entry points and confirm each is behind `helio_experimental_features_enabled()`. **Current instance: the #126 warpage views.** They merge ungated and a follow-up adds the gate; until that follow-up lands, a stable release cut from this branch ships nine unfinished visualisation modes to every user
+- **Before cutting a *stable* release, check that no unfinished feature is sitting on the branch ungated.** The gate is what keeps experimental work out of a stable build, so a feature that merges before its gate does is, for that window, shipping to everyone. Nothing enforces this — `grep` for the feature's entry points and confirm each is behind `helio_experimental_features_enabled()`. **The #126 warpage views were this entry's worked example and are no longer an instance of it** — the earlier plan is what made them one. They were to merge ungated with a follow-up adding the gate; instead #126 carries its own gate, verified on head `54479766` at 9 call sites: `HelioDragon.cpp:1444` and `:1509` (the outgoing `enableWarpingAnalysis` request field), `GCodeViewer.cpp:1442` (`is_warpage_view` rejected on a stable build), `:1516`, `:2099` and `:2102` (legend and view-type plumbing), `Preferences.cpp:2419` (both residual-stress toggles), `GUI_App.cpp:9927` and `HelioReleaseNote.cpp:903`. **That list is a snapshot of one commit, so re-run the grep rather than trusting it — or the sentence it replaced.** The whole risk here is a single missed entry point, which is exactly what a stale inventory hides; the previous wording is the demonstration, having told two sweeps that a gate which had landed was still pending
 
 ### Build Pipeline (reusable workflows)
 - `build_check_cache.yml` → `build_deps.yml` → `build_orca.yml`
@@ -156,20 +178,19 @@ simply absent:
 **The tell is the shape:** when a dependency Helio has never touched fails identically on
 every platform, suspect the pin or its remote, not the fork.
 
-Ownership was settled **before** the fix below was applied: at that point both files were
-byte-identical to upstream v2.5.1 — `git diff --ignore-cr-at-eol refs/tags/v2.5.1 <ref> --
-<file>` was empty against the then-current branch, and neither file contains the string
-`helio`. That is a statement about the pre-backport tree, so do not expect it to hold now:
-running it against today's branch returns the backport itself (~15 lines per file). The
-check that *does* survive, and the more useful one, is that
-`deps/wxWidgets/wxWidgets.cmake` is byte-identical to upstream `main` — which is what makes
-the next sync a no-op for that file.
+Ownership was settled by Rule 15's own test: both files were byte-identical to upstream
+v2.5.1, and neither contains the string `helio`. So this was upstream's, and **upstream
+had already written the fix on `main`** — `GIT_SHALLOW OFF`, and on the Flatpak side
+dropping the branch name plus `disable-shallow-clone: true`. Per the Scope rule the answer
+was to take upstream's text, not to write one, so it was backported verbatim.
 
-So under Rule 15 this is upstream's, and **upstream had already written the fix on `main`**
-— `GIT_SHALLOW OFF`, and on the Flatpak side dropping the branch name plus
-`disable-shallow-clone: true`. Per the Scope rule the answer was to take upstream's text,
-not to write one; it is backported verbatim and listed in `HELIO_INTEGRATION.md` →
-"Temporary backports from upstream `main`", to be dropped at the next sync.
+**That backport is over.** The v2.5.2 sync (#174) carries upstream's own version of both
+files, and our copies are byte-identical to `refs/tags/v2.5.2`, so the whole
+"Temporary backports from upstream `main`" section of `HELIO_INTEGRATION.md` was deleted
+with that sync — along with the other three rows (`deps/Boost/**`, `deps/OCCT/**` and the
+`/var/lib/flatpak` volume in `build_all.yml`), which v2.5.2 absorbed in the same way. The
+fork carries no temporary backports now; if one is ever added again, that section is where
+it is recorded.
 
 Note a cache hit hides this completely, so "CI was green yesterday" says nothing about
 the pin — only that nothing had to clone it.
@@ -185,20 +206,36 @@ the pin — only that nothing had to clone it.
   `unit_tests` (`needs: build_linux`) skip only because their dependency skipped. Same
   outcome today, but the gate on those two is inherited, not stated — dropping or
   re-pointing a `needs:` would let them run unlabelled.
-- **`unit_tests`' `needs: build_linux` has a second consequence, and it currently costs
-  the fork its entire Catch2 signal.** The job is `needs: build_linux` +
+- **A red `build_linux` costs the *Linux* Catch2 jobs, and only those.** The unit-test
+  jobs each depend on their own platform's build, so the blast radius is two of seven —
+  read from the parsed `jobs.*.needs`, not from the job names:
+
+  | unit-test job | `needs:` |
+  |---|---|
+  | `unit_tests_linux_x86_64`, `unit_tests_linux_aarch64` | **`build_linux`** |
+  | `unit_tests_windows_x64`, `unit_tests_windows_arm64` | `build_windows` |
+  | `unit_tests_macos_arm64` | `build_macos_arch` |
+  | `unit_tests_flatpak_x86_64`, `unit_tests_flatpak_aarch64` | `flatpak` |
+
+  The mechanism for the Linux pair: `needs: build_linux` +
   `if: ${{ !cancelled() && success() }}`, and `success()` is false if any needed job
-  failed — so a red `build_linux` skips `unit_tests`. `build_linux` goes red at
+  failed — so a red `build_linux` skips them. `build_linux` goes red at
   *Run external slicer regression tests* (`build_orca.yml:403`), which runs **after**
-  everything `unit_tests` consumes: *Build slicer and tests* (`:381`) and
-  *Upload Test Artifact* (`:393`). The test bundle is built, uploaded and left
-  unexpired, and `unit_tests` declines to run it anyway. So while the external suite is
-  red (see below) **no Catch2 assertion is evaluated on any PR in this repo** — the
-  `ctest` instructions further down this file describe a local-only signal. Observed
-  casualty: the Helio regression tests in #126's `c4c5326d` / `d2fe8fb7`, written to pin
-  a silent warpage-metadata cross-attribution bug, which have never had an assertion run
-  in CI. The gate is inherited upstream code, so per Rule 15 it is recorded here, not
-  patched; #133 carries the options.
+  everything they consume: *Build slicer and tests* (`:381`) and
+  *Upload Test Artifact* (`:393`). The bundle is built, uploaded and left unexpired, and
+  the jobs decline to run it anyway.
+
+  **Do not over-state this, in either direction.** It was once true that a red external
+  suite cost the fork *every* Catch2 assertion, and this file said so; the v2.5.x syncs
+  added the Windows, macOS and Flatpak test jobs, each wired to its own build, so that
+  claim is now wrong and was corrected here only after review caught it. Equally, a red
+  `unit_tests` on **any** platform is real and must not be waved through — since the
+  v2.5.1/v2.5.2 syncs the external suite has been passing and all seven jobs have been
+  running (see *External slicer regression tests* below for the runs and the caveats).
+  The Linux coupling is
+  unchanged, so the signal goes away again the moment that third-party suite goes red,
+  which it can do without a commit here. The gate is inherited upstream code, so per
+  Rule 15 it is recorded here, not patched; #133 carries the options.
 - **The test *targets* are only ever compiled on Linux, so the skip above is the whole
   story and not half of it.** `BUILD_TESTS` is `OFF` by default (`CMakeLists.txt:167`) and
   only the Linux leg turns it on — `build_orca.yml:385` runs `./build_linux.sh -istrlL`,
@@ -220,13 +257,64 @@ the pin — only that nothing had to clone it.
 - Adding those paths does **not** make profile syncs build automatically — the label gate
   still skips every job on an unlabelled parity-branch PR. Widening `paths:` only changes
   whether the workflow *starts*; the label decides whether it *builds*. The exception is
-  PRs based on `main` / `release/*`, which are not label-gated: a profile-only *or*
-  translation-only PR to those branches now builds the full matrix. This fork opens none.
+  PRs based on `main` / `release/*`, which are not label-gated: a PR to those branches
+  touching only a filtered path now builds the full matrix. **This fork does open such
+  PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
+  earlier revision of this line claimed the fork opens none.
 
-### External slicer regression tests — red since 14 Sep 2026 on a v2.4.2 tree (#133)
-**Everything in this section is an observation of a moving third-party repository, not a
-standing fact.** It describes builds of this fork while pinned to **v2.4.2**, between
-14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
+### External slicer regression tests — green since the v2.5.1 sync; red 14 Sep–20 Nov 2026 on a v2.4.2 tree (#133)
+
+**Current state, 25 Nov 2026: passing, and the mechanism that made it dangerous is
+unchanged.** Read this block before the historical analysis below it, which describes a
+tree this fork no longer has.
+
+| | then (29 Oct, v2.4.2 tree) | now (21 Nov, v2.5.1 tree) |
+|---|---|---|
+| suite | `25 failed / 58 passed / 4 skipped / 6 xfailed` | **`84 passed, 0 failed`** / 4 skipped / 5 xfailed |
+| `build_linux` | red | **green** |
+| `unit_tests` | skipped on every PR | **runs** — 3,023 tests, 21,010 runs, 0 failures |
+
+**The baseline run this section says has never been taken, now exists — three times.**
+Its strongest complaint was that all 25 failures had *"only ever been observed in PR
+builds"* with no release-branch baseline to compare against. Release-branch post-merge
+runs [44895806778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44895806778),
+[44935255665](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935255665) and
+[44935380778](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/44935380778)
+(21 Nov) all concluded **success**, with `Run external slicer regression tests` green and
+`Unit Tests` green on Linux x86_64, Linux aarch64, Windows x64 and Windows arm64. So the
+ten crashes this section attributes to *"our own binary"* — the four `transform-*`
+SIGSEGVs among them — **no longer reproduce on this tree against this suite revision.**
+
+**That is an observation, and the historical attribution stays unresolved.** It is
+tempting to read it as clearing those crashes to upstream, and an earlier revision of
+this block did exactly that. It does not follow: **both variables moved at once.** The
+slicer tree went v2.4.2 → v2.5.1, *and* the suite is floating and records no revision,
+so the runs cannot separate "upstream fixed the defect" from "the suite stopped
+exercising it". Neither check the analysis below prescribes was performed — no per-case
+causal trace, and no reproduction on unmodified upstream with the same inputs and the
+same suite revision. Until one of them is, the question is **open**, exactly as that
+section says. Reporting these runs is not the same as answering it.
+
+**What has *not* changed, and is why #133 stays open.** The clone is still unpinned and
+still records no revision, so this says nothing about future runs: one commit in
+`orca-test-repo` can recreate the skew against a v2.5.2 tree with no commit here. Do not
+read "green" as a standing fact — the whole point of the section below is that this
+repository has over-read exactly this evidence, in the reassuring direction, six times.
+
+**Why the dated analysis below is kept rather than deleted.** This section instructs that
+when it stops applying, the dated incident details should be deleted and the
+unpinned-clone warning and ownership reasoning kept. That is followed only in part,
+deliberately: **#133 is still undecided**, and its options are priced against exactly
+that evidence (what the 25 failures were, what pinning to `0dfd8df` would cost). Deleting
+it while the decision is open would remove the basis for the decision. It is therefore
+**labelled historical** instead, and should be deleted once #133 is closed.
+
+---
+
+**Everything below this line is a historical record of the 14 Sep – 20 Nov 2026 incident
+on a v2.4.2 tree. It is not the current state.** It is an observation of a moving
+third-party repository, not a standing fact, and it describes builds of this fork while
+pinned to **v2.4.2**, between 14 Sep and 12 Oct 2026. The suite is cloned unpinned, so its result can change without
 any commit here — and it can change to *green*, or to a **genuine** failure. Re-check
 against the job log before concluding a red `build_linux` is this issue; do not treat a
 red Linux leg as pre-diagnosed. If you confirm it still applies, note the date on #133.
@@ -532,9 +620,23 @@ which is the state in which a genuine regression gets waved through.
 
 ### Profile & locale validation — inactive on this fork
 `check_profiles.yml` and `check_locale.yml` are inherited from upstream and both declare
-`pull_request: branches: [main]`. This fork's PRs target `orca-latest-parity-bambu`, so
-**neither has ever run on a PR here**, and `check_profiles_comment.yml` (which reports
+`pull_request: branches: [main]`, each with a `paths:` filter (`resources/profiles/**` and
+`localization/**` respectively). **Neither has ever run on a PR here** — 0 `pull_request`
+runs for either, per the Actions API — and `check_profiles_comment.yml` (which reports
 results via `workflow_run` on "Check profiles") is dead along with them.
+
+That is the status quo, not a guarantee. It holds because Helio PRs almost always target
+`orca-latest-parity-bambu`, and the few `main`-based ones (see Git Workflow below) have
+not touched `resources/profiles/**` or `localization/**` — not because such a PR is
+impossible. One that did would start the checker matching the paths it touched — and the
+two run *different* checks, so only one of them is exposed to the validator problem below:
+
+- `resources/profiles/**` → `check_profiles.yml`, which downloads a validator and runs it
+  over the full profile tree, then feeds `check_profiles_comment.yml` via `workflow_run`.
+  **This is the one that would fail on inherited data** (next paragraph).
+- `localization/**` → `check_locale.yml`, which runs gettext `msgfmt --check-format` over
+  `localization/i18n/**` and nothing else. No profile validator is involved, so the
+  failure mode below does not apply to it.
 
 Do not simply add the parity branch to those filters: as of v2.4.2 the inherited profile
 data does not pass the validator the workflow downloads. `check_profiles.yml` fetches the
@@ -547,7 +649,11 @@ matching release, or scoping validation to changed vendors, has to be decided fi
 ## Git Workflow
 - **Base branch**: `orca-latest-parity-bambu` (not `main`)
 - **Push remote**: `helio` (never `origin` — that's upstream OrcaSlicer)
-- **PRs target**: `orca-latest-parity-bambu`
+- **PRs target**: `orca-latest-parity-bambu` — the default for all Helio work. A few have
+  targeted `main` instead (#128, #129 in Aug 2026; #3, #6, #19, #24 older). That is the
+  exception, not a second convention, but it is not hypothetical: those bases are **not**
+  label-gated, which is why a `build_all.yml` `paths:` entry costs a full matrix there.
+  See the Build All section above.
 
 ## Overview
 
@@ -595,10 +701,23 @@ Tests are located in the `tests/` directory and use the Catch2 testing framework
 - `tests/slic3rutils/` - Utility function tests
 - `tests/sandboxes/` - Experimental/sandbox test code
 
-**Run these locally — CI currently does not.** While the external regression suite is red
-(see *External slicer regression tests* above), `unit_tests` skips on every PR, so a local
-`ctest` run is the only place these assertions are evaluated. If you add or change a test,
-say in the PR that you ran it; the green check mark does not cover it.
+**CI does run these — but check, because it has not always.** Since the v2.5.1/v2.5.2
+syncs all seven `unit_tests` jobs run on PRs (Linux x86_64/aarch64, Windows x64/arm64,
+macOS arm64, Flatpak x86_64/aarch64), so a red `unit_tests` is a real signal. This file
+said the opposite until 25 Nov 2026 — *"CI currently does not … a local `ctest` run is
+the only place these assertions are evaluated"* — which was true while the external
+regression suite was red, and stopped being true without anyone editing this line.
+
+So confirm rather than assume, in both directions: **a red `unit_tests` must not be
+dismissed**, and a green one covers only the platforms whose jobs actually ran. If the
+external suite goes red again, `build_linux` fails and the **Linux pair** skips with it —
+the other five are wired to their own builds and keep running. See *Build All* above for
+the `needs:` table and *External slicer regression tests* for the current state.
+
+A local `ctest` run is still worth doing on a test change, and worth saying in the PR —
+not because CI skips it, but because the Catch2 **targets** are only compiled on Linux
+(`BUILD_TESTS` is `OFF` elsewhere; see *Build All*), so a test that fails to compile on
+Windows or macOS is caught nowhere.
 
 Run all tests after building:
 ```bash

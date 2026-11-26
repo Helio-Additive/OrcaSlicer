@@ -871,6 +871,7 @@ public:
     // of the last validate_current_plate. Other slice-ready writers consult this to stay consistent.
     bool plugins_block_slicing() const;
     //BBS: select the plate by index
+    bool can_select_plate(int plate_index);
     int select_plate(int plate_index, bool need_slice = false);
     //BBS: update progress result
     void apply_background_progress();
