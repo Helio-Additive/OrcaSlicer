@@ -53,6 +53,7 @@
 #include "libslic3r/Point.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include "libslic3r/LocalesUtils.hpp"
+#include "libslic3r/Utils.hpp"
 #include <exception>
 #include "slic3r/GUI/ParamsPanel.hpp"
 #include "slic3r/GUI/GUI_ObjectLayers.hpp"
@@ -221,6 +222,9 @@ ObjectList::ObjectList(wxWindow* parent) :
 
     // describe control behavior
     Bind(wxEVT_DATAVIEW_SELECTION_CHANGED, [this](wxDataViewEvent& event) {
+        if (m_restoring_plate_selection)
+            return;
+
         // detect the current mouse position here, to pass it to list_manipulation() method
         // if we detect it later, the user may have moved the mouse pointer while calculations are performed, and this would mess-up the HitTest() call performed into list_manipulation()
         if (!GetScreenRect().Contains(wxGetMousePosition())) {
@@ -236,10 +240,11 @@ ObjectList::ObjectList(wxWindow* parent) :
         // if we change selection in object list.
         // But, if we call SetFocus() for ObjectList it will cause an invoking of a KillFocus event for "temporary" panels
         this->SetFocus();
-#endif // __APPLE__
-
+#else
+        // To avoid selection update from SetSelection() and UnselectAll() under osx
         if (m_prevent_list_events)
             return;
+#endif // __APPLE__
 
         /* For multiple selection with pressed SHIFT,
          * event.GetItem() returns value of a first item in selection list
@@ -288,10 +293,10 @@ ObjectList::ObjectList(wxWindow* parent) :
             const int plate = sel_node->GetPlateIdx();
             const int result = plater->is_preview_shown() ? plater->select_sliced_plate(plate) : plater->select_plate(plate);
             if (result != 0) {
-                m_prevent_list_events = true;
+                ScopeGuard restore_events([this] { m_restoring_plate_selection = false; });
+                m_restoring_plate_selection = true;
                 on_plate_selected(plater->get_partplate_list().get_curr_plate_index());
                 m_last_selected_item = GetSelection();
-                m_prevent_list_events = false;
                 return;
             }
             plater->deselect_all();
