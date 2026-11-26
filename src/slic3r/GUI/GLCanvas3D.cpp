@@ -10881,9 +10881,11 @@ void GLCanvas3D::_render_imgui_select_plate_toolbar()
                         if (!app.is_closing()){
                             auto* plater = app.plater();
                             if (plater){
+                                if (!plater->can_select_plate(i))
+                                    return;
+                                plater->select_view_3D("3D"); // ensure its in 3D view
                                 if (plater->select_plate(i) != 0)
                                     return;
-                                plater->select_view_3D("3D");
                                 zoom_to_bed();
                                 auto* view3d_canvas = plater->get_view3D_canvas3D();
                                 if(view3d_canvas){
