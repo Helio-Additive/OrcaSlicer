@@ -285,12 +285,11 @@ ObjectList::ObjectList(wxWindow* parent) :
 
         ObjectDataViewModelNode* sel_node = (ObjectDataViewModelNode*)event.GetItem().GetID();
         if (sel_node && (sel_node->GetType() & ItemType::itPlate)) {
-            if (wxGetApp().plater()->is_preview_shown()) {
-                wxGetApp().plater()->select_sliced_plate(sel_node->GetPlateIdx());
-            } else {
-                wxGetApp().plater()->select_plate(sel_node->GetPlateIdx());
-            }
-            wxGetApp().plater()->deselect_all();
+            auto* plater = wxGetApp().plater();
+            const int plate = sel_node->GetPlateIdx();
+            const int result = plater->is_preview_shown() ? plater->select_sliced_plate(plate) : plater->select_plate(plate);
+            if (result == 0)
+                plater->deselect_all();
         }
         else {
             selection_changed();

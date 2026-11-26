@@ -7244,6 +7244,7 @@ struct Plater::priv
     BackgroundSlicingProcess    background_process;
     HelioBackgroundProcess      helio_background_process;
     bool                        helio_elements_fetched = false;
+    // Keep plate selection locked until the main thread has applied the Helio result.
     bool                        helio_processing_disabled = false;
     bool                        helio_using_reference_material { false };
     bool                        helio_using_reference_printer { false };
@@ -7589,6 +7590,7 @@ struct Plater::priv
     void on_helio_processing_complete(HelioCompletionEvent &evt);
     void on_helio_processing_start(SimpleEvent &evt);
     bool check_helio_mixed_color_sublayer();
+    bool check_helio_plate_switch();
     void on_helio_input_dlg(wxCommandEvent &evt);
     void on_helio_process();
     void on_action_helio_processing(SimpleEvent &evt);
@@ -13330,6 +13332,7 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
     } else {
         notification_manager->push_helio_error_notification(a.error_message);
     }
+    helio_processing_disabled = false;
 }
 
 void Plater::priv::on_helio_processing_start(SimpleEvent &a)
@@ -14308,7 +14311,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
 
-    if (helio_background_process.is_running()) {
+    if (helio_processing_disabled) {
         GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
         msgdialog.ShowModal();
         return -1;
@@ -14664,7 +14667,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
 
-    if (helio_background_process.is_running()) {
+    if (helio_processing_disabled) {
         GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
         msgdialog.ShowModal();
         return -1;
@@ -15011,6 +15014,7 @@ void Plater::priv::on_helio_process()
                 } else {
                     helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, []() {});
                 }
+                helio_processing_disabled = true;
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio simulation process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
             }
@@ -15025,6 +15029,7 @@ void Plater::priv::on_helio_process()
                 } else {
                     helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, []() {});
                 }
+                helio_processing_disabled = true;
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio optimization process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
             }
@@ -16412,6 +16417,7 @@ void Plater::priv::init_notification_manager()
         if (this->helio_background_process.is_running()) {
             this->helio_background_process.stop_current_helio_action();
             this->helio_background_process.stop();
+            helio_processing_disabled = false;
             res1 = true;
             notification_manager->set_slicing_progress_hidden();
         }
@@ -24783,9 +24789,25 @@ void Plater::apply_background_progress()
     }
 }
 
+bool Plater::priv::check_helio_plate_switch()
+{
+    if (!helio_processing_disabled)
+        return true;
+
+    q->CallAfter([plater = q] {
+        if (!wxGetApp().is_closing()) {
+            MessageDialog(plater, _L("A Helio simulation or optimization task is in progress."), wxEmptyString, wxICON_NONE | wxOK).ShowModal();
+        }
+    });
+    return false;
+}
+
 //BBS: select Plate
 int Plater::select_plate(int plate_index, bool need_slice)
 {
+    if (plate_index != p->partplate_list.get_curr_plate_index() && !p->check_helio_plate_switch())
+        return -1;
+
     int ret;
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: plate %2%, need_slice %3% ")%__LINE__ %plate_index  %need_slice;
     take_snapshot("select partplate!");
@@ -25446,6 +25468,8 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
     if (action == 0)
     {
         //select plate
+        if (plate_index != p->partplate_list.get_curr_plate_index() && !p->check_helio_plate_switch())
+            return -1;
         ret = p->partplate_list.select_plate(plate_index);
         if (!ret) {
             SimpleEvent event(EVT_GLCANVAS_PLATE_SELECT);
@@ -25629,6 +25653,8 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
         }
     } else if ((action == 7) && (!right_click)) {
         // move plate to the front
+        if (!p->check_helio_plate_switch())
+            return -1;
         take_snapshot("move plate to the front");
         ret = p->partplate_list.move_plate_to_index(plate_index,0);
         p->partplate_list.update_slice_context_to_current_plate(p->background_process);
@@ -25706,7 +25732,7 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
 //BBS: add an empty plate and switch to it (mirrors the toolbar's Add Plate).
 int Plater::add_plate()
 {
-    if (!p->can_add_plate())
+    if (!p->can_add_plate() || !p->check_helio_plate_switch())
         return -1;
     take_snapshot("add partplate");
     int new_plate = p->partplate_list.create_plate();
@@ -25742,6 +25768,8 @@ int Plater::delete_plate(int plate_index)
     if (plate_index == -1)
         index = p->partplate_list.get_curr_plate_index();
 
+    if (!p->check_helio_plate_switch())
+        return -1;
     take_snapshot("delete partplate");
     ret = p->partplate_list.delete_plate(index);
 

@@ -2285,8 +2285,11 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
         } else {
             set_state(STATE_CANCELED);
         }
-    } else {
+    } else if (!was_canceled()) {
         set_state(STATE_CANCELED);
+        auto* evt = new Slic3r::HelioCompletionEvent(GUI::EVT_HELIO_PROCESSING_COMPLETED, 0, "", "", false,
+                                                     _u8L("Slicing Canceled"));
+        wxQueueEvent(GUI::wxGetApp().plater(), evt);
     }
 }
 
