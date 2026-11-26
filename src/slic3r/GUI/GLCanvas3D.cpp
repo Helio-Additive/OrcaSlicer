@@ -10881,8 +10881,9 @@ void GLCanvas3D::_render_imgui_select_plate_toolbar()
                         if (!app.is_closing()){
                             auto* plater = app.plater();
                             if (plater){
-                                plater->select_view_3D("3D"); // ensure its in 3D view
-                                plater->select_plate(i);
+                                if (plater->select_plate(i) != 0)
+                                    return;
+                                plater->select_view_3D("3D");
                                 zoom_to_bed();
                                 auto* view3d_canvas = plater->get_view3D_canvas3D();
                                 if(view3d_canvas){
@@ -11069,8 +11070,9 @@ void GLCanvas3D::_render_plate_switcher()
 
         if (clicked && !current)
             plater->CallAfter([i]() {
-                wxGetApp().plater()->select_plate(i);
-                wxGetApp().plater()->deselect_all();
+                auto* plater = wxGetApp().plater();
+                if (plater->select_plate(i) == 0)
+                    plater->deselect_all();
             });
         if (hovered) {
             const std::string name = plate->get_plate_name();
