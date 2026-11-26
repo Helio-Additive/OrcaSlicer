@@ -5530,10 +5530,8 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         else if (evt.LeftUp() && !m_mouse.ignore_left_up && !m_mouse.dragging && m_picking_enabled && !m_hover_plate_idxs.empty() && (m_canvas_type == CanvasView3D) && !is_layers_editing_enabled())
         {
                 int hover_idx = m_hover_plate_idxs.front();
-                wxGetApp().plater()->select_plate_by_hover_id(hover_idx);
-                //wxGetApp().plater()->get_partplate_list().select_plate_view();
-                //deselect all the objects
-                if (m_gizmos.get_current_type() != GLGizmosManager::MeshBoolean && m_hover_volume_idxs.empty())
+                const int result = wxGetApp().plater()->select_plate_by_hover_id(hover_idx);
+                if (result == 0 && m_gizmos.get_current_type() != GLGizmosManager::MeshBoolean && m_hover_volume_idxs.empty())
                     deselect_all();
         }
         else if (evt.RightUp() && !is_layers_editing_enabled()) {

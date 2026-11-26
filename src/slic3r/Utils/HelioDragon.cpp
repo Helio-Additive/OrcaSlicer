@@ -994,7 +994,7 @@ HelioQuery::UploadFileResult HelioQuery::upload_file_to_presigned_url(const std:
 
 HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_api_url,
                                                      const std::string& helio_api_key,
-                                                     const std::string& gcode_id) 
+                                                     const std::string& gcode_id, const std::atomic_bool& cancel_requested)
 {
     HelioQuery::PollResult result;
     result.success = false;
@@ -1006,7 +1006,8 @@ HelioQuery::PollResult HelioQuery::poll_gcode_status(const std::string& helio_ap
     std::string poll_body = (boost::format(poll_query) % gcode_id).str();
 
     auto poll_http = Http::post(helio_api_url);
-    poll_http.header("Content-Type", "application/json")
+    poll_http.on_progress([&cancel_requested](Http::Progress, bool& cancel) { cancel = cancel_requested.load(); })
+        .header("Content-Type", "application/json")
         .header("Authorization", helio_api_key)
         .set_post_body(poll_body)
         .timeout_connect(10)
@@ -1111,9 +1112,9 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
                                                        const std::string helio_api_url,
                                                        const std::string helio_api_key,
                                                        const std::string printer_id,
-                                                       const std::string filament_id)
+                                                       const std::string filament_id, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll)
 {
-    HelioQuery::CreateGCodeResult res;
+    HelioQuery::CreateGCodeResult res{};
     std::string query_body_template = R"( {
 			"query": "mutation CreateGcode($input: CreateGcodeInputV2!) { createGcodeV2(input: $input) { id name sizeKb status progress } }",
 			"variables": {
@@ -1144,7 +1145,8 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
         http.header("Accept-Language", "zh-CN");
     }
 
-    http.timeout_connect(20)
+    http.on_progress([&cancel_requested](Http::Progress, bool& cancel) { cancel = cancel_requested.load(); })
+        .timeout_connect(20)
         .timeout_max(100)
         .on_header_callback([&res](std::string header_line) {
             std::string lower_line;
@@ -1156,7 +1158,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
                 res.trace_id = trace_id;
             }
         })
-        .on_complete([&res, helio_api_url, helio_api_key](std::string body, unsigned status) {
+        .on_complete([&res, helio_api_url, helio_api_key, &cancel_requested, &wait_before_poll](std::string body, unsigned status) {
         res.status = status;
         try {
             json parsed_obj = json::parse(body);
@@ -1207,9 +1209,16 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode(const std::string key,
 
             int poll_count = 0;
             while (res.status_str != "READY" && res.status_str != "ERROR" && res.status_str != "RESTRICTED" && poll_count < 60) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
+                if (cancel_requested.load() || wait_before_poll()) {
+                    res.success = false;
+                    return;
+                }
 
-                PollResult poll_res = poll_gcode_status(helio_api_url, helio_api_key, res.id);
+                PollResult poll_res = poll_gcode_status(helio_api_url, helio_api_key, res.id, cancel_requested);
+                if (cancel_requested.load()) {
+                    res.success = false;
+                    return;
+                }
 
                 if (poll_res.success) {
                     res.status_str = poll_res.status_str;
@@ -1276,9 +1285,9 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
                                                           const std::string printer_id,
                                                           const std::vector<MaterialInput>& materials,
                                                           bool isMultiColor,
-                                                          bool isMultiMaterial)
+                                                          bool isMultiMaterial, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll)
 {
-    HelioQuery::CreateGCodeResult res;
+    HelioQuery::CreateGCodeResult res{};
 
     std::vector<std::string> key_split;
     boost::split(key_split, key, boost::is_any_of("/"));
@@ -1322,7 +1331,8 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
         http.header("Accept-Language", "zh-CN");
     }
 
-    http.timeout_connect(20)
+    http.on_progress([&cancel_requested](Http::Progress, bool& cancel) { cancel = cancel_requested.load(); })
+        .timeout_connect(20)
         .timeout_max(100)
         .on_header_callback([&res](std::string header_line) {
             std::string lower_line;
@@ -1334,7 +1344,7 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
                 res.trace_id = trace_id;
             }
         })
-        .on_complete([&res, helio_api_url, helio_api_key](std::string body, unsigned status) {
+        .on_complete([&res, helio_api_url, helio_api_key, &cancel_requested, &wait_before_poll](std::string body, unsigned status) {
         res.status = status;
         try {
             json parsed_obj = json::parse(body);
@@ -1385,9 +1395,16 @@ HelioQuery::CreateGCodeResult HelioQuery::create_gcode_v3(const std::string key,
 
             int poll_count = 0;
             while (res.status_str != "READY" && res.status_str != "ERROR" && res.status_str != "RESTRICTED" && poll_count < 60) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
+                if (cancel_requested.load() || wait_before_poll()) {
+                    res.success = false;
+                    return;
+                }
 
-                PollResult poll_res = poll_gcode_status(helio_api_url, helio_api_key, res.id);
+                PollResult poll_res = poll_gcode_status(helio_api_url, helio_api_key, res.id, cancel_requested);
+                if (cancel_requested.load()) {
+                    res.success = false;
+                    return;
+                }
 
                 if (poll_res.success) {
                     res.status_str = poll_res.status_str;
@@ -2342,13 +2359,20 @@ void HelioBackgroundProcess::helio_threaded_process_start(std::mutex&           
             wxQueueEvent(GUI::wxGetApp().plater(), evt);
 
             HelioQuery::CreateGCodeResult create_gcode_res;
+            const auto wait_before_poll = [this] {
+                wait_for_cancel(std::chrono::seconds(2));
+                return m_cancel_requested->load();
+            };
             if (use_v3) {
                 create_gcode_res = HelioQuery::create_gcode_v3(create_presigned_url_res.key, helio_api_url, helio_api_key, printer_id,
-                                                               materials, is_multi_color, is_multi_material);
+                                                               materials, is_multi_color, is_multi_material, *m_cancel_requested, wait_before_poll);
             } else {
                 create_gcode_res = HelioQuery::create_gcode(create_presigned_url_res.key, helio_api_url, helio_api_key, printer_id,
-                                                            filament_id);
+                                                            filament_id, *m_cancel_requested, wait_before_poll);
             }
+
+            if (was_canceled())
+                return;
 
             if (action == 0) {
                 create_simulation_step(create_gcode_res, notification_manager);

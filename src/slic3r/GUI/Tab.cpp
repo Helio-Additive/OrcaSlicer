@@ -7737,6 +7737,10 @@ bool Tab::select_preset(
         on_presets_changed();
     } else {
         BOOST_LOG_TRIVIAL(info) << boost::format("successfully delete, will update compatibility");
+        if (printer_tab && m_presets->get_edited_preset().name != preset_name) {
+            if (auto* plater = wxGetApp().plater())
+                plater->stop_helio_process();
+        }
         if (current_dirty)
             m_presets->discard_current_changes();
 
