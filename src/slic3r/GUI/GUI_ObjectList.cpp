@@ -236,11 +236,10 @@ ObjectList::ObjectList(wxWindow* parent) :
         // if we change selection in object list.
         // But, if we call SetFocus() for ObjectList it will cause an invoking of a KillFocus event for "temporary" panels
         this->SetFocus();
-#else
-        // To avoid selection update from SetSelection() and UnselectAll() under osx
+#endif // __APPLE__
+
         if (m_prevent_list_events)
             return;
-#endif // __APPLE__
 
         /* For multiple selection with pressed SHIFT,
          * event.GetItem() returns value of a first item in selection list
@@ -288,8 +287,14 @@ ObjectList::ObjectList(wxWindow* parent) :
             auto* plater = wxGetApp().plater();
             const int plate = sel_node->GetPlateIdx();
             const int result = plater->is_preview_shown() ? plater->select_sliced_plate(plate) : plater->select_plate(plate);
-            if (result == 0)
-                plater->deselect_all();
+            if (result != 0) {
+                m_prevent_list_events = true;
+                on_plate_selected(plater->get_partplate_list().get_curr_plate_index());
+                m_last_selected_item = GetSelection();
+                m_prevent_list_events = false;
+                return;
+            }
+            plater->deselect_all();
         }
         else {
             selection_changed();
@@ -1638,9 +1643,12 @@ void ObjectList::list_manipulation(const wxPoint& mouse_pos, bool evt_context_me
 
             get_selected_item_indexes(obj_idx, vol_idx, item);
             //wxGetApp().plater()->PopupObjectTable(obj_idx, vol_idx, mouse_pos);
-            if (m_objects_model->GetItemType(item) & itPlate)
+            if (m_objects_model->GetItemType(item) & itPlate) {
+                const auto* plate_node = static_cast<ObjectDataViewModelNode*>(item.GetID());
+                if (plate_node->GetPlateIdx() != wxGetApp().plater()->get_partplate_list().get_curr_plate_index())
+                    return;
                 dynamic_cast<TabPrintPlate*>(wxGetApp().get_plate_tab())->reset_model_config();
-            else if (m_objects_model->GetItemType(item) & itLayer)
+            } else if (m_objects_model->GetItemType(item) & itLayer)
                 dynamic_cast<TabPrintLayer*>(wxGetApp().get_layer_tab())->reset_model_config();
             else if (item.IsOk())
                 dynamic_cast<TabPrintModel*>(wxGetApp().get_model_tab(vol_idx >= 0))->reset_model_config();

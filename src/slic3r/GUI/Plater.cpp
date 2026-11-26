@@ -8962,8 +8962,9 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
     int current_width = 0, current_depth = 0;
     double current_height = 0;
 
-    if (input_files.empty())
-        return std::vector<size_t>();
+    const bool loading_project = (strategy & LoadStrategy::LoadModel) && (strategy & LoadStrategy::LoadConfig);
+    if (input_files.empty() || (loading_project && !check_helio_plate_switch()))
+        return {};
 
     if (!input_files.empty())
        q->m_3mf_path = input_files[0].string();
@@ -18102,6 +18103,9 @@ LoadType determine_load_type(std::string filename, std::string override_setting 
 void Plater::load_project(wxString const& filename2,
     wxString const& originfile)
 {
+    if (!p->check_helio_plate_switch())
+        return;
+
     model().calib_pa_pattern.reset(nullptr);
     model().plates_custom_gcodes.clear();
 
@@ -20114,6 +20118,8 @@ void Plater::load_gcode(const wxString& filename)
         )
         return;
 
+    if (!p->check_helio_plate_switch())
+        return;
     m_last_loaded_gcode = filename;
 
     // Clear any stale Helio result when loading new gcode
@@ -24824,10 +24830,15 @@ bool Plater::priv::check_helio_plate_switch()
     return false;
 }
 
+bool Plater::can_select_plate(int plate_index)
+{
+    return plate_index == p->partplate_list.get_curr_plate_index() || p->check_helio_plate_switch();
+}
+
 //BBS: select Plate
 int Plater::select_plate(int plate_index, bool need_slice)
 {
-    if (plate_index != p->partplate_list.get_curr_plate_index() && !p->check_helio_plate_switch())
+    if (!can_select_plate(plate_index))
         return -1;
 
     int ret;
@@ -25490,7 +25501,7 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
     if (action == 0)
     {
         //select plate
-        if (plate_index != p->partplate_list.get_curr_plate_index() && !p->check_helio_plate_switch())
+        if (!can_select_plate(plate_index))
             return -1;
         ret = p->partplate_list.select_plate(plate_index);
         if (!ret) {
