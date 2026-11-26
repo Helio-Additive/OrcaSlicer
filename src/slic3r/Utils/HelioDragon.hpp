@@ -11,6 +11,7 @@
 #include <boost/nowide/cstdio.hpp>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <condition_variable>
 #include <mutex>
@@ -309,14 +310,14 @@ public:
 
     static PollResult poll_gcode_status(const std::string& helio_api_url,
                                         const std::string& helio_api_key,
-                                        const std::string& gcode_id);
+                                        const std::string& gcode_id, const std::atomic_bool& cancel_requested);
 
     // V2: single material (used when feature flag helio_multimaterial_enabled is OFF)
     static CreateGCodeResult  create_gcode(const std::string key,
                                            const std::string helio_api_url,
                                            const std::string helio_api_key,
                                            const std::string printer_id,
-                                           const std::string filament_id);
+                                           const std::string filament_id, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll);
 
     // V3: multi-material (used when feature flag helio_multimaterial_enabled is ON)
     static CreateGCodeResult  create_gcode_v3(const std::string key,
@@ -324,7 +325,7 @@ public:
                                               const std::string helio_api_key,
                                               const std::string printer_id,
                                               const std::vector<MaterialInput>& materials,
-                                              bool isMultiColor, bool isMultiMaterial);
+                                              bool isMultiColor, bool isMultiMaterial, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll);
 
 
     static void request_print_priority_options(

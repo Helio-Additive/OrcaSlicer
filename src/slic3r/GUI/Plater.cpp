@@ -15422,9 +15422,11 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
         m_cur_slice_plate++;
 
         q->Freeze();
-        q->select_plate(m_cur_slice_plate);
-        partplate_list.select_plate_view();
-        int ret = q->start_next_slice();
+        int ret = q->select_plate(m_cur_slice_plate);
+        if (ret == 0) {
+            partplate_list.select_plate_view();
+            ret = q->start_next_slice();
+        }
         if (ret) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(":slicing all, plate %1% can not be sliced, will stop")%m_cur_slice_plate;
             m_is_slicing = false;
@@ -15711,11 +15713,11 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
 
         Model::setExtruderParams(config, numExtruders);
         Model::setPrintSpeedTable(config, print_config);
+        if (q->select_plate(0) != 0)
+            return;
         m_slice_all = true;
         m_slice_all_only_has_gcode = true;
         m_cur_slice_plate = 0;
-        //select plate
-        q->select_plate(m_cur_slice_plate);
         q->reslice();
         q->select_view_3D("Preview");
         //BBS: wish to select all plates stats item
