@@ -262,6 +262,41 @@ the pin — only that nothing had to clone it.
   PRs** (see Git Workflow below), so this is a real cost, not a theoretical one. An
   earlier revision of this line claimed the fork opens none.
 
+- **A red `unit_tests` can also be the post-test *cleanup* step, not a failed assertion —
+  read which step failed (#184).** The rule above stands: a red `unit_tests` must not be
+  waved through. But there is exactly one way it goes red with every assertion passing, and
+  it is worth recognising on sight because the check name says nothing about it.
+  `unit_tests.yml:77`'s `Delete Test Artifact` is the only one of the four
+  `geekyeggo/delete-artifact` sites in the tree that leaves `failOnError` at its default
+  `true`:
+
+  | file | step | `failOnError` |
+  |---|---|---|
+  | `unit_tests.yml:77` | `Delete Test Artifact` | **absent → default `true`** |
+  | `unit_tests_flatpak.yml:64` | `Delete Test Artifact` | `false` |
+  | `build_all.yml:337` | `Delete Test Results` | `false` |
+  | `build_orca.yml:388` | `Delete intermediate per-arch artifacts` | absent → default `true` |
+
+  Re-derive it rather than trusting those line numbers — upstream syncs rewrite all four
+  files, which is exactly how the *Build All* citations above rotted:
+  `grep -rn -A 4 'geekyeggo/delete-artifact' .github/workflows/`
+
+  On [run 45602488633](https://github.com/Helio-Additive/OrcaSlicer/actions/runs/45602488633)
+  (release branch, head `94b252a0`) GitHub's artifact delete-by-name answered
+  `(404) Not Found: artifact does not exist` for **8 of the 9** deletions attempted in the
+  run's last four minutes — while the deletions *took effect*: the named artifacts are
+  absent from the run and 17 unrelated ones survive, so the index was inconsistent, not the
+  artifact missing. `Publish Test Results` absorbed six of them because upstream passes
+  `failOnError: false` there; the two Windows unit-test jobs went red because
+  `unit_tests.yml` does not. Every build passed, all seven suites published, and `Build all`
+  still reported **failure**. `unit_tests.yml` is the reusable workflow behind **five of the
+  seven** unit-test jobs (Linux x2, Windows x2, macOS arm64), so only the two Flatpak legs
+  are immune. **The tell:** `Unpackage and Run Unit Tests` green, `Delete Test Artifact`
+  red, `(404) Not Found` in the log. Ownership settled by Rule 15's own test — both diffs
+  against upstream `v2.5.2` empty, `grep -ci helio` → 0, `owner: upstream` in the manifest,
+  and upstream `main` carries the identical step — so it is recorded here, not patched; the
+  one-line fix belongs upstream.
+
 ### External slicer regression tests — green since the v2.5.1 sync; red 14 Sep–20 Nov 2026 on a v2.4.2 tree (#133)
 
 **Current state, 25 Nov 2026: passing, and the mechanism that made it dangerous is
