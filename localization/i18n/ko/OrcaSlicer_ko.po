@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Orca Slicer\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-14 00:49+0800\n"
+"POT-Creation-Date: 2026-11-21 12:24+0800\n"
 "PO-Revision-Date: 2025-06-02 17:12+0900\n"
 "Last-Translator: crwusiz <crwusiz@gmail.com>\n"
 "Language-Team: \n"
@@ -49,7 +49,7 @@ msgid "Left extruder"
 msgstr "왼쪽 압출기"
 
 msgid "left extruder"
-msgstr "왼쪽 익스트루더"
+msgstr "왼쪽 압출기"
 
 msgid "Right Extruder"
 msgstr "오른쪽 압출기"
@@ -58,7 +58,7 @@ msgid "Right extruder"
 msgstr "오른쪽 압출기"
 
 msgid "right extruder"
-msgstr "오른쪽 익스트루더"
+msgstr "오른쪽 압출기"
 
 # AI Translated
 msgid "Main Nozzle"
@@ -180,7 +180,7 @@ msgid "Right"
 msgstr "오른쪽"
 
 msgid "extruder"
-msgstr "익스트루더"
+msgstr "압출기"
 
 msgid "TPU is not supported by AMS."
 msgstr "TPU는 AMS에서 지원되지 않습니다."
@@ -219,7 +219,7 @@ msgid "Damp PVA will become flexible and get stuck inside AMS, please take care 
 msgstr "습한 PVA는 유연해져서 AMS 내부에 달라붙게 됩니다. 사용하기 전에 건조시키십시오."
 
 msgid "Damp PVA is flexible and may get stuck in extruder. Dry it before use."
-msgstr "습한 PVA는 유연하여 익스트루더에 끼일 수 있습니다. 사용 전에 건조시키세요."
+msgstr "습한 PVA는 유연하여 압출기에 끼일 수 있습니다. 사용 전에 건조시키세요."
 
 msgid "The rough surface of PLA Glow can accelerate wear on the AMS system, particularly on the internal components of the AMS Lite."
 msgstr "PLA Glow의 거친 표면은 AMS 시스템, 특히 AMS Lite의 내부 부품의 마모를 가속화할 수 있습니다."
@@ -263,7 +263,7 @@ msgstr "%s은(는) Filament Track Switch로 인해 로드 또는 언로드에 �
 
 #, c-format, boost-format
 msgid "%s is not supported by %s extruder."
-msgstr "%s은(는) %s 익스트루더에서 지원되지 않습니다."
+msgstr "%s은(는) %s 압출기에서 지원되지 않습니다."
 
 # AI Translated
 #, c-format, boost-format
@@ -1091,8 +1091,10 @@ msgstr "잘라내기 후"
 msgid "Cut to parts"
 msgstr "부품으로 자르기"
 
-msgid "Reset cutting plane and remove connectors"
-msgstr "절단면 재설정 및 커넥터 제거"
+# AI Translated
+#. TRN: Part assignments are the upper/lower cut groups changed by right-clicking parts.
+msgid "Reset the cutting plane, remove connectors, and clear part assignments."
+msgstr "절단면 재설정, 커넥터 제거 및 부품 할당 초기화."
 
 # AI Translated
 msgid "Reset Cut"
@@ -5805,6 +5807,10 @@ msgid "Enable the prime tower and either disable purging in the prime tower or d
 msgstr "프라임 타워를 활성화하고, '프라임 타워에서 플러시'를 비활성화하거나 단일 압출기 다중 재료 모드를 비활성화하세요."
 
 # AI Translated
+msgid "The Type 1 prime tower takes the prime volume from each filament, on its Multimaterial page."
+msgstr "유형 1 프라임 타워는 각 필라멘트의 다중 재료 페이지에 있는 프라임양을 사용합니다."
+
+# AI Translated
 msgid "Enable the prime tower to use this setting."
 msgstr "이 설정을 사용하려면 프라임 타워를 활성화하세요."
 
@@ -6208,10 +6214,10 @@ msgid "AMS temperature is too high, which may cause the filament to soften. Plea
 msgstr "AMS 온도가 너무 높아 필라멘트가 연화될 수 있습니다. AMS 온도가 %d℃ 이하로 떨어질 때까지 기다리세요."
 
 msgid "The current chamber temperature or the target chamber temperature exceeds 45℃. In order to avoid extruder clogging, low temperature filament(PLA/PETG/TPU) is not allowed to be loaded."
-msgstr "현재 챔버 온도 또는 목표 챔버 온도가 45℃를 초과합니다. 익스트루더 막힘을 방지하기 위해 저온 필라멘트(PLA/PETG/TPU) 로딩이 허용되지 않습니다."
+msgstr "현재 챔버 온도 또는 목표 챔버 온도가 45℃를 초과합니다. 압출기 막힘을 방지하기 위해 저온 필라멘트(PLA/PETG/TPU) 로딩이 허용되지 않습니다."
 
 msgid "Low temperature filament(PLA/PETG/TPU) is loaded in the extruder. In order to avoid extruder clogging, it is not allowed to set the chamber temperature."
-msgstr "저온 필라멘트(PLA/PETG/TPU)가 익스트루더에 로드되어 있습니다. 익스트루더 막힘을 방지하기 위해 챔버 온도 설정이 허용되지 않습니다."
+msgstr "저온 필라멘트(PLA/PETG/TPU)가 압출기에 로드되어 있습니다. 압출기 막힘을 방지하기 위해 챔버 온도 설정이 허용되지 않습니다."
 
 msgid "When you set the chamber temperature below 40℃, the chamber temperature control will not be activated, and the target chamber temperature will automatically be set to 0℃."
 msgstr "챔버 온도를 40℃ 이하로 설정하면 챔버 온도 제어가 활성화되지 않습니다. 그리고 목표 챔버 온도는 자동으로 0℃ 로 설정됩니다."
@@ -6456,10 +6462,6 @@ msgstr "잘못된 패턴입니다. N, N#K 또는 항목당 선택적 #K가 있�
 #, boost-format
 msgid "Invalid format. Expected vector format: \"%1%\""
 msgstr "잘못된 형식입니다. 필요한 벡터 형식: \"%1%\""
-
-# AI Translated
-msgid "The excluded bed area is invalid. It must be a simple, non-self-intersecting polygon."
-msgstr "베드 제외 구역이 올바르지 않습니다. 자기 교차가 없는 단순 다각형이어야 합니다."
 
 # AI Translated
 msgid "System agents"
@@ -8469,7 +8471,7 @@ msgid "When printing is paused, filament loading and unloading are only supporte
 msgstr "인쇄가 일시 중지되면 필라멘트 로딩 및 언로딩은 외부 슬롯에서만 지원됩니다."
 
 msgid "Current extruder is busy changing filament."
-msgstr "현재 익스트루더가 필라멘트 교체 중입니다."
+msgstr "현재 압출기가 필라멘트 교체 중입니다."
 
 # AI Translated
 msgid "\"Load\" or \"Unload\" is not supported for external spool while using Filament Track Switch."
@@ -9238,6 +9240,29 @@ msgstr ""
 
 msgid "Error loading shaders"
 msgstr "셰이더 로드 오류"
+
+# AI Translated
+#. TRN The OpenGL context could not be made current, so nothing can be drawn in the 3D view.
+msgid "OpenGL could not be activated for the 3D view, so it cannot be shown."
+msgstr "3D 보기에 OpenGL을 활성화할 수 없어 표시할 수 없습니다."
+
+# AI Translated
+#. TRN %1% is the name of a graphics card or display adapter as Windows reports it, such as "Microsoft Basic Display Adapter".
+#, boost-format
+msgid "The window is on a display driven by \"%1%\"."
+msgstr "창이 \"%1%\"에서 구동하는 디스플레이에 있습니다."
+
+# AI Translated
+msgid "Make sure the display adapter driving this window's display is enabled and its driver is installed and up to date."
+msgstr "이 창의 디스플레이를 구동하는 디스플레이 어댑터가 활성화되어 있고 드라이버가 설치되어 최신 상태인지 확인하세요."
+
+# AI Translated
+msgid "If the computer has more than one graphics card, connecting the monitor to another one may help."
+msgstr "컴퓨터에 그래픽 카드가 둘 이상 있다면 모니터를 다른 카드에 연결하면 도움이 될 수 있습니다."
+
+# AI Translated
+msgid "If the problem remains, close any overlay or screen capture software and try again."
+msgstr "문제가 계속되면 오버레이나 화면 캡처 소프트웨어를 모두 닫고 다시 시도하세요."
 
 msgctxt "Layers"
 msgid "Top"
@@ -10079,10 +10104,6 @@ msgstr "이 프로젝트에는 디자인 탭에서 만든 모델만 있고 다�
 
 msgid "The file does not contain any geometry data."
 msgstr "파일에 형상 데이터가 포함되어 있지 않습니다."
-
-# AI Translated
-msgid "The invalid area has been removed, so please define it again using a valid polygon."
-msgstr "올바르지 않은 구역을 제거했습니다. 올바른 다각형으로 다시 지정하세요."
 
 msgid "Your object appears to be too large, do you want to scale it down to fit the print bed automatically?"
 msgstr "객체가 너무 큽니다. 자동으로 고온 베드에 맞게 크기를 줄이시겠습니까?"
@@ -13574,6 +13595,9 @@ msgstr "필라멘트 종료 G-code"
 msgid "Wipe tower parameters"
 msgstr "프라임 타워 매개변수"
 
+msgid "Prime volume"
+msgstr "프라임양"
+
 msgid "Multi Filament"
 msgstr "멀티 필라멘트"
 
@@ -13656,6 +13680,14 @@ msgstr "선택한 프린터는 챔버 온도 제어를 지원하지 않습니다
 # Needs human review: Quotes the existing labels '적응형 볼륨 속도' and '최대 체적 속도 다항 계수', which do not use the glossary rendering 압출 속도 for Volumetric Speed; update together if those labels change.
 msgid "Set nonzero volumetric speed coefficients before enabling adaptive volumetric speed."
 msgstr "'적응형 볼륨 속도'를 활성화하기 전에 '최대 체적 속도 다항 계수'를 0이 아닌 값으로 설정하세요."
+
+# AI Translated
+msgid "Select wipe tower Type 1 in the printer settings to use this setting."
+msgstr "이 설정을 사용하려면 프린터 설정에서 '프라임 타워 유형'을 '유형 1'로 선택하세요."
+
+# AI Translated
+msgid "Select wipe tower Type 1 on a printer whose extruder holds more than one nozzle to use this setting."
+msgstr "이 설정을 사용하려면 압출기에 노즐이 둘 이상인 프린터에서 '프라임 타워 유형'을 '유형 1'로 선택하세요."
 
 # AI Translated
 msgid "Enable multitool ramming to edit this setting."
@@ -13796,7 +13828,7 @@ msgid "Single extruder multi-material setup"
 msgstr "단일 압출기 다중 재료 설정"
 
 msgid "Number of extruders of the printer."
-msgstr "프린터 익스트루더 수."
+msgstr "프린터 압출기 수."
 
 msgid ""
 "Single Extruder Multi Material is selected, and all extruders must have the same diameter.\n"
@@ -14390,7 +14422,7 @@ msgid "Compare the full values"
 msgstr "전체 값 비교"
 
 msgid "Extruder count"
-msgstr "익스트루더 수"
+msgstr "압출기 수"
 
 # AI Translated
 msgid "Capabilities"
@@ -21850,9 +21882,6 @@ msgstr "플러시 승수(고속 모드)"
 # AI Translated
 msgid "The flush multiplier used in fast purge mode."
 msgstr "고속 플러시 모드에서 사용하는 플러시 승수입니다."
-
-msgid "Prime volume"
-msgstr "프라임양"
 
 # AI Translated
 msgid "This is the volume of material to prime the extruder with on the tower."
