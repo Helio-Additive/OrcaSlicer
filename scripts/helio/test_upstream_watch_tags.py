@@ -248,12 +248,52 @@ def ancestry_selftest(repo):
     check(label2, anc2.returncode == 0, True)
 
 
+def range_consumers_are_namespaced():
+    """Every git RANGE must resolve LATEST_TAG through refs/upstream-tags/.
+
+    Selecting the name from the namespace is only half the job. A bare
+    `$LATEST_TAG` resolves through refs/tags/, and the two can disagree: the
+    fetch step's `--tags --force` replaces a fork-local tag of the same name
+    only if upstream's tag exists DURING that fetch, so a name upstream
+    publishes between that fetch and the namespace fetch leaves refs/tags/
+    holding the fork's commit. The digest would then print an upstream release
+    name beside commit counts and file lists computed from a fork commit.
+
+    This is a static check on the shipped step rather than a behavioural case,
+    because reproducing it needs a race between two fetches. It is the same
+    defect as the sync's SYNC_REF (CodeRabbit on #171); this half is
+    CodeRabbit on #157.
+
+    Display uses stay bare on purpose — `LATEST_TAG` is what the digest prints
+    and what the sync-target comparison matches on — so the rule is scoped to
+    lines that invoke git, not to every mention of the variable.
+    """
+    wf = yaml.safe_load(open(WF))
+    body = next(s["run"] for s in wf["jobs"]["watch"]["steps"]
+                if s.get("id") == "digest")
+
+    offenders = [ln.strip() for ln in body.split("\n")
+                 if "$LATEST_TAG" in ln
+                 and re.search(r"\bgit\s+(rev-list|diff|log|merge-base|rev-parse)\b", ln)]
+    check("no git range resolves a bare $LATEST_TAG", offenders, [])
+
+    if "LATEST_REF=" in body:
+        ref = re.search(r'LATEST_REF="([^"]*)"', body)
+        check("LATEST_REF is built from the upstream namespace",
+              bool(ref and ref.group(1).startswith("refs/upstream-tags/")), True)
+    else:
+        check("a namespaced ref variable exists for the ranges", False, True)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         repo = build_repo(tmp)
 
         print("\n== fixture self-tests ==")
         ancestry_selftest(repo)
+
+        print("\n== ranges resolve through the upstream namespace ==")
+        range_consumers_are_namespaced()
 
         print("\n== the reported bug: a new release across a branch boundary ==")
         # Baseline v2.4.2, newest stable v2.5.0. The old code answered "None".
