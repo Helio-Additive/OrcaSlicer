@@ -10195,26 +10195,17 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                 if (cur_plate->is_slice_result_valid())
                     q->m_valid_plates_count ++;
             }
-            if (first_plate&&first_plate->is_slice_result_valid()) {
-                q->m_exported_file = true;
-                //select plate 0 as default
-                q->select_plate(first_plate_index);
-                //set to 3d tab
-                q->select_view_3D("Preview");
-                wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
-            }
-            else {
-                //set to 3d tab
+            if (first_plate && first_plate->is_slice_result_valid()) {
+                if (q->select_plate(first_plate_index) == 0) {
+                    q->m_exported_file = true;
+                    q->select_view_3D("Preview");
+                    wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
+                }
+            } else if (q->select_plate(0) == 0) {
                 q->select_view_3D("3D");
-                //select plate 0 as default
-                q->select_plate(0);
             }
-        }
-        else {
-            //set to 3d tab
+        } else if (q->select_plate(0) == 0) {
             q->select_view_3D("3D");
-            //select plate 0 as default
-            q->select_plate(0);
         }
     }
     else {
