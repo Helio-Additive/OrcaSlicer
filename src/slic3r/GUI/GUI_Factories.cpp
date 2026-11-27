@@ -2751,12 +2751,10 @@ void MenuFactory::append_menu_item_plate_name(wxMenu *menu, size_t pos)
             int hover_idx =plater()->canvas3D()->GetHoverId();
             if (hover_idx == -1) {
                 int plate_idx=plater()->GetPlateIndexByRightMenuInLeftUI();
-                plater()->select_plate_by_hover_id(plate_idx * PartPlate::GRABBER_COUNT, false, true);
+                hover_idx = plate_idx * PartPlate::GRABBER_COUNT;
             }
-            else
-            {
-                plater()->select_plate_by_hover_id(hover_idx, false, true);
-            }
+            if (plater()->select_plate_by_hover_id(hover_idx, false, true) != 0)
+                return;
             plater()->get_current_canvas3D()->post_event(SimpleEvent(EVT_GLCANVAS_PLATE_NAME_CHANGE));
         },
         "", nullptr, []() { return true; }, m_parent, pos);

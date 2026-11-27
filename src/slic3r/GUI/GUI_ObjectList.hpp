@@ -189,6 +189,7 @@ private:
     std::vector<wxBitmap*>      m_bmp_vector;
 
     int			m_selected_object_id = -1;
+    bool        m_restoring_plate_selection = false;
     bool		m_prevent_list_events = false;		// We use this flag to avoid circular event handling Select()
                                                     // happens to fire a wxEVT_LIST_ITEM_SELECTED on OSX, whose event handler
                                                     // calls this method again and again and again
