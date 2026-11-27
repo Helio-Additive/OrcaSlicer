@@ -641,8 +641,7 @@ public:
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
-        if (m_thread.joinable())
-            m_thread.join();
+        cancel_and_wait();
         m_cancel_requested = std::make_shared<std::atomic_bool>(false);
         m_source_gcode_path.clear();
         current_simulation_result.reset();
@@ -679,8 +678,7 @@ public:
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
-        if (m_thread.joinable())
-            m_thread.join();
+        cancel_and_wait();
         m_cancel_requested = std::make_shared<std::atomic_bool>(false);
         m_source_gcode_path.clear();
         current_simulation_result.reset();
