@@ -215,6 +215,9 @@ const std::string MODEL_RELS_FILE = "3D/_rels/3dmodel.model.rels";
 const std::string METADATA_DIR = "Metadata/";
 const std::string ACCESOR_DIR = "accesories/";
 const std::string GCODE_EXTENSION = ".gcode";
+// Keep preview payloads out of readers that discover printable .gcode entries by extension.
+const std::string PREVIEW_GCODE_EXTENSION = ".preview";
+const std::string PREVIEW_GCODE_SUFFIX = GCODE_EXTENSION + PREVIEW_GCODE_EXTENSION;
 const std::string THUMBNAIL_EXTENSION = ".png";
 const std::string CALIBRATION_INFO_EXTENSION = ".json";
 const std::string CONTENT_TYPES_FILE = "[Content_Types].xml";
@@ -1311,7 +1314,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         void _extract_project_embedded_presets_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat, std::vector<Preset*>&project_presets, Model& model, Preset::Type type, bool use_json = true);
 
         void _extract_auxiliary_file_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat, Model& model);
-        void _extract_file_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat);
+        bool _extract_file_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat);
         void _extract_embossed_svg_shape_file(const std::string &filename, mz_zip_archive &archive, const mz_zip_archive_file_stat &stat);
 
         // handlers to parse the .model file
@@ -1989,6 +1992,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         //     dont_load_config = true;
         // }
 
+        std::set<std::string> extracted_previews;
         // we then loop again the entries to read other files stored in the archive
         for (mz_uint i = 0; i < num_entries; ++i) {
             if (mz_zip_reader_file_stat(&archive, i, &stat)) {
@@ -2117,6 +2121,11 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     // extract auxiliary directory to temp directory, do nothing for restore
                     if (m_load_aux && !m_load_restore)
                         _extract_auxiliary_file_from_archive(archive, stat, model);
+                }
+                else if (!dont_load_config && boost::algorithm::istarts_with(name, METADATA_DIR) &&
+                         boost::algorithm::iends_with(name, PREVIEW_GCODE_SUFFIX)) {
+                    if (_extract_file_from_archive(archive, stat))
+                        extracted_previews.insert(decode_path(stat.m_filename));
                 }
                 else if (!dont_load_config && boost::algorithm::istarts_with(name, METADATA_DIR) && boost::algorithm::iends_with(name, GCODE_EXTENSION)) {
                     //load gcode files
@@ -2433,7 +2442,15 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             plate_data_list[it->first-1]->plate_index = it->second->plate_index-1;
             plate_data_list[it->first-1]->plate_name = it->second->plate_name;
             plate_data_list[it->first-1]->obj_inst_map = it->second->obj_inst_map;
-            plate_data_list[it->first-1]->gcode_file = (m_load_restore || it->second->gcode_file.empty()) ? it->second->gcode_file : m_backup_path + "/" + it->second->gcode_file;
+            const std::string& print_gcode = it->second->gcode_file;
+            if (!print_gcode.empty() &&
+                (m_load_restore || is_path_within_root(print_gcode, boost::filesystem::path(m_backup_path)))) {
+                PlateData& plate = *plate_data_list[it->first - 1];
+                plate.gcode_file = m_load_restore ? print_gcode : m_backup_path + "/" + print_gcode;
+                const std::string preview_entry = print_gcode + PREVIEW_GCODE_EXTENSION;
+                if (extracted_previews.count(preview_entry) != 0)
+                    plate.preview_gcode_file = m_backup_path + "/" + preview_entry;
+            }
             plate_data_list[it->first-1]->gcode_prediction = it->second->gcode_prediction;
             plate_data_list[it->first-1]->gcode_weight = it->second->gcode_weight;
             plate_data_list[it->first-1]->toolpath_outside = it->second->toolpath_outside;
@@ -2964,7 +2981,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         }
     }
 
-    void _BBS_3MF_Importer::_extract_file_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat)
+    bool _BBS_3MF_Importer::_extract_file_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat)
     {
         if (stat.m_uncomp_size > 0) {
             std::string src_file = decode_path(stat.m_filename);
@@ -2972,7 +2989,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             boost::filesystem::path backup_root(m_backup_path);
             if (!is_path_within_root(src_file, backup_root)) {
                 BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", path traversal detected in file: %1%, skipping") % src_file;
-                return;
+                return false;
             }
 
             // BBS: use backup path
@@ -2981,12 +2998,11 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             std::string dest_zip_file = encode_path(dest_path.string().c_str());
             mz_bool res = mz_zip_reader_extract_to_file(&archive, stat.m_file_index, dest_zip_file.c_str(), 0);
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", extract  %1% from 3mf %2%, ret %3%\n") % dest_path % stat.m_filename % res;
-            if (res == 0) {
+            if (res == 0)
                 add_error("Error while extract file to temp directory");
-                return;
-            }
+            return res != 0;
         }
-        return;
+        return false;
     }
 
     void _BBS_3MF_Importer::_extract_layer_heights_profile_config_from_archive(mz_zip_archive& archive, const mz_zip_archive_file_stat& stat)
@@ -4717,7 +4733,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             }
             else if (key == GCODE_FILE_ATTR)
             {
-                m_curr_plater->gcode_file = value;
+                if (boost::algorithm::iends_with(value, GCODE_EXTENSION))
+                    m_curr_plater->gcode_file = value;
             }
             else if (key == THUMBNAIL_FILE_ATTR)
             {
@@ -6231,6 +6248,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         bool m_skip_static{ false };        // not save mesh and other big static contents
         bool m_from_backup_save{ false };   // the object save is from backup store
         bool m_split_model { false };       // save object per file with Production Extention
+        bool m_save_preview_gcode { false };
         bool m_save_gcode { false };        // whether to save gcode for normal save
         bool m_skip_model { false };        // skip model when exporting .gcode.3mf
         bool m_skip_auxiliary { false };    // skip normal axuiliary files
@@ -6333,6 +6351,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         m_skip_static = store_params.strategy & SaveStrategy::SkipStatic;
         m_split_model = store_params.strategy & SaveStrategy::SplitModel;
         m_save_gcode = store_params.strategy & SaveStrategy::WithGcode;
+        m_save_preview_gcode = m_save_gcode && !(store_params.strategy & SaveStrategy::SkipPreviewGcode);
         m_skip_model  = store_params.strategy & SaveStrategy::SkipModel;
         m_skip_auxiliary = store_params.strategy & SaveStrategy::SkipAuxiliary;
         m_share_mesh       = store_params.strategy & SaveStrategy::ShareMesh;
@@ -6482,7 +6501,6 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         }
 
         // Adds content types file ("[Content_Types].xml";).
-        // The content of this file is the same for each OrcaSlicer 3mf.
         if (!_add_content_types_file_to_archive(archive)) {
             return false;
         }
@@ -6951,6 +6969,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         stream << " <Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/>\n";
         stream << " <Default Extension=\"json\" ContentType=\"application/json\"/>\n";
         stream << " <Default Extension=\"gcode\" ContentType=\"text/x.gcode\"/>\n";
+        if (m_save_preview_gcode)
+            stream << " <Default Extension=\"preview\" ContentType=\"application/octet-stream\"/>\n";
         stream << "</Types>";
 
         std::string out = stream.str();
@@ -9053,6 +9073,7 @@ bool _BBS_3MF_Exporter::_add_gcode_file_to_archive(mz_zip_archive& archive, cons
                 boost::filesystem::path src_gcode_path(src_gcode_file);
                 if (!boost::filesystem::exists(src_gcode_path)) {
                     BOOST_LOG_TRIVIAL(error) << "Gcode is missing, filename = " << src_gcode_file;
+                    boost::unique_lock l(mutex);
                     result = false;
                 }
                 boost::filesystem::ifstream ifs(src_gcode_file, std::ios::binary);
@@ -9070,7 +9091,8 @@ bool _BBS_3MF_Exporter::_add_gcode_file_to_archive(mz_zip_archive& archive, cons
             mz_zip_reader_init_mem(&archive, ppBuf, pSize, 0);
             {
                 boost::unique_lock l(mutex);
-                mz_zip_writer_add_from_zip_reader(&root_archive, &archive, 0);
+                if (!mz_zip_writer_add_from_zip_reader(&root_archive, &archive, 0))
+                    result = false;
             }
             mz_zip_reader_end(&archive);
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ":" <<__LINE__ << boost::format(", store  %1% to 3mf %2%\n") % src_gcode_file % gcode_in_3mf;
@@ -9084,6 +9106,14 @@ bool _BBS_3MF_Exporter::_add_gcode_file_to_archive(mz_zip_archive& archive, cons
                                    MZ_DEFAULT_COMPRESSION)) {
             add_error("Unable to add statistics file to archive");
             result = false;
+        }
+    }
+
+    if (result && m_save_preview_gcode) {
+        for (const PlateData* plate : plate_data_list2) {
+            if (!plate->preview_gcode_file.empty() && boost::filesystem::is_regular_file(plate->preview_gcode_file) &&
+                !_add_file_to_archive(archive, plate->gcode_file + PREVIEW_GCODE_EXTENSION, plate->preview_gcode_file))
+                return false;
         }
     }
     return result;

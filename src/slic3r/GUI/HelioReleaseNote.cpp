@@ -1,3 +1,4 @@
+#include "libslic3r/HelioChannel.hpp"
 #include "HelioReleaseNote.hpp"
 #include "HelioHistoryDialog.hpp"
 #include "I18N.hpp"
@@ -899,6 +900,42 @@ void HelioStatementDialog::create_pat_page()
         content_sizer->Add(mm_row, 0, wxALIGN_CENTER, 0);
     }
 
+    if (Slic3r::helio_experimental_features_enabled()) {
+        content_sizer->Add(0, 0, 0, wxTOP, FromDIP(12));
+        wxBoxSizer* warping_row = new wxBoxSizer(wxHORIZONTAL);
+        auto* warping_checkbox = new ::CheckBox(page_pat_panel);
+
+        warping_checkbox->SetValue(wxGetApp().app_config->get_bool("helio_warping_analysis_enabled"));
+
+        auto* warping_label = new Label(page_pat_panel, Label::Body_13,
+            _L("Experimental: Enable Residual stress analysis"));
+        warping_label->SetForegroundColour(HELIO_MUTED);
+        warping_label->SetToolTip(_L("When enabled, Helio performs residual stress analysis during simulations."));
+
+        auto save_warping_setting = [warping_checkbox]() {
+            const bool enabled = warping_checkbox->GetValue();
+            wxGetApp().app_config->set_bool("helio_warping_analysis_enabled", enabled);
+            wxGetApp().app_config->save();
+            BOOST_LOG_TRIVIAL(info) << "helio_warping_analysis_enabled set to " << (enabled ? "true" : "false");
+            warping_checkbox->Refresh(false);
+            warping_checkbox->Update();
+        };
+
+        warping_checkbox->Bind(wxEVT_TOGGLEBUTTON, [save_warping_setting](wxCommandEvent& e) {
+            save_warping_setting();
+            e.Skip();
+        });
+
+        warping_label->Bind(wxEVT_LEFT_DOWN, [warping_checkbox, save_warping_setting](wxMouseEvent&) {
+            warping_checkbox->SetValue(!warping_checkbox->GetValue());
+            save_warping_setting();
+        });
+
+        warping_row->Add(warping_checkbox, 0, wxALIGN_CENTER_VERTICAL, 0);
+        warping_row->Add(warping_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
+        content_sizer->Add(warping_row, 0, wxALIGN_CENTER, 0);
+    }
+
     content_sizer->Add(0, 0, 0, wxTOP, FromDIP(24));
     content_sizer->Add(helio_links_sizer, 0, wxALIGN_CENTER, 0);
     content_sizer->Add(0, 0, 0, wxTOP, FromDIP(20));
@@ -1446,9 +1483,9 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     // Check badges removed - using colored/greyscale icons instead
 }
 
- HelioInputDialog::HelioInputDialog(wxWindow *parent /*= nullptr*/, const std::string& material_id /*= ""*/)
+ HelioInputDialog::HelioInputDialog(wxWindow *parent /*= nullptr*/, const std::string& material_id /*= ""*/, bool is_multi_material /*= false*/)
     : DPIDialog(static_cast<wxWindow *>(wxGetApp().mainframe), wxID_ANY, wxString("Helio Additive"), wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX),
-      m_material_id(material_id)
+      m_material_id(material_id), m_is_multi_material(is_multi_material)
 {
     shared_ptr = std::make_shared<int>(0);
     auto theme = get_theme();
@@ -2234,7 +2271,7 @@ void HelioInputDialog::update_mode_card_styling(int selected_action)
     m_button_confirm->SetMinSize(wxSize(-1, FromDIP(56)));
     m_button_confirm->SetCornerRadius(FromDIP(16));
     m_button_confirm->SetToolTip(_L("Enhancement will only take a few minutes to complete, depending on the size of your object. (A lot of compute is happening in the background) (Formerly referred to as 'Optimize' or 'Optimization')"));
-    m_button_confirm->Bind(wxEVT_LEFT_DOWN, &HelioInputDialog::on_confirm, this);
+    m_button_confirm->Bind(wxEVT_BUTTON, &HelioInputDialog::on_confirm, this);
     m_button_confirm->Bind(wxEVT_ENTER_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_HAND); });
     m_button_confirm->Bind(wxEVT_LEAVE_WINDOW, [this](auto& e) { SetCursor(wxCURSOR_ARROW); });
 
@@ -2888,7 +2925,7 @@ void HelioInputDialog::fetch_print_priority_options()
     }
 
     // Check cache first
-    auto cached_options = HelioQuery::get_cached_print_priority_options(m_material_id);
+    auto cached_options = HelioQuery::get_cached_print_priority_options(m_material_id, m_is_multi_material);
     if (!cached_options.empty()) {
         m_print_priority_options = cached_options;
         update_print_priority_dropdown();
@@ -2945,7 +2982,8 @@ void HelioInputDialog::fetch_print_priority_options()
                     }
                 });
             }
-        }
+        },
+        m_is_multi_material
     );
 }
 
@@ -3098,7 +3136,7 @@ Slic3r::HelioQuery::OptimizationInput HelioInputDialog::get_optimization_input(b
 }
 
 
-void HelioInputDialog::on_confirm(wxMouseEvent& e)
+void HelioInputDialog::on_confirm(wxCommandEvent&)
 {
     bool ok = false;
     if (current_action == 0) // Simulation

@@ -501,7 +501,8 @@ std::vector<NativeCommand> build_command_catalog()
             index = std::stoi(param);
         } catch (const std::exception&) {}
         index = std::clamp(index, 0, count - 1);
-        plater->select_plate(index, false);
+        if (plater->select_plate(index, false) != 0)
+            return AppActionRunResult{AppActionRunResult::Level::Info};
         return AppActionRunResult{AppActionRunResult::Level::Success};
     });
 

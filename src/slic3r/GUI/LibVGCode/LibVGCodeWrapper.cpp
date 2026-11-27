@@ -42,6 +42,28 @@
 namespace libvgcode {
 class Viewer;
 
+static bool same_simulation_value(float lhs, float rhs)
+{
+    return lhs == rhs || (std::isnan(lhs) && std::isnan(rhs));
+}
+
+static bool same_simulation_data(const Slic3r::GCodeProcessorResult::MoveVertex& lhs,
+                                 const Slic3r::GCodeProcessorResult::MoveVertex& rhs)
+{
+    return lhs.thermal_index_mean == rhs.thermal_index_mean &&
+           lhs.thermal_index_min == rhs.thermal_index_min &&
+           lhs.thermal_index_max == rhs.thermal_index_max &&
+           same_simulation_value(lhs.warpage_displacement, rhs.warpage_displacement) &&
+           same_simulation_value(lhs.warpage_disp_x, rhs.warpage_disp_x) &&
+           same_simulation_value(lhs.warpage_disp_y, rhs.warpage_disp_y) &&
+           same_simulation_value(lhs.warpage_disp_z, rhs.warpage_disp_z) &&
+           same_simulation_value(lhs.warpage_risk, rhs.warpage_risk) &&
+           same_simulation_value(lhs.warpage_ti_gradient, rhs.warpage_ti_gradient) &&
+           same_simulation_value(lhs.warpage_thermal_strain, rhs.warpage_thermal_strain) &&
+           same_simulation_value(lhs.warpage_hull_shrinkage, rhs.warpage_hull_shrinkage) &&
+           same_simulation_value(lhs.warpage_layer_shrinkage, rhs.warpage_layer_shrinkage);
+}
+
 Vec3 convert(const Slic3r::Vec3f& v)
 {
     return { v.x(), v.y(), v.z() };
@@ -232,7 +254,8 @@ static bool starts_path(const Slic3r::GCodeProcessorResult::MoveVertex& prev,
         return false;
     return first_move || prev.type != curr.type || prev.extrusion_role != curr.extrusion_role
         // ORCA: Split the path when a preview value changes.
-        || prev.mm3_per_mm != curr.mm3_per_mm || prev.acceleration != curr.acceleration || prev.jerk != curr.jerk;
+        || prev.mm3_per_mm != curr.mm3_per_mm || prev.acceleration != curr.acceleration || prev.jerk != curr.jerk
+        || !same_simulation_data(prev, curr);
 }
 
 GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::vector<std::string>& str_tool_colors,
@@ -240,6 +263,8 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
     const Slic3r::Transform3d* belt_xform)
 {
     GCodeInputData ret;
+    ret.warpage_wdm_p95 = result.warpage_wdm_p95;
+    ret.warpage_whs_p95 = result.warpage_whs_p95;
 
     // Belt printers: optionally map each vertex DISPLAY position from machine
     // (G-code) space back to model/Cartesian space using the general belt
@@ -292,7 +317,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
                 /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
                 /* ORCA: Add Acceleration visualization support */ curr.acceleration,
                 /* ORCA: Add Jerk visualization support */ curr.jerk,
-        /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+        /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+                curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+                curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #else
             const libvgcode::PathVertex vertex = { xform_pos(prev.position), curr.height, curr.width, curr.feedrate, prev.actual_feedrate,
                 curr.mm3_per_mm, curr.fan_speed, curr.temperature, convert(curr.extrusion_role), curr_type,
@@ -301,7 +328,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
                 /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
                 /* ORCA: Add Acceleration visualization support */ curr.acceleration,
                 /* ORCA: Add Jerk visualization support */ curr.jerk,
-        /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+        /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+                curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+                curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #endif // VGCODE_ENABLE_COG_AND_TOOL_MARKERS
             ret.vertices.emplace_back(vertex);
         }
@@ -315,7 +344,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
             /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
             /* ORCA: Add Acceleration visualization support */ curr.acceleration,
             /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #else
         const libvgcode::PathVertex vertex = { xform_pos(curr.position), curr.height, curr.width, curr.feedrate, curr.actual_feedrate,
             curr.mm3_per_mm, curr.fan_speed, curr.temperature, convert(curr.extrusion_role), curr_type,
@@ -324,7 +355,9 @@ GCodeInputData convert(const Slic3r::GCodeProcessorResult& result, const std::ve
             /* ORCA: Add Pressure Advance visualization support */ 0.0f, curr.pressure_advance,
             /* ORCA: Add Acceleration visualization support */ curr.acceleration,
             /* ORCA: Add Jerk visualization support */ curr.jerk,
-            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max };
+            /* Helio: Thermal index from simulation */ curr.thermal_index_mean, curr.thermal_index_min, curr.thermal_index_max,
+            curr.warpage_displacement, curr.warpage_disp_x, curr.warpage_disp_y, curr.warpage_disp_z, curr.warpage_risk,
+            curr.warpage_ti_gradient, curr.warpage_thermal_strain, curr.warpage_hull_shrinkage, curr.warpage_layer_shrinkage };
 #endif // VGCODE_ENABLE_COG_AND_TOOL_MARKERS
         ret.vertices.emplace_back(vertex);
     }
@@ -894,4 +927,3 @@ GCodeInputData convert(const Slic3r::Print& print, const std::vector<std::string
 }
 
 } // namespace libvgcode
-

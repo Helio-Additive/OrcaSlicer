@@ -54,6 +54,7 @@ enum class SaveStrategy
     MinimalPublished    = 1 << 13,
     // With WithGcode, also the G-code's statistics.
     WithStatistics      = 1 << 14,
+    SkipPreviewGcode    = 1 << 15,
 
     SplitModel = 0x1000 | ProductionExt,
     Encrypted  = SecureContentExt | SplitModel,

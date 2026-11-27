@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <cmath>
 
 namespace Slic3r {
 
@@ -223,6 +224,9 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> nozzle_group_result;
         float initial_layer_time;
         bool is_helio_gcode{false};
+        float warpage_wdm_p95{ NAN };
+        // Retained for future use; hull shrinkage currently uses a fixed 0..1 color scale.
+        float warpage_whs_p95{ NAN };
 
         struct SettingsIds
         {
@@ -264,6 +268,15 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             float thermal_index_mean{ -200.0f };
             float thermal_index_min{ -200.0f };
             float thermal_index_max{ -200.0f };
+            float warpage_displacement{ NAN };
+            float warpage_disp_x{ NAN };
+            float warpage_disp_y{ NAN };
+            float warpage_disp_z{ NAN };
+            float warpage_risk{ NAN };
+            float warpage_ti_gradient{ NAN };
+            float warpage_thermal_strain{ NAN };
+            float warpage_hull_shrinkage{ NAN };
+            float warpage_layer_shrinkage{ NAN };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
             unsigned int layer_id{ 0 };
@@ -502,6 +515,8 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             belt_z_origin = std::forward<Other>(other).belt_z_origin;
             machine_frame_transform_active = std::forward<Other>(other).machine_frame_transform_active;
             is_helio_gcode = std::forward<Other>(other).is_helio_gcode;
+            warpage_wdm_p95 = other.warpage_wdm_p95;
+            warpage_whs_p95 = other.warpage_whs_p95;
 #if ENABLE_GCODE_VIEWER_STATISTICS
             time = std::forward<Other>(other).time;
 #endif
@@ -1358,7 +1373,9 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         float m_thermal_index_mean{ -200.0f };
         float m_thermal_index_min{ -200.0f };
         float m_thermal_index_max{ -200.0f };
+        std::array<float, 9> m_warpage_fields{ NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN };
         bool m_is_helio_gcode{false};
+        std::optional<unsigned int> m_pending_helio_gcode_id;
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
         std::vector<unsigned char> m_last_filament_id;

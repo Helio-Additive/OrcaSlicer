@@ -1,3 +1,4 @@
+#include "libslic3r/HelioChannel.hpp"
 #include "Preferences.hpp"
 #include "CloudProvider.hpp"
 #include "OptionsGroup.hpp"
@@ -2414,6 +2415,12 @@ void PreferencesDialog::create_items()
     auto item_multimaterial = create_item_checkbox(_L("Enable multi-material (V3) support"),
         _L("When enabled, Helio uses per-slot material mapping for multi-material plates"), "helio_multimaterial_enabled");
     g_sizer->Add(item_multimaterial);
+
+    if (Slic3r::helio_experimental_features_enabled()) {
+        auto item_warping_analysis = create_item_checkbox(_L("Experimental: Enable Residual stress analysis"),
+            _L("When enabled, Helio performs residual stress analysis during simulations and optimizations"), "helio_warping_analysis_enabled");
+        g_sizer->Add(item_warping_analysis);
+    }
 
     g_sizer->AddSpacer(FromDIP(10));
     sizer_page->Add(g_sizer, 0, wxEXPAND);

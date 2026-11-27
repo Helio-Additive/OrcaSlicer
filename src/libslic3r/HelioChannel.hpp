@@ -28,8 +28,8 @@
 // experimental-only code fails the stable build instead of waiting for the next
 // experimental release to be cut.
 
-#define HELIO_RELEASE_CHANNEL "stable"
-#define HELIO_EXPERIMENTAL_BUILD 0
+#define HELIO_RELEASE_CHANNEL "experimental"
+#define HELIO_EXPERIMENTAL_BUILD 1
 
 // Release-tag prefixes written by helio-release.yml. Deliberately not prefixes
 // of one another ("helio-exp-v..." does not start with "helio-v..."), so a tag

@@ -10,6 +10,9 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/nowide/cstdio.hpp>
 
+#include <atomic>
+#include <functional>
+#include <memory>
 #include <condition_variable>
 #include <mutex>
 #include <boost/thread.hpp>
@@ -204,7 +207,7 @@ public:
         float       progress;
         std::string id;
         std::string name;
-        std::string url;
+        std::string thermal_index_gcode_url;
         std::string error;
         std::string trace_id;
         bool             transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
@@ -218,7 +221,8 @@ public:
         float       progress;
         std::string id;
         std::string name;
-        std::string url;
+        std::string optimized_gcode_url;
+        std::string optimized_gcode_with_thermal_indexes_url;
         std::string error;
         std::string trace_id;
         bool        transient{false}; // true: retryable blip (disconnect/5xx/200-with-errors), not a terminal failure
@@ -241,6 +245,7 @@ public:
         std::string status;
         std::string gcode_url;
         std::string gcode_key;
+        std::string optimized_gcode_url;  // Printable optimized GCode URL
         std::string optimized_gcode_with_thermal_indexes_url;  // Thermal index enhanced GCode URL
         std::string printer_id;
         std::string printer_name;
@@ -302,19 +307,19 @@ public:
     static void                 shutdown_background_requests();
     static void request_pat_token(std::function<void(std::string)> func);
     static void optimization_feedback(const std::string helio_api_url, const std::string helio_api_key, std::string optimization_id, float rating, std::string comment);
-    static PresignedURLResult create_presigned_url(const std::string helio_api_url, const std::string helio_api_key);
-    static UploadFileResult   upload_file_to_presigned_url(const std::string file_path_string, const std::string upload_url);
+    static PresignedURLResult create_presigned_url(const std::string helio_api_url, const std::string helio_api_key, const std::atomic_bool* cancel_requested = nullptr);
+    static UploadFileResult   upload_file_to_presigned_url(const std::string file_path_string, const std::string upload_url, const std::atomic_bool* cancel_requested = nullptr);
 
     static PollResult poll_gcode_status(const std::string& helio_api_url,
                                         const std::string& helio_api_key,
-                                        const std::string& gcode_id);
+                                        const std::string& gcode_id, const std::atomic_bool& cancel_requested);
 
     // V2: single material (used when feature flag helio_multimaterial_enabled is OFF)
     static CreateGCodeResult  create_gcode(const std::string key,
                                            const std::string helio_api_url,
                                            const std::string helio_api_key,
                                            const std::string printer_id,
-                                           const std::string filament_id);
+                                           const std::string filament_id, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll);
 
     // V3: multi-material (used when feature flag helio_multimaterial_enabled is ON)
     static CreateGCodeResult  create_gcode_v3(const std::string key,
@@ -322,18 +327,19 @@ public:
                                               const std::string helio_api_key,
                                               const std::string printer_id,
                                               const std::vector<MaterialInput>& materials,
-                                              bool isMultiColor, bool isMultiMaterial);
+                                              bool isMultiColor, bool isMultiMaterial, const std::atomic_bool& cancel_requested, const std::function<bool()>& wait_before_poll);
 
 
     static void request_print_priority_options(
         const std::string& helio_api_url,
         const std::string& helio_api_key,
         const std::string& material_id,
-        std::function<void(GetPrintPriorityOptionsResult)> callback
+        std::function<void(GetPrintPriorityOptionsResult)> callback,
+        bool is_multi_material = false
     );
 
     static std::vector<PrintPriorityOption> get_cached_print_priority_options(
-        const std::string& material_id
+        const std::string& material_id, bool is_multi_material = false
     );
 
     static void clear_print_priority_cache();
@@ -366,7 +372,7 @@ public:
 
     static CheckSimulationProgressResult check_simulation_progress(const std::string helio_api_url,
                                                                    const std::string helio_api_key,
-                                                                   const std::string simulation_id);
+                                                                   const std::string simulation_id, const std::atomic_bool* cancel_requested = nullptr);
 
 
     /*for helio optimization*/
@@ -382,7 +388,7 @@ public:
 
     static CheckOptimizationResult check_optimization_progress(const std::string helio_api_url,
                                                                const std::string helio_api_key,
-                                                               const std::string optimization_id);
+                                                               const std::string optimization_id, const std::atomic_bool* cancel_requested = nullptr);
 
 
     static std::string create_optimization_default_get(const std::string helio_api_url, const std::string helio_api_key, const std::string gcode_id);
@@ -393,7 +399,8 @@ public:
                                                          float              temperatureStabilizationHeight = -1,
                                                          float              airTemperatureAboveBuildPlate  = -1,
                                                          float              stabilizedAirTemperature       = -1,
-                                                         const std::string& job_name                       = "");
+                                                         const std::string& job_name                       = "",
+                                                         bool               enableWarpingAnalysis          = false);
 
     static std::string generate_optimization_graphql_query(const std::string& gcode_id,
                                                            const std::string& printPriority,
@@ -408,7 +415,8 @@ public:
                                                            double             maxExtruderFlowRate            = -1,
                                                            int                layersToOptimizeStart          = -1,
                                                            int                layersToOptimizeEnd            = -1,
-                                                           const std::string& job_name                       = "");
+                                                           const std::string& job_name                       = "",
+                                                           bool               enableWarpingAnalysis          = false);
     static std::string generateTimestampedString()
     {
         // Get the current UTC time
@@ -421,7 +429,7 @@ public:
         return "OrcaSlicer " + iso_datetime;
     }
 
-    static std::map<std::string, std::vector<PrintPriorityOption>> global_print_priority_cache;
+    static std::map<std::pair<std::string, bool>, std::vector<PrintPriorityOption>> global_print_priority_cache;
     static std::string last_simulation_trace_id;
     static std::string last_optimization_trace_id;
     static double convert_speed(float mm_per_second);
@@ -440,6 +448,9 @@ public:
 struct HelioPlateResult {
     int action{-1};  // -1=none, 0=simulation, 1=optimization
 
+    std::string preview_gcode_path;
+    std::string printable_gcode_path;
+
     // Simulation data
     HelioQuery::SimulationResult simulation_result;
     int original_print_time_seconds{0};
@@ -454,6 +465,8 @@ struct HelioPlateResult {
 
     void clear() {
         action = -1;
+        preview_gcode_path.clear();
+        printable_gcode_path.clear();
         simulation_result = HelioQuery::SimulationResult();
         original_print_time_seconds = 0;
         roles_times.clear();
@@ -482,6 +495,16 @@ private:
     // Guarded by m_mutex on every read and write. Default-initialised because
     // Plater's reslice path calls is_running() before the first init().
     State m_state{STATE_INITIAL};
+    // Replaced on the UI thread only after the preceding worker has joined.
+    std::shared_ptr<std::atomic_bool> m_cancel_requested = std::make_shared<std::atomic_bool>(false);
+
+    std::string m_source_gcode_path;
+    int m_original_time_seconds = 0;
+    std::vector<std::pair<ExtrusionRole, float>> m_original_roles_times;
+
+    void stop_current_helio_action();
+    void queue_completion(HelioCompletionEvent* event);
+    void wait_for_cancel(std::chrono::seconds delay);
 
 public:
     std::mutex              m_mutex;
@@ -533,6 +556,7 @@ public:
     HelioQuery::OptimizationInput       optimization_input_data;
 
     Slic3r::GCodeProcessorResult* m_gcode_result{nullptr};
+    std::string                   m_input_gcode_path;
     Slic3r::GCodeProcessor        m_gcode_processor;
     Slic3r::GUI::Preview*         m_preview;
     std::function<void()>         m_update_function;
@@ -552,12 +576,8 @@ public:
         optimization_input_data = data;
     }
 
-    void stop()
-    {
-        m_mutex.lock();
-        m_state = STATE_CANCELED;
-        m_mutex.unlock();
-    }
+    void stop();
+    void cancel_and_wait();
 
     bool is_running()
     {
@@ -579,7 +599,8 @@ public:
     void set_state(State state)
     {
         m_mutex.lock();
-        m_state = state;
+        if (!m_cancel_requested->load())
+            m_state = state;
         m_mutex.unlock();
     }
 
@@ -592,7 +613,7 @@ public:
         return state;
     }
 
-    void stop_current_helio_action();
+    void cancel_current_helio_action();
     void feedback_current_helio_action(float rating, std::string commend);
     void clear_helio_file_cache();
 
@@ -608,13 +629,7 @@ public:
 
     HelioBackgroundProcess() {}
 
-    ~HelioBackgroundProcess()
-    {
-        m_gcode_result = nullptr;
-        if (m_thread.joinable()) {
-            m_thread.join();
-        }
-    }
+    ~HelioBackgroundProcess() { cancel_and_wait(); }
 
     // V2 init: single filament_id (used when feature flag is OFF)
     void init(std::string                   api_key,
@@ -622,9 +637,15 @@ public:
               std::string                   printer_id,
               std::string                   filament_id,
               Slic3r::GCodeProcessorResult* gcode_result,
+              std::string                   input_gcode_path,
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
+        cancel_and_wait();
+        m_cancel_requested = std::make_shared<std::atomic_bool>(false);
+        m_source_gcode_path.clear();
+        current_simulation_result.reset();
+        current_optimization_result.reset();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_state = STATE_STARTED;
@@ -640,6 +661,7 @@ public:
         this->is_multi_color    = false;
         this->is_multi_material = false;
         m_gcode_result    = gcode_result;
+        m_input_gcode_path = std::move(input_gcode_path);
         m_preview         = preview;
         m_update_function = function;
     }
@@ -652,9 +674,15 @@ public:
               bool                          is_multi_color,
               bool                          is_multi_material,
               Slic3r::GCodeProcessorResult* gcode_result,
+              std::string                   input_gcode_path,
               Slic3r::GUI::Preview*         preview,
               std::function<void()>         function)
     {
+        cancel_and_wait();
+        m_cancel_requested = std::make_shared<std::atomic_bool>(false);
+        m_source_gcode_path.clear();
+        current_simulation_result.reset();
+        current_optimization_result.reset();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_state = STATE_STARTED;
@@ -670,30 +698,33 @@ public:
         this->is_multi_color   = is_multi_color;
         this->is_multi_material = is_multi_material;
         m_gcode_result         = gcode_result;
+        m_input_gcode_path     = std::move(input_gcode_path);
         m_preview              = preview;
         m_update_function      = function;
     }
 
     void reset()
     {
+        cancel_and_wait();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_state = STATE_INITIAL;
         }
-        // Deliberately outside the lock: m_gcode_processor and m_gcode_result are
-        // read by the worker thread without ever taking m_mutex, so holding it here
-        // would not order those accesses. See issue #139.
         m_gcode_processor.reset();
         m_gcode_result = nullptr;
+        m_source_gcode_path.clear();
+        m_input_gcode_path.clear();
     }
 
     void set_helio_api_key(std::string api_key);
     void set_gcode_result(Slic3r::GCodeProcessorResult* gcode_result);
     void create_simulation_step(HelioQuery::CreateGCodeResult create_gcode_res,std::unique_ptr<GUI::NotificationManager>& notification_manager);
     void create_optimization_step(HelioQuery::CreateGCodeResult create_gcode_res, std::unique_ptr<GUI::NotificationManager>& notification_manager);
-    void save_downloaded_gcode_and_load_preview(std::string                                file_download_url,
-                                                std::string                                helio_gcode_path,
-                                                std::string                                tmp_path,
+    void save_downloaded_gcodes_and_load_preview(std::string                                preview_download_url,
+                                                 std::string                                preview_gcode_path,
+                                                 std::string                                printable_download_url,
+                                                 std::string                                printable_gcode_path,
+                                                 std::string                                tmp_path,
                                                 std::unique_ptr<GUI::NotificationManager>& notification_manager,
                                                 HelioQuery::RatingData                    rating_data);
 
@@ -725,7 +756,16 @@ public:
         return (parent / new_filename).string();
     }
 
-    void load_helio_file_to_viwer(std::string file_path, std::string tmp_path, HelioQuery::RatingData rating_data);
+    std::string create_path_for_thermal_gcode(std::string printable_gcode_path)
+    {
+        boost::filesystem::path p(printable_gcode_path);
+        if (!p.has_filename())
+            throw std::runtime_error("Invalid path: No filename present.");
+        return (p.parent_path() / ("thermal_" + p.filename().string())).string();
+    }
+
+    void load_helio_file_to_viewer(std::string preview_path, std::string printable_path, std::string tmp_path,
+                                   HelioQuery::RatingData rating_data);
 };
 } // namespace Slic3r
 #endif

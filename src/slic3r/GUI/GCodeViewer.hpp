@@ -386,6 +386,8 @@ mutable bool m_no_render_path { false };
     std::array<float, 4> m_clipping_plane{ 0.0f, 0.0f, 0.0f, 1.0f };
     bool m_loaded_as_preview{ false };
     bool m_has_thermal_index_data{ false };
+    std::array<bool, 9> m_has_warpage_data{};
+    void update_simulation_data_availability();
 
 public:
     GCodeViewer();
@@ -487,16 +489,7 @@ public:
     //BBS: add only gcode mode
     bool is_only_gcode_in_preview() const { return m_only_gcode_in_preview; }
 
-    void set_view_type(libvgcode::EViewType type) {
-        m_viewer.set_view_type(type);
-        // Sync dropdown selection index with the new view type
-        for (int i = 0; i < static_cast<int>(view_type_items.size()); ++i) {
-            if (view_type_items[i] == type) {
-                m_view_type_sel = i;
-                break;
-            }
-        }
-    }
+    void set_view_type(libvgcode::EViewType type);
     // ORCA: select a view type in the preview combo box and apply it
     void select_view_type(libvgcode::EViewType type);
     // ORCA: apply the "preview_default_view_type" preference, see the definition for the supported values
