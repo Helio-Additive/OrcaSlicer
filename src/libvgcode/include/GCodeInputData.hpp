@@ -9,6 +9,8 @@
 #include <vector>
 #include "Types.hpp"
 
+#include <limits>
+
 namespace libvgcode {
 
 struct GCodeInputData
@@ -31,6 +33,8 @@ struct GCodeInputData
     // Palette for color print colors
     //
     PaletteWithAlpha color_print_colors;
+    float warpage_wdm_p95{ std::numeric_limits<float>::quiet_NaN() };
+    float warpage_whs_p95{ std::numeric_limits<float>::quiet_NaN() };
 };
 
 } // namespace libvgcode

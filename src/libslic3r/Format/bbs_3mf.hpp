@@ -102,6 +102,7 @@ struct PlateData
     std::string     nozzle_diameters;
     std::string     nozzle_volume_types;
     std::string     gcode_file;
+    std::string     preview_gcode_file;
     std::string     gcode_file_md5;
     // The G-code's statistics as JSON, stored with the G-code when not empty.
     std::string     statistics;

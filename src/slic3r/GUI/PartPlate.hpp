@@ -138,6 +138,8 @@ private:
     bool m_apply_invalid {false};
     bool m_helio_apply_invalid {false};
     std::unique_ptr<HelioPlateResult> m_helio_result;
+    std::unique_ptr<HelioPlateResult> m_previous_helio_result;
+    bool m_helio_result_staged {false};
     float m_slice_percent;
 
     Print *m_print; //Print reference, not own it, no need to serialize
@@ -147,6 +149,7 @@ private:
 
     std::string m_tmp_gcode_path;       //use a temp path to store the gcode
     std::string m_temp_config_3mf_path; //use a temp path to store the config 3mf
+    std::string m_preview_gcode_path_from_3mf;
     std::string m_gcode_path_from_3mf;  //use a path to store the gcode loaded from 3mf
 
     friend class PartPlateList;
@@ -467,6 +470,8 @@ public:
 
     //get gcode filename
     std::string get_gcode_filename();
+    std::string get_preview_gcode_filename() const;
+    void clear_imported_preview_gcode() { m_preview_gcode_path_from_3mf.clear(); }
 
     bool is_valid_gcode_file();
 
@@ -709,6 +714,8 @@ public:
     // Helio result per-plate storage
     const HelioPlateResult* get_helio_result() const;
     void set_helio_result(const HelioPlateResult& result);
+    void stage_helio_result(const HelioPlateResult& result);
+    void restore_staged_helio_result();
     void clear_helio_result();
     bool has_helio_result() const;
 

@@ -937,7 +937,7 @@ struct Sidebar::priv
     PlaterPresetComboBox *combo_print = nullptr;
     std::vector<PlaterPresetComboBox*> combos_filament;
     int editing_filament = -1;
-    wxBoxSizer *sizer_filaments = nullptr;
+    wxGridSizer *sizer_filaments = nullptr;
 
     //BBS Sidebar widgets
     wxPanel* m_panel_print_title;
@@ -972,7 +972,7 @@ struct Sidebar::priv
     ScalableButton*   m_btn_mixed_del_all{nullptr};
     wxScrolledWindow* m_mixed_scroll_area{nullptr};       // independent scrollbar for mixed rows
     wxPanel*          m_panel_mixed_content{nullptr};
-    wxBoxSizer*       m_sizer_mixed_filaments{nullptr};   // two-column, mirrors sizer_filaments
+    wxBoxSizer*       m_sizer_mixed_filaments{nullptr};
     wxPanel*          m_panel_mixed_warning{nullptr};     // red bar for broken/mismatched mixes
     wxStaticText*     m_text_mixed_warning{nullptr};
     bool              m_mixed_filament_broken{false};
@@ -3428,9 +3428,7 @@ Sidebar::Sidebar(Plater *parent)
 
     // Orca: Sidebar - Filament content UI: setup filament selection combos panel layout
     // Creates a two-column grid layout for filament selection dropdowns within the scrollable panel
-    p->sizer_filaments = new wxBoxSizer(wxHORIZONTAL);
-    p->sizer_filaments->Add(new wxBoxSizer(wxVERTICAL), 1, wxEXPAND);
-    p->sizer_filaments->Add(new wxBoxSizer(wxVERTICAL), 1, wxEXPAND);
+    p->sizer_filaments = new wxGridSizer(2);
 
     p->combos_filament.push_back(nullptr);
 
@@ -3523,7 +3521,7 @@ Sidebar::Sidebar(Plater *parent)
         p->m_panel_mixed_content = new wxPanel(p->m_mixed_scroll_area, wxID_ANY);
         p->m_panel_mixed_content->SetBackgroundColour(StateColor::darkModeColorFor(*wxWHITE));
 
-        // Two columns, same idiom as sizer_filaments.
+        // Two columns for the mixed filament controls.
         p->m_sizer_mixed_filaments = new wxBoxSizer(wxHORIZONTAL);
         p->m_sizer_mixed_filaments->Add(new wxBoxSizer(wxVERTICAL), 1, wxEXPAND);
         p->m_sizer_mixed_filaments->Add(new wxBoxSizer(wxVERTICAL), 1, wxEXPAND);
@@ -3730,11 +3728,8 @@ void Sidebar::init_filament_combo(PlaterPresetComboBox **combo, const int filame
 
     auto combo_and_btn_sizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // BBS:  filament double columns
-
-    // int em = wxGetApp().em_unit();
-    if ((filament_idx % 2) == 0) // Dont add right column item. this one create equal spacing on left, right & middle
-        combo_and_btn_sizer->AddSpacer(FromDIP((filament_idx % 2) == 0 ? 12 : 3)); // Content Margin
+    if (p->sizer_filaments->GetItemCount() % 2 == 0)
+        combo_and_btn_sizer->AddSpacer(FromDIP(SidebarProps::ContentMargin()));
 
     (*combo)->clr_picker->SetLabel(wxString::Format("%d", filament_idx + 1));
     combo_and_btn_sizer->Add((*combo)->clr_picker, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(SidebarProps::ElementSpacing()) - FromDIP(2)); // ElementSpacing - 2 (from combo box))
@@ -3758,7 +3753,8 @@ void Sidebar::init_filament_combo(PlaterPresetComboBox **combo, const int filame
     edit_btn->SetToolTip(_L("Click to edit preset"));
 
     PlaterPresetComboBox* combobox = (*combo);
-    edit_btn->Bind(wxEVT_BUTTON, [this, edit_btn, combobox, filament_idx](wxCommandEvent) {
+    edit_btn->Bind(wxEVT_BUTTON, [this, edit_btn, combobox](wxCommandEvent) {
+        const int filament_idx = combobox->get_filament_idx();
         bool single_or_bbl     = should_show_SEMM_buttons();
         bool is_multi_material = p->combos_filament.size() > 1;
         if(single_or_bbl && is_multi_material) {
@@ -3785,40 +3781,15 @@ void Sidebar::init_filament_combo(PlaterPresetComboBox **combo, const int filame
 
     combo_and_btn_sizer->AddSpacer(FromDIP(SidebarProps::ContentMargin()));
 
-    // BBS:  filament double columns
-    auto side = filament_idx % 2;
-    auto /***/sizer_filaments = this->p->sizer_filaments->GetItem(side)->GetSizer();
-    if (side == 1 && filament_idx > 1) sizer_filaments->Remove(filament_idx / 2);
-    sizer_filaments->Add(combo_and_btn_sizer, 1, wxEXPAND);
-    if (side == 0 && filament_idx > 0) {
-        sizer_filaments = this->p->sizer_filaments->GetItem(1)->GetSizer();
-        sizer_filaments->AddStretchSpacer(1);
-    }
+    p->sizer_filaments->Add(combo_and_btn_sizer, 0, wxEXPAND);
 }
 
 void Sidebar::remove_unused_filament_combos(const size_t current_extruder_count)
 {
-    if (current_extruder_count >= p->combos_filament.size())
-        return;
     while (p->combos_filament.size() > current_extruder_count) {
-        const int last = p->combos_filament.size() - 1;
-        auto sizer_filaments = this->p->sizer_filaments->GetItem(last % 2)->GetSizer();
-        sizer_filaments->Remove(last / 2);
-        (*p->combos_filament[last]).Destroy();
+        p->sizer_filaments->Remove(p->combos_filament.size() - 1);
+        p->combos_filament.back()->Destroy();
         p->combos_filament.pop_back();
-    }
-    // BBS:  filament double columns
-    auto sizer_filaments0 = this->p->sizer_filaments->GetItem((size_t)0)->GetSizer();
-    auto sizer_filaments1 = this->p->sizer_filaments->GetItem(1)->GetSizer();
-    if (current_extruder_count < 2) {
-        sizer_filaments1->Clear();
-    } else {
-        size_t c0 = sizer_filaments0->GetChildren().GetCount();
-        size_t c1 = sizer_filaments1->GetChildren().GetCount();
-        if (c0 < c1)
-            sizer_filaments1->Remove(c1 - 1);
-        else if (c0 > c1)
-            sizer_filaments1->AddStretchSpacer(1);
     }
 }
 
@@ -4327,9 +4298,8 @@ void Sidebar::recalc_filament_scroll_sizes()
         return;
 
     // Same preferred-row budget the physical list uses, so both lists cap consistently.
-    auto left_sizer  = p->sizer_filaments->GetItem((size_t) 0)->GetSizer();
-    auto combo_sizer = left_sizer->GetItem((size_t) 0)->GetSizer();
-    const int row_h  = combo_sizer ? combo_sizer->GetSize().GetHeight() : 0;
+    const int rows = p->sizer_filaments->GetEffectiveRowsCount();
+    const int row_h = rows > 0 ? p->sizer_filaments->GetMinSize().y / rows : 0;
     int preferred_rows = std::ceil(0.5 * std::stoi(wxGetApp().app_config->get("filaments_area_preferred_count")));
     const int max_h = (row_h > 0) ? preferred_rows * row_h : -1;
 
@@ -5479,10 +5449,9 @@ void Sidebar::update_filaments_area_height()
 // ORCA
 {
     // ORCA use a height with user preference
-    auto left_sizer          = p->sizer_filaments->GetItem((size_t) 0)->GetSizer();
-    auto combo_sizer         = left_sizer->GetItem((size_t) 0)->GetSizer();
-    int  preferred_rows      = std::ceil(0.5 * std::stoi(wxGetApp().app_config->get("filaments_area_preferred_count")));
-    auto height_with_borders = combo_sizer->GetSize().GetHeight(); // gets height from sizer instead static numbers
+    const int rows = p->sizer_filaments->GetEffectiveRowsCount();
+    const int preferred_rows = std::ceil(0.5 * std::stoi(wxGetApp().app_config->get("filaments_area_preferred_count")));
+    const int height_with_borders = rows > 0 ? p->sizer_filaments->GetMinSize().y / rows : 0;
     p->m_panel_filament_content->SetMaxSize(wxSize{-1, preferred_rows * height_with_borders});
 
     // fixes wxScrolledWindow not shrinks its height to content size
@@ -5745,7 +5714,20 @@ void Sidebar::on_filament_count_change(size_t num_filaments)
 
     auto& choices = combos_filament();
 
-    if (num_physical == choices.size()) {
+    wxWindowUpdateLocker noUpdates_scrolled_panel(this);
+    bool slots_changed = false;
+    for (size_t i = 0; i < std::min(num_physical, choices.size()); ++i) {
+        auto* choice = choices[i];
+        const int slot = static_cast<int>(physical_indices[i]);
+        if (choice->get_filament_idx() == slot)
+            continue;
+        choice->set_filament_idx(slot);
+        choice->clr_picker->SetLabel(wxString::Format("%d", slot + 1));
+        choice->update();
+        slots_changed = true;
+    }
+
+    if (num_physical == choices.size() && !slots_changed) {
         // The ctor pre-creates one combo, so a single-filament project hits this guard before
         // any layout pass has sized the scroll areas; refresh them here as well.
         // Adding a mixed slot also lands here, since only the virtual count changed, so the
@@ -5756,22 +5738,21 @@ void Sidebar::on_filament_count_change(size_t num_filaments)
         return;
     }
 
-    if (choices.size() == 1 || num_physical == 1)
+    if (!choices.empty() && (choices.size() == 1 || num_physical == 1))
         choices[0]->GetDropDown().Invalidate();
-
-    wxWindowUpdateLocker noUpdates_scrolled_panel(this);
 
     size_t i = choices.size();
     while (i < num_physical)
     {
         PlaterPresetComboBox* choice/*{ nullptr }*/;
         init_filament_combo(&choice, physical_indices[i]);
-        int last_selection = choices.back()->GetSelection();
+        const int last_selection = choices.empty() ? wxNOT_FOUND : choices.back()->GetSelection();
         choices.push_back(choice);
 
         // initialize selection
         choice->update();
-        choice->SetSelection(last_selection);
+        if (last_selection != wxNOT_FOUND)
+            choice->SetSelection(last_selection);
         ++i;
     }
 
@@ -5792,56 +5773,11 @@ void Sidebar::on_filament_count_change(size_t num_filaments)
 
 void Sidebar::on_filaments_delete(size_t filament_id)
 {
-    auto &choices = combos_filament();
-
-    // A mixed (virtual) slot has no combo of its own, so there is no combo UI to remove —
-    // but the shared refresh below must still run so the mixed filament panel drops its row.
-    if (filament_id < choices.size()) {
-        if (choices.size() == 1)
-            choices[0]->GetDropDown().Invalidate();
-
-        wxWindowUpdateLocker noUpdates_scrolled_panel(this);
-
-        // delete UI item
-        {
-            const int last            = p->combos_filament.size() - 1;
-            auto      sizer_filaments = this->p->sizer_filaments->GetItem(last % 2)->GetSizer();
-            sizer_filaments->Remove(last / 2);
-
-            PlaterPresetComboBox* to_delete_combox = p->combos_filament[filament_id];
-            (*p->combos_filament[last]).Destroy();
-            p->combos_filament.pop_back();
-
-            // BBS:  filament double columns
-            auto sizer_filaments0 = this->p->sizer_filaments->GetItem((size_t) 0)->GetSizer();
-            auto sizer_filaments1 = this->p->sizer_filaments->GetItem(1)->GetSizer();
-            if (p->combos_filament.size() < 2) {
-                sizer_filaments1->Clear();
-            } else {
-                size_t c0 = sizer_filaments0->GetChildren().GetCount();
-                size_t c1 = sizer_filaments1->GetChildren().GetCount();
-                if (c0 < c1)
-                    sizer_filaments1->Remove(c1 - 1);
-                else if (c0 > c1)
-                    sizer_filaments1->AddStretchSpacer(1);
-            }
-        }
-
-        show_SEMM_buttons(); // ORCA
-
-        for (size_t idx = filament_id ; idx < p->combos_filament.size(); ++idx) {
-            p->combos_filament[idx]->update();
-        }
+    on_filament_count_change(wxGetApp().preset_bundle->filament_presets.size());
+    for (auto* choice : combos_filament()) {
+        if (static_cast<size_t>(choice->get_filament_idx()) >= filament_id)
+            choice->update();
     }
-
-    update_filaments_area_height(); // ORCA
-    recalc_filament_scroll_sizes();
-    update_mixed_filament_list();
-
-    Layout();
-    p->m_panel_filament_title->Refresh();
-    update_ui_from_settings();
-    update_dynamic_filament_list();
 }
 
 void Sidebar::add_filament() {
@@ -5953,9 +5889,11 @@ void Sidebar::change_filament(size_t from_id, size_t to_id)
 void Sidebar::edit_filament()
 {
     p->editing_filament = -1;
-    if (p->m_menu_filament_id >= 0 && p->m_menu_filament_id < p->combos_filament.size()
-            && p->combos_filament[p->m_menu_filament_id]->switch_to_tab())
-        p->editing_filament = p->m_menu_filament_id; // sync with TabPresetComboxBox's m_filament_idx
+    const auto combo = std::find_if(p->combos_filament.begin(), p->combos_filament.end(), [this](const auto* choice) {
+        return choice->get_filament_idx() == p->m_menu_filament_id;
+    });
+    if (combo != p->combos_filament.end() && (*combo)->switch_to_tab())
+        p->editing_filament = (*combo)->get_filament_idx();
 }
 
 void Sidebar::add_custom_filament(wxColour new_col, const std::string& preset_name, bool /*skip_preset_validation*/) {
@@ -7306,6 +7244,7 @@ struct Plater::priv
     BackgroundSlicingProcess    background_process;
     HelioBackgroundProcess      helio_background_process;
     bool                        helio_elements_fetched = false;
+    // Keep plate selection locked until the main thread has applied the Helio result.
     bool                        helio_processing_disabled = false;
     bool                        helio_using_reference_material { false };
     bool                        helio_using_reference_printer { false };
@@ -7650,6 +7589,9 @@ struct Plater::priv
     // Helio cloud processing handlers
     void on_helio_processing_complete(HelioCompletionEvent &evt);
     void on_helio_processing_start(SimpleEvent &evt);
+    bool check_helio_mixed_color_sublayer();
+    bool check_helio_plate_switch();
+    bool check_helio_gcode_ready();
     void on_helio_input_dlg(wxCommandEvent &evt);
     void on_helio_process();
     void on_action_helio_processing(SimpleEvent &evt);
@@ -9020,8 +8962,9 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
     int current_width = 0, current_depth = 0;
     double current_height = 0;
 
-    if (input_files.empty())
-        return std::vector<size_t>();
+    const bool loading_project = (strategy & LoadStrategy::LoadModel) && (strategy & LoadStrategy::LoadConfig);
+    if (input_files.empty() || (loading_project && !check_helio_plate_switch()))
+        return {};
 
     if (!input_files.empty())
        q->m_3mf_path = input_files[0].string();
@@ -10252,26 +10195,17 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                 if (cur_plate->is_slice_result_valid())
                     q->m_valid_plates_count ++;
             }
-            if (first_plate&&first_plate->is_slice_result_valid()) {
-                q->m_exported_file = true;
-                //select plate 0 as default
-                q->select_plate(first_plate_index);
-                //set to 3d tab
-                q->select_view_3D("Preview");
-                wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
-            }
-            else {
-                //set to 3d tab
+            if (first_plate && first_plate->is_slice_result_valid()) {
+                if (q->select_plate(first_plate_index) == 0) {
+                    q->m_exported_file = true;
+                    q->select_view_3D("Preview");
+                    wxGetApp().mainframe->select_tab(TAB_ID_PREVIEW);
+                }
+            } else if (q->select_plate(0) == 0) {
                 q->select_view_3D("3D");
-                //select plate 0 as default
-                q->select_plate(0);
             }
-        }
-        else {
-            //set to 3d tab
+        } else if (q->select_plate(0) == 0) {
             q->select_view_3D("3D");
-            //select plate 0 as default
-            q->select_plate(0);
         }
     }
     else {
@@ -11685,14 +11619,10 @@ bool Plater::priv::restart_background_process(unsigned int state)
            (state & UPDATE_BACKGROUND_PROCESS_RESTART) != 0 ) ) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%: print is valid, try to start it now")%__LINE__;
         // Helio: auto-stop running helio when reslicing (FIX-4)
-        if (helio_background_process.is_running()) {
-            helio_background_process.stop_current_helio_action();
-            helio_background_process.stop();
-            helio_background_process.reset();
-            helio_processing_disabled = false;
-        }
-        // Helio: clear previous helio result on reslice so View Summary disappears
-        {
+        q->stop_helio_process();
+        // Keep the Helio artifact selection for an export-only run so that it uses
+        // the optimized printable G-code. A reslice invalidates the Helio artifacts.
+        if ((state & (UPDATE_BACKGROUND_PROCESS_FORCE_RESTART | UPDATE_BACKGROUND_PROCESS_RESTART)) != 0) {
             PartPlate* plate = background_process.get_current_plate();
             if (plate) plate->clear_helio_result();
         }
@@ -11708,12 +11638,7 @@ bool Plater::priv::restart_background_process(unsigned int state)
         PartPlate* cur_plate = background_process.get_current_plate();
         if (cur_plate->is_slice_result_valid() && ((state & UPDATE_BACKGROUND_PROCESS_FORCE_RESTART) != 0)) {
             // Helio: auto-stop running helio when reslicing (FIX-4)
-            if (helio_background_process.is_running()) {
-                helio_background_process.stop_current_helio_action();
-                helio_background_process.stop();
-                helio_background_process.reset();
-                helio_processing_disabled = false;
-            }
+            q->stop_helio_process();
             // Helio: clear previous helio result on reslice (FIX-1)
             if (cur_plate) cur_plate->clear_helio_result();
             if (this->background_process.start()) {
@@ -13321,23 +13246,16 @@ void Plater::priv::on_slicing_completed(wxCommandEvent & evt)
 
 void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
 {
+    if (a.cancel_requested && a.cancel_requested->load())
+        return;
+    helio_processing_disabled = false;
+
     if (a.is_successful) {
         this->reset_gcode_toolpaths();
 
-        // Keep original gcode by renaming
-        try {
-            boost::filesystem::path original_path(a.tmp_path);
-            std::string original_path_name = original_path.parent_path().string() + "/original_" + original_path.filename().string();
-            int renamed = boost::nowide::rename(a.tmp_path.c_str(), original_path_name.c_str());
-            if (renamed != 0) {
-                BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
-            }
-        } catch (...) {
-            BOOST_LOG_TRIVIAL(error) << "Helio Failed to rename file";
-        }
-
-        std::string copied;
-        copy_file(a.path, a.tmp_path, copied);
+        // Keep all Helio artifacts separate: the original sliced G-code remains at
+        // a.tmp_path, the annotation-free file at a.printable_path is exported or
+        // uploaded, and the thermal-index file at a.path is used only for preview.
 
         float time_origin_value = 0;
         float time_optimized_value = 0;
@@ -13346,7 +13264,10 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
             time_origin_value = plate->get_slice_result()->print_statistics.modes[0].time;
         }
 
-        helio_background_process.m_gcode_result->filename = a.tmp_path;
+        // lines_ends and move line IDs were produced from the annotated preview
+        // file. Keep that file attached to the preview result so the sequential
+        // G-code window reads the same bytes whose offsets it is displaying.
+        helio_background_process.m_gcode_result->filename = a.path;
 
         GCodeProcessorResult *res1 = partplate_list.get_curr_plate()->get_slice_result();
         *res1 = *helio_background_process.m_gcode_result;
@@ -13367,28 +13288,38 @@ void Plater::priv::on_helio_processing_complete(HelioCompletionEvent &a)
         this->update();
         q->force_update_all_plate_thumbnails();
 
-        // Show rating dialog for optimization
         if (a.action == 1) {
-            PartPlate* plate1 = wxGetApp().plater()->get_partplate_list().get_curr_plate();
-            if (plate1 && plate1->get_slice_result()) {
-                time_optimized_value = plate1->get_slice_result()->print_statistics.modes[0].time;
-            }
+            PartPlate* optimized_plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+            if (optimized_plate && optimized_plate->get_slice_result())
+                time_optimized_value = optimized_plate->get_slice_result()->print_statistics.modes[0].time;
+        }
 
-            if (plate) {
-                HelioPlateResult helio_result;
-                helio_result.action = 1;
+        if (plate) {
+            const HelioPlateResult* pending_result = plate->get_helio_result();
+            HelioPlateResult helio_result = a.action == 0 && pending_result ? *pending_result : HelioPlateResult();
+            helio_result.action = a.action;
+            helio_result.preview_gcode_path = a.path;
+            helio_result.printable_gcode_path = a.printable_path;
+            helio_result.is_valid = true;
+
+            if (a.action == 1) {
                 helio_result.original_print_time_seconds = time_origin_value;
                 helio_result.optimized_print_time_seconds = time_optimized_value;
                 helio_result.quality_mean_improvement = a.quality_mean_improvement;
                 helio_result.quality_std_improvement = a.quality_std_improvement;
-                helio_result.is_valid = true;
-                plate->set_helio_result(helio_result);
             }
+            plate->set_helio_result(helio_result);
+        }
 
+        // Show rating dialog for optimization only after publishing the complete result.
+        if (a.action == 1) {
             HelioRatingDialog dlg(nullptr, time_origin_value, time_optimized_value, a.quality_mean_improvement, a.quality_std_improvement);
             dlg.ShowModal();
         }
     } else {
+        PartPlate* plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+        if (plate)
+            plate->restore_staged_helio_result();
         notification_manager->push_helio_error_notification(a.error_message);
     }
 }
@@ -14369,7 +14300,7 @@ int Plater::priv::update_helio_background_process_v2(std::string& printer_id, st
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
 
-    if (helio_background_process.is_running()) {
+    if (helio_processing_disabled) {
         GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
         msgdialog.ShowModal();
         return -1;
@@ -14725,7 +14656,7 @@ int Plater::priv::update_helio_background_process(std::string& printer_id,
     PresetBundle* preset_bundle = wxGetApp().preset_bundle;
     std::string preset_name = preset_bundle->printers.get_edited_preset().name;
 
-    if (helio_background_process.is_running()) {
+    if (helio_processing_disabled) {
         GUI::MessageDialog msgdialog(nullptr, _L("A Helio simulation or optimization task is in progress."), "", wxICON_NONE | wxOK);
         msgdialog.ShowModal();
         return -1;
@@ -15030,7 +14961,7 @@ void Plater::priv::on_helio_process()
         std::string primary_material_id = multimaterial_enabled
             ? (materials.empty() ? "" : materials[0].materialId)
             : material_id;
-        HelioInputDialog dlg(nullptr, primary_material_id);
+        HelioInputDialog dlg(nullptr, primary_material_id, is_multi_material);
 
         // Pre-select optimization mode if flag was set from simulation results
         if (g_helio_pre_select_optimization) {
@@ -15055,8 +14986,10 @@ void Plater::priv::on_helio_process()
 
         while (dlg.ShowModal() == wxID_OK)
         {
-            if (partplate_list.get_curr_plate()->empty()) return;
+            if (!check_helio_gcode_ready())
+                return;
             GCodeProcessorResult* g_result = background_process.get_current_gcode_result();
+            const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
             int action = dlg.get_action();
             helio_background_process.set_action(action);
@@ -15068,10 +15001,13 @@ void Plater::priv::on_helio_process()
 
                 helio_background_process.set_simulation_input_data(data);
                 if (multimaterial_enabled) {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material, g_result, preview, []() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material,
+                                                  g_result, input_gcode_path, preview, []() {});
                 } else {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, []() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, input_gcode_path, preview,
+                                                  []() {});
                 }
+                helio_processing_disabled = true;
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio simulation process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
             }
@@ -15082,10 +15018,13 @@ void Plater::priv::on_helio_process()
 
                 helio_background_process.set_optimization_input_data(data);
                 if (multimaterial_enabled) {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material, g_result, preview, []() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, materials, is_multi_color, is_multi_material,
+                                                  g_result, input_gcode_path, preview, []() {});
                 } else {
-                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, preview, []() {});
+                    helio_background_process.init(helio_api_key, helio_api_url, printer_id, material_id, g_result, input_gcode_path, preview,
+                                                  []() {});
                 }
+                helio_processing_disabled = true;
                 helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state, notification_manager);
                 BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ":helio optimization process called (V" << (multimaterial_enabled ? "3" : "2") << ")";
             }
@@ -15095,8 +15034,43 @@ void Plater::priv::on_helio_process()
     }
 }
 
+bool Plater::priv::check_helio_mixed_color_sublayer()
+{
+    const auto* plate_config = partplate_list.get_curr_plate()->config();
+    const auto& print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    const auto* enabled = plate_config->option<ConfigOptionBool>("enable_mixed_color_sublayer");
+    if (enabled == nullptr)
+        enabled = print_config.option<ConfigOptionBool>("enable_mixed_color_sublayer");
+    if (enabled == nullptr || !enabled->value)
+        return true;
+
+    MessageDialog(q, _L("Helio does not support Mixed color sublayer. Disable it and slice the plate again before using Helio.") + "\n\n",
+                  _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE, wxEmptyString, _L("Learn more"),
+                  [](const wxString&) {
+                      wxLaunchDefaultBrowser("https://wiki.helioadditive.com/en/known-issues-null-values");
+                  })
+        .ShowModal();
+    return false;
+}
+
+bool Plater::priv::check_helio_gcode_ready()
+{
+    auto* plate = partplate_list.get_curr_plate();
+    if (!plate->empty() && plate->is_valid_gcode_file())
+        return true;
+
+    const wxString message = q->m_only_gcode || q->m_exported_file
+        ? _L("Open the original model or project and slice it before starting Helio simulation or optimization.")
+        : _L("Please slice the current plate before starting Helio simulation or optimization.");
+    MessageDialog(q, message, _L("Execution Blocked"), wxOK | wxICON_WARNING | wxCENTRE).ShowModal();
+    return false;
+}
+
 void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
 {
+    if (!check_helio_mixed_color_sublayer() || !check_helio_gcode_ready())
+        return;
+
     std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
 
     if (helio_api_key.empty()) {
@@ -15147,7 +15121,7 @@ void Plater::priv::on_helio_input_dlg(wxCommandEvent &a)
 
 void Plater::priv::on_action_helio_processing(SimpleEvent& a)
 {
-    if (!(partplate_list.get_curr_plate()->empty())) {
+    if (check_helio_mixed_color_sublayer() && check_helio_gcode_ready()) {
         helio_processing_disabled = true;
         std::string helio_api_key = Slic3r::HelioQuery::get_helio_pat();
         if (helio_api_key.empty()) {
@@ -15165,9 +15139,10 @@ void Plater::priv::on_action_helio_processing(SimpleEvent& a)
         std::string helio_filament_id = q->get_helio_material_id_for_the_current_selection(extruder_id).value_or("");
 
         auto g_result = background_process.get_current_gcode_result();
+        const std::string input_gcode_path = partplate_list.get_curr_plate()->get_gcode_filename();
 
         helio_background_process.init(helio_api_key, helio_api_url, helio_printer_id, helio_filament_id,
-                                      g_result, preview, []() {});
+                                      g_result, input_gcode_path, preview, []() {});
 
         helio_background_process.helio_thread_start(background_process.m_mutex, background_process.m_condition, background_process.m_state,
                                                     notification_manager);
@@ -15460,9 +15435,11 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
         m_cur_slice_plate++;
 
         q->Freeze();
-        q->select_plate(m_cur_slice_plate);
-        partplate_list.select_plate_view();
-        int ret = q->start_next_slice();
+        int ret = q->select_plate(m_cur_slice_plate);
+        if (ret == 0) {
+            partplate_list.select_plate_view();
+            ret = q->start_next_slice();
+        }
         if (ret) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(":slicing all, plate %1% can not be sliced, will stop")%m_cur_slice_plate;
             m_is_slicing = false;
@@ -15749,11 +15726,11 @@ void Plater::priv::on_action_slice_all(SimpleEvent&)
 
         Model::setExtruderParams(config, numExtruders);
         Model::setPrintSpeedTable(config, print_config);
+        if (q->select_plate(0) != 0)
+            return;
         m_slice_all = true;
         m_slice_all_only_has_gcode = true;
         m_cur_slice_plate = 0;
-        //select plate
-        q->select_plate(m_cur_slice_plate);
         q->reslice();
         q->select_view_3D("Preview");
         //BBS: wish to select all plates stats item
@@ -16446,9 +16423,11 @@ void Plater::priv::init_notification_manager()
         bool res1 = false;
         bool res2 = false;
 
-        if (this->helio_background_process.is_running()) {
-            this->helio_background_process.stop_current_helio_action();
-            this->helio_background_process.stop();
+        if (helio_processing_disabled) {
+            helio_background_process.cancel_current_helio_action();
+            helio_processing_disabled = false;
+            if (PartPlate* plate = background_process.get_current_plate())
+                plate->restore_staged_helio_result();
             res1 = true;
             notification_manager->set_slicing_progress_hidden();
         }
@@ -18111,6 +18090,9 @@ LoadType determine_load_type(std::string filename, std::string override_setting 
 void Plater::load_project(wxString const& filename2,
     wxString const& originfile)
 {
+    if (!p->check_helio_plate_switch())
+        return;
+
     model().calib_pa_pattern.reset(nullptr);
     model().plates_custom_gcodes.clear();
 
@@ -20123,6 +20105,8 @@ void Plater::load_gcode(const wxString& filename)
         )
         return;
 
+    if (!p->check_helio_plate_switch())
+        return;
     m_last_loaded_gcode = filename;
 
     // Clear any stale Helio result when loading new gcode
@@ -22780,14 +22764,14 @@ void Plater::feedback_helio_process(float rating, std::string commend)
 
 void Plater::stop_helio_process()
 {
-    if (p->helio_background_process.is_running()) {
-        p->helio_background_process.clear_helio_file_cache();
-        PartPlate* plate = p->background_process.get_current_plate();
-        if (plate) plate->clear_helio_result();
-        p->helio_background_process.reset();
-        p->helio_background_process.stop_current_helio_action();
-        p->helio_background_process.stop();
-    }
+    if (!p->helio_processing_disabled)
+        return;
+
+    p->helio_background_process.cancel_current_helio_action();
+    p->helio_background_process.clear_helio_file_cache();
+    if (PartPlate* plate = p->background_process.get_current_plate())
+        plate->clear_helio_result();
+    p->helio_background_process.reset();
     p->helio_processing_disabled = false;
 }
 
@@ -23378,7 +23362,7 @@ int Plater::send_gcode(int plate_idx, Export3mfProgressFn proFn)
         strategy = SaveStrategy::Silence | SaveStrategy::SplitModel | SaveStrategy::WithGcode;
 #endif
 
-    result = export_3mf(p->m_print_job_data._3mf_path, strategy, plate_idx, proFn);
+    result = export_3mf(p->m_print_job_data._3mf_path, strategy | SaveStrategy::SkipPreviewGcode, plate_idx, proFn);
 
     return result;
 }
@@ -24820,9 +24804,30 @@ void Plater::apply_background_progress()
     }
 }
 
+bool Plater::priv::check_helio_plate_switch()
+{
+    if (!helio_processing_disabled)
+        return true;
+
+    q->CallAfter([plater = q] {
+        if (!wxGetApp().is_closing()) {
+            MessageDialog(plater, _L("A Helio simulation or optimization task is in progress."), wxEmptyString, wxICON_NONE | wxOK).ShowModal();
+        }
+    });
+    return false;
+}
+
+bool Plater::can_select_plate(int plate_index)
+{
+    return plate_index == p->partplate_list.get_curr_plate_index() || p->check_helio_plate_switch();
+}
+
 //BBS: select Plate
 int Plater::select_plate(int plate_index, bool need_slice)
 {
+    if (!can_select_plate(plate_index))
+        return -1;
+
     int ret;
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: plate %2%, need_slice %3% ")%__LINE__ %plate_index  %need_slice;
     take_snapshot("select partplate!");
@@ -25483,6 +25488,8 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
     if (action == 0)
     {
         //select plate
+        if (!can_select_plate(plate_index))
+            return -1;
         ret = p->partplate_list.select_plate(plate_index);
         if (!ret) {
             SimpleEvent event(EVT_GLCANVAS_PLATE_SELECT);
@@ -25666,6 +25673,8 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
         }
     } else if ((action == 7) && (!right_click)) {
         // move plate to the front
+        if (!p->check_helio_plate_switch())
+            return -1;
         take_snapshot("move plate to the front");
         ret = p->partplate_list.move_plate_to_index(plate_index,0);
         p->partplate_list.update_slice_context_to_current_plate(p->background_process);
@@ -25743,7 +25752,7 @@ int Plater::select_plate_by_hover_id(int hover_id, bool right_click, bool isModi
 //BBS: add an empty plate and switch to it (mirrors the toolbar's Add Plate).
 int Plater::add_plate()
 {
-    if (!p->can_add_plate())
+    if (!p->can_add_plate() || !p->check_helio_plate_switch())
         return -1;
     take_snapshot("add partplate");
     int new_plate = p->partplate_list.create_plate();
@@ -25779,6 +25788,8 @@ int Plater::delete_plate(int plate_index)
     if (plate_index == -1)
         index = p->partplate_list.get_curr_plate_index();
 
+    if (!p->check_helio_plate_switch())
+        return -1;
     take_snapshot("delete partplate");
     ret = p->partplate_list.delete_plate(index);
 

@@ -235,16 +235,25 @@ void BackgroundSlicingProcess::process_fff()
         evt.SetInt((int) (m_fff_print->step_state_with_timestamp(PrintStep::psSlicingFinished).timestamp));
         wxQueueEvent(GUI::wxGetApp().mainframe->m_plater, evt.Clone());
 
-        m_temp_output_path = this->get_current_plate()->get_tmp_gcode_path();
+        m_temp_output_path = this->get_current_plate()->get_gcode_filename();
         if (!m_export_path.empty()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__
                                     << boost::format(" %1%: export gcode from %2% directly to %3%") % __LINE__ % m_temp_output_path %
                                            m_export_path;
         } else {
             if (m_upload_job.empty()) {
-                m_fff_print->export_gcode_from_previous_file(m_temp_output_path, m_gcode_result, [this](const ThumbnailsParams& params) {
-                    return this->render_thumbnails(params);
-                });
+                const std::string preview_path = m_current_plate->get_preview_gcode_filename();
+                bool preview_loaded = false;
+                if (!preview_path.empty()) {
+                    try {
+                        m_fff_print->export_gcode_from_previous_file(preview_path, m_gcode_result);
+                        preview_loaded = m_gcode_result->moves.size() > 1; // The first move is a placeholder.
+                    } catch (const Slic3r::RuntimeError& e) {
+                        BOOST_LOG_TRIVIAL(warning) << e.what();
+                    }
+                }
+                if (!preview_loaded)
+                    m_fff_print->export_gcode_from_previous_file(m_temp_output_path, m_gcode_result);
             }
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__
                                     << boost::format(" %1%: export_gcode_from_previous_file from %2% finished") % __LINE__ %
@@ -256,6 +265,7 @@ void BackgroundSlicingProcess::process_fff()
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__
                                 << boost::format(" %1%: will start slicing, reset gcode_result %2% firstly") % __LINE__ % m_gcode_result;
         m_gcode_result->reset();
+        m_current_plate->clear_imported_preview_gcode();
 
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" %1%: gcode_result reseted, will start print::process") % __LINE__;
         m_print->process();

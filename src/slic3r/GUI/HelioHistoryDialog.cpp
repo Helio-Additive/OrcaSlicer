@@ -563,19 +563,33 @@ wxPanel* HelioHistoryDialog::create_run_card(wxWindow* parent, const HelioQuery:
     auto* button_row = new wxBoxSizer(wxHORIZONTAL);
 
     StateColor btn_bg(
+        std::pair<wxColour, int>(HELIO_CARD_HIGHLIGHT, StateColor::Disabled),
         std::pair<wxColour, int>(HELIO_BLUE, StateColor::Hovered),
         std::pair<wxColour, int>(theme.blue, StateColor::Normal));
     StateColor btn_text(
+        std::pair<wxColour, int>(HELIO_MUTED, StateColor::Disabled),
         std::pair<wxColour, int>(wxColour(255, 255, 255), StateColor::Normal));
 
-    auto* download_btn = new Button(card, _L("Download GCode"));
+    auto* download_btn = new Button(card, _L("Download Print G-code"));
     download_btn->SetBackgroundColor(btn_bg);
     download_btn->SetTextColor(btn_text);
-    download_btn->SetMinSize(wxSize(FromDIP(140), FromDIP(32)));
+    download_btn->SetMinSize(wxSize(FromDIP(180), FromDIP(32)));
     download_btn->SetCornerRadius(FromDIP(4));
-    download_btn->Bind(wxEVT_LEFT_DOWN, [this, run](wxMouseEvent&) {
-        // Use thermal index enhanced GCode URL for optimizations
-        on_download_gcode(run.optimized_gcode_with_thermal_indexes_url, run.name);
+    download_btn->SetToolTip(_L("Download the optimized G-code for printing."));
+    download_btn->Enable(!run.optimized_gcode_url.empty());
+    download_btn->Bind(wxEVT_BUTTON, [this, run](wxCommandEvent&) {
+        on_download_gcode(run.optimized_gcode_url, run.name, false);
+    });
+
+    auto* preview_btn = new Button(card, _L("Download Preview G-code"));
+    preview_btn->SetBackgroundColor(btn_bg);
+    preview_btn->SetTextColor(btn_text);
+    preview_btn->SetMinSize(wxSize(FromDIP(200), FromDIP(32)));
+    preview_btn->SetCornerRadius(FromDIP(4));
+    preview_btn->SetToolTip(_L("Download G-code with analysis data for preview only. Do not use it for printing."));
+    preview_btn->Enable(!run.optimized_gcode_with_thermal_indexes_url.empty());
+    preview_btn->Bind(wxEVT_BUTTON, [this, run](wxCommandEvent&) {
+        on_download_gcode(run.optimized_gcode_with_thermal_indexes_url, run.name, true);
     });
 
     StateColor view_btn_bg(
@@ -595,6 +609,7 @@ wxPanel* HelioHistoryDialog::create_run_card(wxWindow* parent, const HelioQuery:
     });
 
     button_row->Add(download_btn, 0, wxRIGHT, FromDIP(8));
+    button_row->Add(preview_btn, 0, wxRIGHT, FromDIP(8));
     button_row->Add(view_btn, 0);
 
     card_sizer->Add(button_row, 0, wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
@@ -673,19 +688,33 @@ wxPanel* HelioHistoryDialog::create_run_card(wxWindow* parent, const HelioQuery:
     auto* button_row = new wxBoxSizer(wxHORIZONTAL);
 
     StateColor btn_bg(
+        std::pair<wxColour, int>(HELIO_CARD_HIGHLIGHT, StateColor::Disabled),
         std::pair<wxColour, int>(HELIO_PURPLE, StateColor::Hovered),
         std::pair<wxColour, int>(theme.purple, StateColor::Normal));
     StateColor btn_text(
+        std::pair<wxColour, int>(HELIO_MUTED, StateColor::Disabled),
         std::pair<wxColour, int>(wxColour(255, 255, 255), StateColor::Normal));
 
-    auto* download_btn = new Button(card, _L("Download GCode"));
+    auto* download_btn = new Button(card, _L("Download Print G-code"));
     download_btn->SetBackgroundColor(btn_bg);
     download_btn->SetTextColor(btn_text);
-    download_btn->SetMinSize(wxSize(FromDIP(140), FromDIP(32)));
+    download_btn->SetMinSize(wxSize(FromDIP(180), FromDIP(32)));
     download_btn->SetCornerRadius(FromDIP(4));
-    download_btn->Bind(wxEVT_LEFT_DOWN, [this, run](wxMouseEvent&) {
-        // Use thermal index enhanced GCode URL for simulations
-        on_download_gcode(run.thermal_index_gcode_url, run.name);
+    download_btn->SetToolTip(_L("Download the original G-code for printing. Simulation does not modify the print file."));
+    download_btn->Enable(!run.gcode_url.empty());
+    download_btn->Bind(wxEVT_BUTTON, [this, run](wxCommandEvent&) {
+        on_download_gcode(run.gcode_url, run.name, false);
+    });
+
+    auto* preview_btn = new Button(card, _L("Download Preview G-code"));
+    preview_btn->SetBackgroundColor(btn_bg);
+    preview_btn->SetTextColor(btn_text);
+    preview_btn->SetMinSize(wxSize(FromDIP(200), FromDIP(32)));
+    preview_btn->SetCornerRadius(FromDIP(4));
+    preview_btn->SetToolTip(_L("Download G-code with analysis data for preview only. Do not use it for printing."));
+    preview_btn->Enable(!run.thermal_index_gcode_url.empty());
+    preview_btn->Bind(wxEVT_BUTTON, [this, run](wxCommandEvent&) {
+        on_download_gcode(run.thermal_index_gcode_url, run.name, true);
     });
 
     StateColor view_btn_bg(
@@ -705,6 +734,7 @@ wxPanel* HelioHistoryDialog::create_run_card(wxWindow* parent, const HelioQuery:
     });
 
     button_row->Add(download_btn, 0, wxRIGHT, FromDIP(8));
+    button_row->Add(preview_btn, 0, wxRIGHT, FromDIP(8));
     button_row->Add(view_btn, 0);
     card_sizer->Add(button_row, 0, wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
 
@@ -734,7 +764,7 @@ void HelioHistoryDialog::on_helio_completion(wxEvent& event)
     event.Skip();
 }
 
-void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const std::string& run_name)
+void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const std::string& run_name, bool for_preview)
 {
     if (gcode_url.empty()) {
         wxMessageBox(_L("GCode URL is not available"), _L("Download Error"), wxOK | wxICON_ERROR);
@@ -743,9 +773,9 @@ void HelioHistoryDialog::on_download_gcode(const std::string& gcode_url, const s
 
     // Show file save dialog
     wxFileDialog save_dialog(this,
-        _L("Save GCode File"),
+        for_preview ? _L("Save Preview G-code") : _L("Save Print G-code"),
         wxStandardPaths::Get().GetDocumentsDir(),
-        wxString(run_name) + ".gcode",
+        wxString(run_name) + (for_preview ? "_preview.gcode" : "_print.gcode"),
         "GCode files (*.gcode)|*.gcode",
         wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
 
